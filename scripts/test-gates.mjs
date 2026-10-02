@@ -44673,6 +44673,343 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 145a-145z. (Y-PAY-03) The SAQ-A checkout and the PAN-never-touched gate: every rule shown to fire, and the
+//            absence shown to be defended by something that can fail.
+//
+// This unit's whole subject is an ABSENCE — no primary account number is ever touched by this system — and an
+// absence is the one claim a passing assertion cannot make. "The audit row does not contain a card number"
+// passes on the day one could not possibly reach it and on the day one can, because on that day nobody has run
+// a card through yet. So the deliverable is a set of things that FAIL, and this block is what proves each of
+// them can:
+//
+//   - **A card field appearing in our own markup.** 145a and 145b. It is not a feature and it is not a small
+//     change: an `autocomplete="cc-number"` on an admin screen moves this system from SAQ-A to SAQ-A-EP, in a
+//     line that reviews as an improvement. 145c is the same rule in the shape a CMS collection takes, which is
+//     the one a markup scan would miss — a Payload field is rendered by Payload's own admin.
+//   - **A second transport that reads a body its own way.** 145d. One endpoint checks and the other does not,
+//     and the second is the one somebody adds later for a different client. The rule found TWO live instances
+//     of this on its first run against this unit's own tree: the checkout's `route.ts` parsed the form itself,
+//     and Y-PAY-02's intent endpoint refused nothing at all.
+//   - **A card-data field in the CONTRACT rather than in the markup.** 145e. A field nothing renders is still
+//     a field a `curl` can fill in.
+//   - **A second definition of what a card number looks like.** 145f. The second policy is the one that misses
+//     the spelling with spaces in it, or that disagrees with migration 0117 so a refusal arrives from the
+//     wrong layer and nothing says which.
+//   - **A sink write that skips the redactor.** 145g. This is the half migration 0117 deliberately does NOT
+//     do: a trigger on `audit_event` would refuse a legitimate write about one long digit run in ten — a TRN,
+//     an IBAN, an E.164 number — and an audit write that can be refused is an audit trail with a hole in it.
+//   - **A widened policy.** 145h and 145i are the static halves (a second builder, a literal origin) and 145k
+//     is the behavioural one: a third origin anywhere in the policy must fail the test that states it whole.
+//   - **A detector that stopped detecting.** 145l reduces the window scan to a whole-run check, which is the
+//     change that makes `INV-0042<PAN>` invisible — the shape an accidental paste actually produces.
+//   - **The database's half, shown to be load-bearing.** 145m breaks `is_card_shaped` inside a transaction and
+//     145n drops the trigger, and in both cases a card-shaped reference is then ACCEPTED. Without them, ZY231
+//     is a refusal nobody has watched stop working.
+//
+// 145j is the vacuity guard on the gate's own parse: the scan reads `CARD_DATA_FIELD_NAMES` out of the
+// detector module, so a rename would turn two rules off while the gate went on reporting success (ADR 0002).
+//
+// The helper names carry a `saq` prefix for block 127's reason: two gate blocks with identically named local
+// helpers make git treat them as shared context and interleave them on merge.
+{
+  const saqRunGate = () => runExpectingFailure('pnpm', ['saq-a'])
+  const saqUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+
+  const SAQ_RENDER = 'apps/web/app/(admin)/checkout/render.ts'
+  const SAQ_BOUNDARY = 'packages/payments/src/checkout.ts'
+  const SAQ_DETECTOR = 'packages/payments/src/redaction.ts'
+  const SAQ_POLICY = 'packages/payments/src/hosted-fields.ts'
+  const SAQ_TOKEN_HANDLER = 'apps/web/app/api/v1/payments/token/handler.ts'
+  /** A payments module that is scanned, writes to no sink, and is nobody's detector or policy. */
+  const SAQ_INNOCENT_PAYMENTS = 'packages/payments/src/record-sink.ts'
+  /** A file outside the payments estate, so the policy rule's first half is exercised where it applies. */
+  const SAQ_INNOCENT_APP = 'apps/web/src/image-loader.ts'
+  /** A Payload collection, where a field reaches a browser without any markup in this repository. */
+  const SAQ_COLLECTION = 'apps/web/src/collections/journal-posts.ts'
+
+  /** Appends a line to a file that must survive, so the anchor is the file's own end. */
+  const saqAppending = (line) => (text) => `${text}\n${line}\n`
+
+  // 145a. A card autocomplete token on the checkout. The single most likely way this build stops being SAQ-A:
+  //       somebody adds the field "so the operator can type it in when the frame fails to load".
+  checkRejectedBy(
+    'SAQ-A: a card autocomplete token in our own markup is refused',
+    withEditedFile(
+      SAQ_RENDER,
+      (text) =>
+        replaceOnce(
+          text,
+          "    '<h2>Card details</h2>',",
+          '    \'<h2>Card details</h2>\',\n    \'<input autocomplete="cc-number" name="pa" type="text">\',',
+        ),
+      saqRunGate,
+    ),
+    'saq-a-no-card-autocomplete-in-our-own-markup',
+  )
+
+  // 145b. And the same field without the autocomplete attribute, which is how it would actually be written by
+  //       somebody who had read the first rule.
+  checkRejectedBy(
+    'SAQ-A: a form control named after card data is refused',
+    withEditedFile(
+      SAQ_RENDER,
+      (text) =>
+        replaceOnce(
+          text,
+          "    '<h2>Card details</h2>',",
+          '    \'<h2>Card details</h2>\',\n    \'<input type="text" name="cvv">\',',
+        ),
+      saqRunGate,
+    ),
+    'saq-a-no-card-field-in-our-own-forms',
+  )
+
+  // 145c. The CMS shape, which no markup scan can see: a Payload field is rendered by Payload's own admin, and
+  //       this repository holds none of that markup. The catalogue boundary found the same shape mattering for
+  //       a `price` field.
+  checkRejectedBy(
+    'SAQ-A: a card-data field on a CMS collection is refused',
+    withEditedFile(
+      SAQ_COLLECTION,
+      saqAppending("export const __gateField = { name: 'cvv', type: 'text' }"),
+      saqRunGate,
+    ),
+    'saq-a-no-card-field-in-our-own-forms',
+  )
+
+  // 145d. A payments transport that reads a body and does not reach the one boundary. The rule found two live
+  //       instances of this when it was written, which is why it exists rather than being a formality.
+  checkRejectedBy(
+    'SAQ-A: a payments transport that reads a body outside the one boundary is refused',
+    withEditedFile(
+      SAQ_TOKEN_HANDLER,
+      (text) =>
+        replaceOnce(
+          replaceOnce(
+            text,
+            "import { authoriseCheckout, CHECKOUT_REFUSAL_SENTENCES } from '@berelax/payments'",
+            "import { CHECKOUT_REFUSAL_SENTENCES } from '@berelax/payments'",
+          ),
+          '  const result = await authoriseCheckout(deps, body)',
+          '  const result = await takeItFromHere(deps, body)',
+        ),
+      saqRunGate,
+    ),
+    'saq-a-payments-transport-reads-its-body-through-one-boundary',
+  )
+
+  // 145e. A card-data field in the CONTRACT. Nothing renders it and a `curl` can still fill it in, which is
+  //       the half the markup rules cannot reach.
+  checkRejectedBy(
+    'SAQ-A: a card-data field added to the checkout contract is refused',
+    withEditedFile(
+      SAQ_BOUNDARY,
+      (text) =>
+        replaceOnce(text, "  reference: 'reference',", "  reference: 'reference',\n  cvv: 'cvv',"),
+      saqRunGate,
+    ),
+    'saq-a-checkout-contract-names-no-card-data',
+  )
+
+  // 145f. A second Luhn walk. The arithmetic is unmistakable and nobody writes it by accident, which is why
+  //       the rule can be narrow enough to survive: a rule matching every `% 10` would be turned off in a week.
+  checkRejectedBy(
+    'SAQ-A: a second definition of the card shape is refused',
+    withEditedFile(
+      SAQ_INNOCENT_PAYMENTS,
+      saqAppending(
+        'export const __gateLuhn = (d: string): boolean => {\n' +
+          '  let sum = 0\n' +
+          '  for (let i = 0; i < d.length; i += 1) {\n' +
+          '    let v = Number(d[i])\n' +
+          '    if (i % 2 === 0) { v = v * 2; if (v > 9) { v = v - 9 } }\n' +
+          '    sum += v\n' +
+          '  }\n' +
+          '  return sum % 10 === 0\n' +
+          '}',
+      ),
+      saqRunGate,
+    ),
+    'saq-a-card-shape-has-one-definition',
+  )
+
+  // 145g. A payments module that writes to a sink and names no redactor. `audit_event` is append-only, so a
+  //       card number written there is permanent — and the module cannot be protected by a trigger, because a
+  //       trigger on that table would refuse legitimate writes about TRNs and IBANs.
+  checkRejectedBy(
+    'SAQ-A: a payments sink write that skips the redactor is refused',
+    withEditedFile(
+      SAQ_INNOCENT_PAYMENTS,
+      saqAppending(
+        'export const __gateAudit = async (uow: { audit: { record: (r: unknown) => Promise<void> } }, ' +
+          "body: unknown) => { await uow.audit.record({ action: 'gate', after: body }) }",
+      ),
+      saqRunGate,
+    ),
+    'saq-a-payments-sink-writes-go-through-the-redactor',
+  )
+
+  // 145h. A second content-security-policy builder. A policy assembled in a handler is a policy nothing can
+  //       state the expected value of, which is how a directive comes to be widened by a line that looks like
+  //       configuration.
+  checkRejectedBy(
+    'SAQ-A: a second content-security-policy builder is refused',
+    withEditedFile(
+      SAQ_INNOCENT_APP,
+      saqAppending("export const __gateCsp = \"frame-src 'self'; script-src 'self'\""),
+      saqRunGate,
+    ),
+    'saq-a-checkout-policy-has-one-builder-and-no-literal-origin',
+  )
+
+  // 145i. A hard-coded gateway origin. No gateway has been chosen, and a plausible vendor domain is
+  //       indistinguishable from a configured one — brief rule 15's sharpest instance in this unit, because
+  //       what it produces is a checkout framing a domain nobody owns.
+  checkRejectedBy(
+    'SAQ-A: a literal gateway origin in the payments estate is refused',
+    withEditedFile(
+      SAQ_INNOCENT_PAYMENTS,
+      saqAppending("export const __gateOrigin = 'https://fields.gate-fixture.test'"),
+      saqRunGate,
+    ),
+    'saq-a-checkout-policy-has-one-builder-and-no-literal-origin',
+  )
+
+  // 145j. The vacuity guard on the gate's own parse. The scan reads the card-field vocabulary out of the
+  //       detector module, so a rename would turn two rules off while the gate reported success (ADR 0002).
+  checkRejectedBy(
+    'SAQ-A: a card-field vocabulary the gate cannot parse is a failure, not a pass',
+    withEditedFile(
+      SAQ_DETECTOR,
+      (text) =>
+        replaceOnce(
+          text,
+          'export const CARD_DATA_FIELD_NAMES: readonly string[] = Object.freeze([',
+          'export const CARD_DATA_FIELD_LIST: readonly string[] = Object.freeze([',
+        ),
+      saqRunGate,
+    ),
+    'saq-a-no-card-field-in-our-own-forms',
+  )
+
+  // 145k. A third origin in the policy. The acceptance line is *"adding a further origin fails the header
+  //       test"*, and this is that sentence made mechanical: the test states the WHOLE policy string and counts
+  //       the origins in it, so an origin added to any directive fails it wherever it went.
+  checkRejectedBy(
+    'SAQ-A: a further origin in the checkout policy fails the policy test',
+    withEditedFile(
+      SAQ_POLICY,
+      (text) =>
+        replaceOnce(
+          text,
+          '    `frame-src ${frame}`,',
+          '    `frame-src ${frame} https://extra.gate-fixture.test`,',
+        ),
+      () => runExpectingFailure('pnpm', saqUnit('packages/payments/src/hosted-fields.test.ts')),
+    ),
+    'permits exactly the two gateway origins and no others',
+  )
+
+  // 145l. The window scan reduced to a whole-run check. This is the change that makes a card number pasted
+  //       inside a longer digit string invisible, which is the shape an accident produces — and it is the
+  //       change that looks like a simplification.
+  checkRejectedBy(
+    'SAQ-A: a detector that only checks whole runs fails the detector suite',
+    withEditedFile(
+      SAQ_DETECTOR,
+      (text) =>
+        replaceOnce(
+          text,
+          '    for (let length = PAN_MIN_DIGITS; length <= longest; length += 1) {',
+          '    for (let length = run.length; length <= longest; length += 1) {',
+        ),
+      () => runExpectingFailure('pnpm', saqUnit('packages/payments/src/redaction.test.ts')),
+    ),
+    'finds a card number hidden inside a longer digit run',
+  )
+
+  // The database's half. Both cases run against real PostgreSQL inside `begin ... rollback`, because ZY231 is
+  // only a refusal once something has been seen to bounce off it — and once its absence has been seen not to.
+  {
+    const saqDbUrl = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL'] ?? ''
+    // `VERBOSITY=verbose` so psql prints the SQLSTATE. Without it the refusal's MESSAGE is in the output and
+    // its CODE is not, and `checkRejectedBy` would be matching prose — which is exactly what ADR 0043 says a
+    // caller must not do, made worse here because this refusal's message deliberately says nothing specific.
+    const saqPsql = (statements) =>
+      run('psql', [
+        '--no-psqlrc',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-v',
+        'VERBOSITY=verbose',
+        '-q',
+        saqDbUrl,
+        '-c',
+        statements,
+      ])
+
+    /** A card-shaped reference, inserted the way a caller that skipped the boundary would. */
+    const saqInsert = (key) =>
+      `insert into payment_intent (idempotency_key, gateway, instrument, posting_account_code, ` +
+      `requested_fils, reference) values ('${key}', 'fake-card-gateway', 'card_online', '1030', 20000, ` +
+      `'gate 4111111111111111');`
+
+    if (saqDbUrl === '') {
+      // Loudly, not silently. A gate that skips when its environment is absent is the ADR 0002 failure.
+      check(
+        'SAQ-A: the database refuses a card-shaped reference',
+        false,
+        'TEST_DATABASE_URL is not set',
+      )
+    } else {
+      // The control FIRST, because both cases below assert that the refusal STOPS, and an insert that was
+      // never refused would satisfy them for a reason that has nothing to do with the fixture.
+      checkRejectedBy(
+        'SAQ-A: the database refuses a card-shaped reference by name',
+        saqPsql(`begin; ${saqInsert('gate-saq-zy231')} rollback;`),
+        'ZY231',
+      )
+
+      // 145m. `is_card_shaped` reduced to `false`. The trigger is still there and still fires; it simply never
+      //       finds anything, which is the shape of a detector that has stopped detecting.
+      const saqBlindDetector = saqPsql(
+        'begin; create or replace function is_card_shaped(p_text text) returns boolean language sql ' +
+          `immutable strict parallel safe as $$ select false $$; ${saqInsert('gate-saq-blind')} rollback;`,
+      )
+      check(
+        'SAQ-A: a blinded is_card_shaped lets a card-shaped reference through, so the detector is load-bearing',
+        !saqBlindDetector.failed,
+        `the insert was still refused, so this case proves nothing about the detector:\n${saqBlindDetector.output}`,
+      )
+
+      // 145n. The trigger dropped. The function still works and nothing consults it, which is what a migration
+      //       that "tidied up" the triggers would leave behind.
+      const saqNoTrigger = saqPsql(
+        `begin; drop trigger payment_intent_no_card_shaped_text on payment_intent; ` +
+          `${saqInsert('gate-saq-untriggered')} rollback;`,
+      )
+      check(
+        'SAQ-A: dropping the ZY231 trigger lets a card-shaped reference through, so the trigger is load-bearing',
+        !saqNoTrigger.failed,
+        `the insert was still refused, so this case proves nothing about the trigger:\n${saqNoTrigger.output}`,
+      )
+    }
+  }
+
+  // The controls for the static rules. Every case above asserts the gate FAILS; without these, all nine are
+  // satisfied by a gate that fails on the repository as it stands.
+  {
+    const clean = run('pnpm', ['saq-a'])
+    check('SAQ-A: the gate passes on the repository as it stands', !clean.failed, clean.output)
+    // And it read something. A scan over nothing reports success, which is the whole reason this block exists.
+    check(
+      'SAQ-A: the gate reports how much it scanned, and it is not nothing',
+      /\b\d{3,} source file\(s\) scanned/.test(String(clean.output)),
+      `the gate did not report a file count:\n${String(clean.output)}`,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -45523,6 +45860,11 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'pnpm chokepoint',
     'pnpm send-chokepoint',
     'pnpm private-documents',
+    // Y-PAY-03's SAQ-A gate, in the position `pnpm verify` runs it. Registered here because that is what makes
+    // dropping it from CI a failing build rather than the silent loss of the only check that says no field
+    // this build renders accepts a card number — the one gate whose whole subject is an absence, and
+    // therefore the one whose removal nothing else would notice.
+    'pnpm saq-a',
     // A-MEAS-01's egress guard, in the position `pnpm verify` runs it. Registered here because that is what
     // makes dropping it from CI a failing build rather than the silent loss of the one check that says
     // nothing but an opaque category code leaves the building.

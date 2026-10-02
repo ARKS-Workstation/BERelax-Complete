@@ -162,6 +162,29 @@ const schema = z
     DOCUMENT_URL_SIGNING_SECRET_PREVIOUS: z.string().optional(),
     DOCUMENT_URL_SIGNING_SECRET_PREVIOUS_VERSION: z.string().optional(),
 
+    /**
+     * Where the card gateway serves its hosted fields from — Y-PAY-03, SAQ-A.
+     *
+     * `frame` is the origin of the card-entry document the checkout puts in an iframe; `script` is the origin
+     * of the gateway's hosted-fields script. Both are bare origins (`scheme://host[:port]`), and the CSP on
+     * the checkout route names them and nothing else.
+     *
+     * **No default, and not derived from each other.** No gateway has been chosen and no merchant account
+     * exists (OPEN-QUESTIONS `Y7-gateway`, `Y7-hosted-fields`), so there is no value to default to, and a
+     * plausible-looking vendor domain is what brief rule 15 refuses: it is indistinguishable from a
+     * configured one. Unset is a first-class state — `hostedFieldsFrom` in `@berelax/payments` returns
+     * `not_configured` naming the missing keys, the checkout renders the refusal instead of a frame, and the
+     * policy becomes `frame-src 'none'; script-src 'none'`. A checkout that cannot take a card is the
+     * strictest safe option; one pointed at a guessed origin is not.
+     *
+     * NOT in the `real`-refused list above, because neither is a provider selection: a real origin outside
+     * production reaches the gateway's public card-entry page and nothing else — no credential, no customer
+     * and no token. What must not happen outside production is an authorisation, and `PAYMENT_PROVIDER=real`
+     * is already refused for that (ADR 0005).
+     */
+    PAYMENT_HOSTED_FIELDS_FRAME_ORIGIN: z.string().optional(),
+    PAYMENT_HOSTED_FIELDS_SCRIPT_ORIGIN: z.string().optional(),
+
     SENTRY_DSN: z.string().optional(),
     LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
   })

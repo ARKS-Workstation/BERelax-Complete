@@ -1,6 +1,7 @@
 import type {
   GatewayIntentId,
   IdempotencyKey,
+  InstrumentToken,
   PaymentGateway,
   PaymentIntentEvent,
   PaymentIntentEventType,
@@ -26,6 +27,7 @@ import {
   readPaymentIntentTransactions,
 } from '@berelax/db'
 import { AppError } from '@berelax/shared'
+import { redactCardData } from './redaction.ts'
 
 /**
  * Where the pure lifecycle and the durable rows meet: the only place an intent is created or moved.
@@ -62,6 +64,16 @@ export interface CreatePaymentIntentRequest {
   readonly instrument: TenderKind
   /** The invoice or booking. Carried through to reconciliation; non-blank is the port's own refusal. */
   readonly reference: string
+  /**
+   * The gateway's own token for the card, from its hosted fields (Y-PAY-03).
+   *
+   * Forwarded to `gateway.authorise` and NOWHERE else: it is not stored, not audited and not put on an outbox
+   * payload. Y-PAY-02 left `gatewayIntentId` and any customer-action URL out of this surface on the grounds
+   * that an opaque token a browser may hold was Y-PAY-03's to define; the definition is that it travels one
+   * way, through this function, into the adapter, and is never written down. A column for it would be a
+   * single-use charge credential at rest with nothing that needed it there.
+   */
+  readonly instrumentToken?: InstrumentToken
 }
 
 export interface PaymentIntentResult {
@@ -108,7 +120,10 @@ export async function createPaymentIntent(
       entityType: 'payment_intent',
       entityId: claim.intent.id,
       operation: 'read',
-      after: { idempotencyKey: request.idempotencyKey, gateway: gateway.name },
+      // Y-PAY-03: the key is CALLER-SUPPLIED free text, so it goes to the sink through the redactor. Found
+      // by `pnpm saq-a`'s rule 6, which refuses a payments module that writes an audit or outbox payload and
+      // names no redactor — this row would otherwise have carried whatever a caller put in a key.
+      after: redactCardData({ idempotencyKey: request.idempotencyKey, gateway: gateway.name }),
     })
     return {
       intent: claim.intent,
@@ -126,6 +141,9 @@ export async function createPaymentIntent(
     instrument: request.instrument,
     idempotencyKey: request.idempotencyKey,
     reference: request.reference,
+    // Spread rather than passed as `undefined`, because `exactOptionalPropertyTypes` is on: an explicit
+    // `instrumentToken: undefined` is not the same as an absent one, and the till gateway has none to give.
+    ...(request.instrumentToken === undefined ? {} : { instrumentToken: request.instrumentToken }),
   })
 
   const events = await eventsFor(gateway, snapshot.gatewayIntentId, before)
@@ -139,12 +157,12 @@ export async function createPaymentIntent(
     entityType: 'payment_intent',
     entityId: claim.intent.id,
     operation: 'create',
-    after: {
+    after: redactCardData({
       gateway: gateway.name,
       gatewayIntentId: snapshot.gatewayIntentId,
       requestedFils: request.amount.fils,
       events: events.map((event) => event.type),
-    },
+    }),
   })
 
   const intent = await readPaymentIntent(uow.sql, claim.intent.id)
@@ -393,11 +411,14 @@ export async function recordClientCallback(
       entityId: claim.paymentIntentId,
       operation: 'denied',
       before: { state: before },
-      after: {
+      // Y-PAY-03, and this is the sharpest instance of the rule in the whole chain: `claimedEvent` and
+      // `claimedGatewayEventId` are strings a BROWSER chose, on the path whose entire subject is an untrusted
+      // claim, written to an append-only table. A card number pasted into either would have been permanent.
+      after: redactCardData({
         claimedEvent: claim.claimedEvent,
         claimedGatewayEventId: claim.claimedGatewayEventId ?? null,
         storedMovements: stored.length,
-      },
+      }),
     })
     // Read again rather than reusing `before`. The claim is that this function moves nothing, and a result
     // built from a value captured before the audit write could not tell a caller whether it had.
@@ -414,7 +435,10 @@ export async function recordClientCallback(
     entityType: 'payment_intent',
     entityId: claim.paymentIntentId,
     operation: 'read',
-    after: { claimedEvent: claim.claimedEvent, gatewayEventId: matched.gatewayEventId },
+    after: redactCardData({
+      claimedEvent: claim.claimedEvent,
+      gatewayEventId: matched.gatewayEventId,
+    }),
   })
   return {
     outcome: 'confirmed_by_a_stored_movement',

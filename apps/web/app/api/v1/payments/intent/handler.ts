@@ -3,7 +3,12 @@ import { filsFrom, money, TENDER_KINDS, TENDER_TYPES } from '@berelax/core'
 import type { Actor, Sql } from '@berelax/db'
 import { paymentIntentError, withUnitOfWork } from '@berelax/db'
 import type { PaymentGatewayRegistry } from '@berelax/payments'
-import { createPaymentIntent, recordClientCallback } from '@berelax/payments'
+import {
+  assertNoCardData,
+  CardDataRefused,
+  createPaymentIntent,
+  recordClientCallback,
+} from '@berelax/payments'
 import { isAppError } from '@berelax/shared'
 
 /**
@@ -95,6 +100,37 @@ export async function handlePaymentIntentRequest(
     body = (await request.json()) as CreateBody
   } catch {
     return bad('the body is not JSON')
+  }
+
+  /*
+    Y-PAY-03: card data is refused BEFORE any field is read for its own sake.
+
+    This endpoint takes two free-text fields a caller chooses — `reference` and `idempotencyKey` — and it used
+    to pass both straight through to a row and an audit payload. `pnpm saq-a`'s rule 3 found it: a payments
+    transport that reads a body must reach the one card-data boundary, and this one did not, so a `curl` could
+    put a primary account number in a reference and the only thing that would have refused it is migration
+    0117's ZY231 — which answers 409 `invariant_violated`, tells the caller nothing useful, and arrives after
+    an authorisation has already been attempted at the gateway.
+
+    First, before the action is even chosen, because every branch below builds a message about a field and a
+    message about a body that has not been cleared of card data is a message that may carry one. The refusal
+    names the PATHS and never the value, for the reason `@berelax/payments/redaction` records.
+  */
+  try {
+    assertNoCardData(body, 'the payment intent endpoint')
+  } catch (error) {
+    if (!(error instanceof CardDataRefused)) throw error
+    return json(
+      {
+        error: 'card_data_refused',
+        reason:
+          'The request carried something shaped like a card number, or a field named after card data, and ' +
+          'was refused without being read further. Card details are typed into the gateway\u2019s own hosted ' +
+          'fields and never reach this endpoint. The value is deliberately not repeated here or in any log.',
+        paths: error.findings.map((finding) => finding.path),
+      },
+      400,
+    )
   }
 
   const action = body.action ?? 'create'

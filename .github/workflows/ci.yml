@@ -157,6 +157,15 @@ jobs:
       - name: Private document choke point
         run: pnpm private-documents
 
+      # No primary account number can reach this build. Seven rules no type, no test and no import rule can
+      # express, because the claim is an ABSENCE: a `cc-` autocomplete token or a card-named field in anything
+      # this build renders (which changes the PCI scope from SAQ-A to SAQ-A-EP in a line of markup), a payments
+      # transport that reads a body without going through the one card-data boundary, a checkout contract field
+      # named after card data, a second definition of what a card number looks like, a payments sink write that
+      # skips the redactor, a second content-security-policy builder, and a hard-coded gateway origin.
+      - name: SAQ-A card data
+        run: pnpm saq-a
+
       # Nothing but an opaque category code leaves the building. Seven rules no type and no import rule can
       # express: a cast that forges the branded payload, the projection turning into a spread, a category code
       # spelled at a call site, a service-name column reaching the guard, the guard reaching the network, an

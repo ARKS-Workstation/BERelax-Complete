@@ -278,6 +278,33 @@ export const ROUTES = [
       'Referer and every browser history, and a link is forwardable in a way a POST body is not.',
   },
   {
+    id: 'payments-token',
+    path: '/api/v1/payments/token',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'Y-PAY-03s hosted-fields token endpoint: the JSON twin of the /checkout screens submission, for a ' +
+      'gateway whose own script posts the opaque token it produced. The SAME boundary the screen goes ' +
+      'through - authoriseCheckout in @berelax/payments - because two transports for one submission is how ' +
+      'one of them comes to read a body its own way and skip the card-data refusal, and `pnpm saq-a` ' +
+      'refuses a payments transport that reads a body any other way. This is where the acceptance lines 400 ' +
+      'lives: a body carrying a 13-to-19-digit Luhn-valid number is refused before any statement is issued ' +
+      'and creates no intent, and neither the response nor any log repeats the value. Under /api/v1 for the ' +
+      'three reasons the endpoints beside it record, and NOT at the /api/payments/token the manifest names ' +
+      '- a fifth endpoint outside the prefix would leave the public API surface half-versioned. ' +
+      'AUTHENTICATED, unlike the intent endpoint beside it: guardAdminRoute is the first statement and the ' +
+      'actor on every audit row is the signed-in member of staffs employee id with their staff_reference as ' +
+      'the label, which is the deferral Y-PAY-02 handed this unit. Dynamic by necessity: it claims an ' +
+      'idempotency key, calls a gateway and writes rows on every request. Not indexable, and covered by the ' +
+      'proxy exemption rather than by a header, exactly like the endpoints beside it. Nothing is read from ' +
+      'the query string - not the actor, not the amount, not the token - because a payment instruction in a ' +
+      'URL is in every access log, every Referer and every browser history.',
+  },
+  {
     id: 'preferences',
     path: '/api/v1/preferences',
     kind: 'handler',
@@ -405,6 +432,35 @@ export const ROUTES = [
       'no other route and a prefix would be a claim on paths nothing serves. Dynamic because the page is a ' +
       'claim about which trading date it is: a prerendered copy would be wrong from the next close of ' +
       'trading, and would show appointments that have since moved.',
+  },
+  {
+    id: 'checkout',
+    path: '/checkout',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'Y-PAY-03s SAQ-A card checkout: the gateways own card fields, in an iframe served from the gateways ' +
+      'own origin, and an amount and a reference that are ours. The page renders NO input for a card number, ' +
+      'an expiry or a security code and carries no script at all, which is what keeps this a SAQ-A checkout ' +
+      'rather than a system that handles card data - `pnpm saq-a` scans for a card field and a cc- ' +
+      'autocomplete token on every declared route, and checkout.itest.ts opens this one in a real browser ' +
+      'and asserts the card field is inside a frame whose contentDocument is null. Its response carries a ' +
+      'content-security-policy naming ONLY the gateways own frame and script origins, built by ' +
+      'checkoutContentSecurityPolicy in @berelax/payments so a test can state the whole string; with no ' +
+      'gateway configured both become none and the screen renders the refusal instead of a frame ' +
+      '(Y7-hosted-fields). A handler answering text/html rather than a document, for the reason the till, ' +
+      'the diary, the pipeline board, the Messages inbox, the compliance calendar, the duplicate queue, ' +
+      'quick-book and the review paste form all give: a registry document must be served in BOTH locales, ' +
+      'which needs an Arabic admin document and the W-SYS-01 shell. It WRITES - its POST authorises through ' +
+      'the gateway and records the movement and the audit row in one transaction - and it IS authenticated: ' +
+      'guardAdminRoute is the first statement of both verbs and the audit actor is the signed-in staff ' +
+      'members employee id with their staff_reference as the label. Dynamic because it mints a fresh ' +
+      'idempotency key per read; a cached copy would hand two operators one key. Covered by the /checkout ' +
+      'noindex prefix in ADMIN_GROUP_PREFIXES, and it states noindex on its own response as well.',
   },
   {
     id: 'client-flags',
@@ -1462,6 +1518,12 @@ export const ADMIN_GROUP_PREFIXES: readonly string[] = [
   // and a prefix added with the first route covers every one of them the moment it exists.
   '/accounts',
   '/analytics',
+  // Y-PAY-03's SAQ-A card checkout. A prefix rather than a bare path because the payments estate is already
+  // allocated there — Y-PAY-06's refund screen and Y-PAY-05's reconciliation exceptions are both screens that
+  // go beside it — and a screen listing what has been charged and refunded is a list of what every customer
+  // paid. The second route under a prefix arrives noindex on the commit that creates it rather than on the
+  // commit that remembers to.
+  '/checkout',
   '/clients',
   '/compliance',
   '/crm',

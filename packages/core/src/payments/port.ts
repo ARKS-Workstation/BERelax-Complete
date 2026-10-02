@@ -41,6 +41,28 @@ export type GatewayIntentId = Brand<string, 'GatewayIntentId'>
 export type IdempotencyKey = Brand<string, 'IdempotencyKey'>
 
 /**
+ * The gateway's own single-use reference to card data it holds and we do not — Y-PAY-03's half of SAQ-A.
+ *
+ * Y-PAY-01 deliberately left this undefined: *"an opaque token a browser may hold is Y-PAY-03's to define,
+ * and returning one today would make it a contract before anybody decided what it may contain."* This is that
+ * definition, and the answer is that it may contain NOTHING we can read. Card entry happens inside the
+ * gateway's cross-origin hosted fields; the browser receives this token and posts it to us; we hand it
+ * straight to {@link PaymentGateway.authorise}. It is the only thing that crosses from the card-entry
+ * document into this system, which is what keeps every primary account number outside it.
+ *
+ * Branded and `string`, with no structure asserted, for the same reason {@link GatewayEventCursor} is opaque:
+ * a consumer that parsed it — for a BIN, for a last four, for an expiry — would be reading card data out of
+ * the one value that exists so that nothing has to. No gateway has been chosen (OPEN-QUESTIONS `Y7-gateway`),
+ * so its real format is unknown, and a build that pretended to know it would have built a parser for a shape
+ * it invented.
+ *
+ * It is a CREDENTIAL rather than cardholder data: it authorises one charge, so it is redacted before any log
+ * line, audit row, outbox payload or breadcrumb (`SECRET_FIELD_NAMES` in `@berelax/payments/redaction`) even
+ * though SAQ-A does not require it.
+ */
+export type InstrumentToken = Brand<string, 'InstrumentToken'>
+
+/**
  * Where an event stream is resumed from.
  *
  * Opaque on purpose: a cursor is the gateway's own bookmark and a consumer that parsed it — as a
@@ -66,6 +88,23 @@ export interface AuthoriseRequest {
   readonly idempotencyKey: IdempotencyKey
   /** The invoice or booking this belongs to, carried through to reconciliation. */
   readonly reference: string
+  /**
+   * The gateway's own token for the card, from its hosted fields. Absent for an instrument that has none.
+   *
+   * OPTIONAL rather than required, and the reason is the till: `cash`, `card_machine` and `bank_transfer` are
+   * money already in hand, there is no hosted-fields document and no token to present — so a required field
+   * here would have made the manual gateway carry a value it has to invent. It is
+   * `card_online` that has one, which is exactly the split {@link GatewayCapabilities} already draws between
+   * an adapter with an external service and one without.
+   *
+   * Optional here and REQUIRED at the checkout's own boundary: `POST /api/v1/payments/token` refuses a body
+   * with no token, because a checkout POST carrying no token is a POST the hosted fields did not make. The
+   * requirement is stated where it is true rather than as a conformance rule every adapter would have to
+   * answer for — and so that the claim "the token reached the gateway" stays assertable: the fake records
+   * whether one was presented on its {@link GatewayMovementRecord}, so a checkout that stopped forwarding it
+   * fails a test instead of authorising against nothing.
+   */
+  readonly instrumentToken?: InstrumentToken
 }
 
 export interface CaptureRequest {
@@ -158,6 +197,17 @@ export interface GatewayMovementRecord {
   readonly idempotencyKey: IdempotencyKey
   /** Set when this call was suppressed as a duplicate, so a replay is visible rather than invisible. */
   readonly suppressedDuplicate?: boolean
+  /**
+   * Whether an {@link InstrumentToken} was presented with this call. A BOOLEAN, never the token.
+   *
+   * Y-PAY-03. The token is what stands between this system and a primary account number, so "did the
+   * checkout actually forward it" has to be assertable — a checkout that quietly stopped would authorise
+   * against nothing and look identical from every other angle. It is a boolean and not the value because
+   * this record IS the operator-visible payments screen and a movement row holding a live charge credential
+   * is a credential in every screenshot; `SECRET_FIELD_NAMES` in `@berelax/payments/redaction` redacts the
+   * value everywhere else for the same reason.
+   */
+  readonly instrumentTokenPresented?: boolean
 }
 
 /** Where movement records go. The admin payments screen and the conformance suite both read one. */

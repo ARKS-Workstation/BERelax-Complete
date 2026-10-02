@@ -3805,6 +3805,40 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // answer (ADR 0043, 0061): the answer to all four of these is the same sentence — lint the reply and
 // deliver it through the send path.
 //
+// 117 is 0117_card_shape_refusal.sql — no column a checkout writes may hold text shaped like a card number
+// (Y-PAY-03). One function, `is_card_shaped()`, and one rule, `ZY231`, on `payment_intent.reference`,
+// `payment_intent.idempotency_key`, `payment_intent.gateway_intent_id` and
+// `payment_intent_transaction.gateway_event_id`. No table, no column and no index, so the Drizzle mirror is
+// unchanged and `pnpm db:drift` has nothing new to compare — the file is a refusal and nothing else.
+//
+// Two decisions in it are worth finding here rather than in the file, because both are the kind that gets
+// "simplified" by a later reader.
+//
+// **It is a TRIGGER and not a CHECK constraint, and that is the point of the migration.** A CHECK is the
+// obvious spelling and it is the wrong one: PostgreSQL appends `DETAIL: Failing row contains (…)` to a CHECK
+// violation, so the constraint that kept the card number out of the column would have written it into the
+// server log and from there into wherever logs ship. The guard would have created the disclosure it exists to
+// prevent, on the path everybody agrees is the safe one. A trigger raises a message we write, which names the
+// TABLE and the COLUMN and never the value — and that is also why the refusal needs a private SQLSTATE at
+// all: the prose is deliberately uninformative, so a caller has to be able to branch on the code.
+//
+// **It is deliberately NOT on `audit_event` or `outbox_event`**, which is the version of this rule somebody
+// will propose. `is_card_shaped` reports a 13-to-19-digit Luhn-valid run, and about one arbitrary run in ten
+// of that length is Luhn-valid; those two payloads carry the whole build's data, including a fifteen-digit
+// TRN, an IBAN whose BBAN can be sixteen digits or more (P-HR-12's WPS file) and E.164 numbers up to fifteen.
+// A trigger there would refuse legitimate writes, and an audit write that can be refused is an audit trail
+// with a hole in it — a worse failure than the one being prevented. Those tables get the other mechanism
+// instead: `redactCardData` before every sink, `pnpm saq-a` refusing a payments write that skips it, and a
+// full-text sweep in `apps/web/src/checkout.itest.ts`. Structural where a refusal is safe, scanned where it
+// is not. ADR 0067 records the division.
+//
+// `luhn_check()` and `is_card_shaped()` are a second statement of `cardShapedRuns()` in
+// `packages/payments/src/redaction.ts`, because SQL cannot read TypeScript, so the check that holds them
+// equal ships in the same commit: `packages/fixtures/src/card-shape-agreement.itest.ts` drives
+// `CARD_SHAPE_PROBES` — stated once, in that module — through both and requires identical verdicts. The
+// direction the drift would take is the dangerous one: a database still accepting what the request boundary
+// had started refusing, so a test asserting the refusal would be satisfied by the wrong layer.
+//
 // Every number allocated through 99 has now landed: the run on disk is 1..99 less the permanent gaps above,
 // less 88, which M-TILL-13 released as a permanent gap because every table its screens touch already
 // existed. 85 and 89 through 99 arrived out of order, each with the unit that held it, 94 (G-REV-02) last of
@@ -3840,4 +3874,4 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // the last thing before SCHEMA_VERSION, and a merge that wants to add another edits this one instead:
 // `allocation-note.test.ts` is what refuses a second copy, and a second next-free claim in any wording, now
 // that saying so here has failed five times.
-export const SCHEMA_VERSION = 113 as const
+export const SCHEMA_VERSION = 117 as const

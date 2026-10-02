@@ -1885,6 +1885,13 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     translators: [],
   },
   {
+    code: 'ZY231',
+    rule: 'A payments column may not hold text shaped like a card number.',
+    migration: '0117',
+    raisedBy: ['refuse_card_shaped_payment_text'],
+    translators: ['packages/db/src/repositories/payment-intent.ts'],
+  },
+  {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',
     migration: '0093',
