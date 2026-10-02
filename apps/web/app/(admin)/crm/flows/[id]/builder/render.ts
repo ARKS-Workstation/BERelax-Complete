@@ -9,6 +9,11 @@ import {
   MESSAGE_CLASSES,
 } from '@berelax/shared'
 import { tokensCss } from '@berelax/ui'
+import {
+  type AdminChrome,
+  GOOGLE_REAUTH_BANNER_CSS,
+  renderAdminBanner,
+} from '../../../../../../src/components/admin/google-reauth-banner.ts'
 import type { FlowLiveState } from '../../api/handler.ts'
 import {
   BUILDER_FIELDS,
@@ -82,6 +87,15 @@ export interface BuilderRefusalView {
 export type BuilderDirection = 'ltr' | 'rtl'
 
 export interface BuilderView {
+  /**
+   * The Google re-auth banner's state, on every admin document without exception.
+   *
+   * `apps/web/src/google-reauth-banner.test.ts` enumerates the admin renders and refuses one that
+   * draws no banner: an operator on a screen that cannot tell them the connection is broken is the
+   * failure G-CONN-07 exists to remove, and a journey builder is exactly a screen somebody works in
+   * for a long time. This unit shipped without it and that case named the file.
+   */
+  readonly chrome: AdminChrome
   readonly flowKey: string
   readonly path: string
   readonly direction: BuilderDirection
@@ -610,10 +624,11 @@ export function renderFlowBuilderHtml(view: BuilderView): string {
     '<meta name="robots" content="noindex, nofollow, noarchive">',
     // No brand in the title: docs/09's brand-collision rule, scanned by `apps/web/src/seo/brand.test.ts`.
     '<title>Journey builder — CRM admin</title>',
-    `<style>${tokensCss()}${BUILDER_CSS}</style>`,
+    `<style>${tokensCss()}${GOOGLE_REAUTH_BANNER_CSS}${BUILDER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',
+    renderAdminBanner(view.chrome),
     `<h1>Journey builder: <code>${safeText(view.flowKey)}</code></h1>`,
     `<p>Read at ${safeText(view.readAtIso)}. This screen draws a journey and publishes it as a new ` +
       'version; it never edits a published one, because the enrolments already running are pinned to ' +

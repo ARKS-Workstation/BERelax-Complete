@@ -19,6 +19,7 @@ import {
   serialiseFlowDefinition,
 } from '@berelax/core'
 import { readCurrentTemplateClasses, readFlowDefinition, type Sql } from '@berelax/db'
+import type { AdminChrome } from '../../../../../../src/components/admin/google-reauth-banner.ts'
 import type { AdminPrincipal } from '../../../../../../src/session.ts'
 import {
   FLOW_API_SENTENCES,
@@ -87,6 +88,8 @@ export interface BuilderDeps {
 }
 
 export interface BuilderRequest {
+  /** Read by the route, never here: this file stays a reading of the draft (the calendar's rule). */
+  readonly chrome: AdminChrome
   readonly flowKey: string
   readonly principal: AdminPrincipal
   readonly searchParams: URLSearchParams
@@ -324,6 +327,7 @@ export const builderPathFor = (flowKey: string): string =>
  * an edit from what it shows on a reload — which is the only way the reload acceptance line can hold.
  */
 export function builderView(input: {
+  readonly chrome: AdminChrome
   readonly flowKey: string
   readonly draft: JourneyDraft
   readonly registry: readonly FlowTemplateFact[]
@@ -339,6 +343,7 @@ export function builderView(input: {
   const verdict = journeyDraftVerdict(input.draft, { templates: input.registry })
   const refusals: readonly FlowRefusal[] = verdict.ok ? [] : verdict.refusals
   return {
+    chrome: input.chrome,
     flowKey: input.flowKey,
     path: builderPathFor(input.flowKey),
     direction: input.direction,
@@ -431,6 +436,7 @@ export async function handleBuilderRead(
         published,
         publishRefusal: null,
         direction: directionFrom(request.searchParams),
+        chrome: request.chrome,
         readAtIso: deps.now().toISOString(),
       }),
     ),
@@ -611,6 +617,7 @@ function renderWith(
         published: null,
         publishRefusal: input.publishRefusal,
         direction: directionFrom(request.searchParams, request.form),
+        chrome: request.chrome,
         readAtIso: deps.now().toISOString(),
       }),
     ),

@@ -1,6 +1,8 @@
 import { loadConfig } from '@berelax/config'
+import type { Instant } from '@berelax/core'
 import { createConnection, type Sql } from '@berelax/db'
 import { isAppError } from '@berelax/shared'
+import { adminChromeFor } from '../../../../../../src/components/admin/google-reauth-source.ts'
 import { guardAdminRoute } from '../../../../../../src/session.ts'
 import { handleBuilderRead, handleBuilderWrite } from './handler.ts'
 
@@ -66,9 +68,14 @@ export async function GET(
   try {
     const url = new URL(request.url)
     const flowKey = await flowKeyOf(context)
-    return await withSql((sql) =>
+    return await withSql(async (sql) =>
       handleBuilderRead(
-        { flowKey, principal: authorised.principal, searchParams: url.searchParams },
+        {
+          flowKey,
+          principal: authorised.principal,
+          searchParams: url.searchParams,
+          chrome: await adminChromeFor({ sql, now: now().getTime() as Instant, request }),
+        },
         { sql, now },
       ),
     )
@@ -89,13 +96,14 @@ export async function POST(
     const url = new URL(request.url)
     const flowKey = await flowKeyOf(context)
     const form = new URLSearchParams(await request.text())
-    return await withSql((sql) =>
+    return await withSql(async (sql) =>
       handleBuilderWrite(
         {
           flowKey,
           principal: authorised.principal,
           searchParams: url.searchParams,
           form,
+          chrome: await adminChromeFor({ sql, now: now().getTime() as Instant, request }),
         },
         { sql, now },
       ),
