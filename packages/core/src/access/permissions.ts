@@ -113,8 +113,28 @@ export const PERMISSIONS = [
   // name on a public listing, docs/07 SS4 requires a human to approve every one, and the linter that guards it
   // refuses medical claims, named therapists and discount promises. Folding the two together would mean the
   // role that types in a one-star review could also publish the answer to it, which is exactly the decision
-  // docs/07 SS4 reserves for somebody with the authority to make it. G-REV-05 owns that permission.
+  // docs/07 SS4 reserves for somebody with the authority to make it. G-REV-06 owns that permission, below.
   'review:record',
+
+  // Reviews, the other half (G-REV-06). ONE permission for the whole approval queue, and it is owner-only.
+  //
+  // `review:reply_approve` is the mandatory human approval docs/10 SS6 names, plus the act that follows it:
+  // recording that the approved reply was pasted into Google. It gates the READ of the queue as well as
+  // both writes, because the queue shows a reviewer's words about this business and the sentence a machine
+  // proposes to answer them with.
+  //
+  // Owner-only, like `content:publish` and for the same reason rather than by analogy: this is the control
+  // that puts a sentence on a public page under the business's name, at licensed health-adjacent premises,
+  // where docs/07 SS4 forbids a medical claim, a named therapist, an admission of fault and a discount
+  // promise. The linter refuses all four (G-REV-05) and the linter is not the authority - it is the floor.
+  // The floor exists because the person approving is accountable for the sentence, and a floor with nobody
+  // behind it is what the mandatory-approval requirement exists to prevent.
+  //
+  // ONE permission and not two, which was the live question. Splitting approval from "Marked as posted"
+  // would create a role that may assert a reply is public without being allowed to read the reply - a
+  // claim about a sentence it may not see - and the claim is the compliance-relevant half: it is what the
+  // audit trail answers "who said this went out" with (migration 0128, ZY341).
+  'review:reply_approve',
 
   // Content and SEO
   'content:write',

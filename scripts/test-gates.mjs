@@ -51547,6 +51547,297 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   )
 }
 
+// 158a-158z. (G-REV-06) The approval queue: the clipboard shown to be a SEND path, the deep link shown to
+//            be derived, and the posting shown to be a named person's claim.
+//
+// docs/10 §6 gives this unit one sentence — *"owner sees the draft with Copy reply and a deep link → posts
+// → clicks Marked as posted"* — and every case below breaks one mechanism of it and asserts that a named
+// test notices. The reason the list is this long is that almost everything here is the kind of thing that
+// reads correctly while doing nothing:
+//
+//   - **A copy control that copies the editable draft.** *Copy reply* is a SEND path: the bytes it puts on
+//     a clipboard are published under the business's name. Reading them off the textarea an owner just
+//     typed in would defeat G-REV-05 completely, and every test of `deliverApprovedReply` would still pass.
+//     158d points the script at the editable field.
+//   - **A hard-coded listing link.** It opens the right business for months and then, the day the listing
+//     moves, sends somebody to paste a reply on another business's reviews. Nothing fails. 158a-158c put
+//     each of the three forms back into real source and assert the scan names the rule.
+//   - **A control the screen must not have.** docs/07 §4 permits an auto-sent reply in one case this build
+//     cannot reach (docs/10 §4, OPEN-QUESTIONS Y3-gbp-api), so the absence of an auto-send control is permanent — and an absence is the
+//     easiest thing in the world to assert vacuously. 158e adds one.
+//   - **A claim with no claimant.** `posted_manually_at` records that a PERSON said they pasted a reply
+//     into Google. 158j drops the actor id and the DATABASE refuses the write by name, which is the only
+//     form in which "who said so" is a fact rather than a convention.
+//   - **A record of a delivery that can be edited.** 158k removes the handler's own pre-check and asserts
+//     migration 0128's trigger refuses the second claim, so the floor is shown to be the floor.
+//   - **A lint refusal that is logged and ignored.** 158i swallows it and 303s anyway: the owner sees
+//     "approved", the queue moves on, and the only thing that notices is the row.
+//   - **An explanation that answers with today's rules.** 158g resolves the lexicon from this build
+//     instead of from the version the verdict names, which reports the current answer as the historical
+//     one — and passes every other case while doing it.
+//
+// The helper names carry a `queue` prefix for block 127's and 141's reason: two gate blocks with
+// identically named local helpers make git treat them as shared context and interleave them on merge.
+{
+  const QUEUE_DETAIL_RENDER = 'apps/web/app/(admin)/reviews/[id]/render.ts'
+  const QUEUE_RENDER = 'apps/web/app/(admin)/reviews/render.ts'
+  const QUEUE_HANDLER = 'apps/web/app/(admin)/reviews/handler.ts'
+  const QUEUE_DETAIL_HANDLER = 'apps/web/app/(admin)/reviews/[id]/handler.ts'
+  const QUEUE_REASON = 'packages/core/src/reviews/escalation-reason.ts'
+  const QUEUE_RENDER_SUITE = 'apps/web/src/reviews-queue-render.test.ts'
+  const QUEUE_REASON_SUITE = 'packages/core/src/reviews/escalation-reason.test.ts'
+  const QUEUE_SCAN_SUITE = 'apps/web/src/reviews-deep-link.test.ts'
+  const QUEUE_ITEST = 'apps/web/src/reviews-queue-handler.itest.ts'
+  /** A real source file, in a real package, which `withFixture` removes in a `finally`. */
+  const QUEUE_FIXTURE = 'packages/core/src/reviews/__gate_fixture__.ts'
+
+  const queueUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const queueIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // 158a. A place id written out in source. The scan's own control case proves the rule fires over a
+  //       synthetic corpus; this proves it fires over the REAL tree, which is a different claim — a
+  //       directory walk that stopped matching would pass the synthetic case for ever.
+  checkRejectedBy(
+    'reviews queue: a hard-coded place id in real source is caught by name',
+    withFixture(QUEUE_FIXTURE, "export const LISTING = 'ChIJ_hard_coded_listing_identifier'", () =>
+      runExpectingFailure('pnpm', queueUnit(QUEUE_SCAN_SUITE)),
+    ),
+    'deep-link-literal-place-id',
+  )
+
+  // 158b. The same identifier inside a URL, which is the form that actually ships: somebody pastes the
+  //       link out of their own browser's address bar and it carries the id.
+  checkRejectedBy(
+    'reviews queue: a listing identifier baked into a maps URL is caught by name',
+    withFixture(
+      QUEUE_FIXTURE,
+      "export const LINK = 'https://www.google.com/maps/search/?api=1&query_place_id=ChIJabcdef'",
+      () => runExpectingFailure('pnpm', queueUnit(QUEUE_SCAN_SUITE)),
+    ),
+    'deep-link-identifier-in-a-url',
+  )
+
+  // 158c. A THIRD place that builds one of these URLs. Two answers to "where is this listing" already
+  //       exist and are named in the scan; the day a third disagrees, the wrong one is whichever screen
+  //       nobody checked.
+  checkRejectedBy(
+    'reviews queue: a second maps URL template outside the permitted builders is caught by name',
+    withFixture(
+      QUEUE_FIXTURE,
+      'export const link = (q: string): string => `https://www.google.com/maps/search/?q=${q}`',
+      () => runExpectingFailure('pnpm', queueUnit(QUEUE_SCAN_SUITE)),
+    ),
+    'deep-link-second-template',
+  )
+
+  // 158d. The copy control pointed at the EDITABLE textarea. This is the defect the whole shape of this
+  //       screen exists to prevent: a reply that reaches a clipboard unlinted is published, and nothing in
+  //       the send path has been touched — `deliverApprovedReply` still refuses everything it should.
+  checkRejectedBy(
+    'reviews queue: a copy control reading the editable draft is caught by name',
+    withEditedFile(
+      QUEUE_DETAIL_RENDER,
+      (text) =>
+        replaceOnce(
+          text,
+          '  var source = document.querySelector(\'[data-testid="reply-approved"]\')',
+          '  var source = document.querySelector(\'[data-testid="reply-draft"]\')',
+        ),
+      () => runExpectingFailure('pnpm', queueUnit(QUEUE_RENDER_SUITE)),
+    ),
+    'copy-reads-the-approved-text',
+  )
+
+  // 158e. An auto-send control added to the screen. The absence is asserted as a CLOSED SET of controls
+  //       rather than as the absence of a word, because the docs/07 §4 rule sentences contain "auto-send"
+  //       in prose — a page explaining why a reply may not be auto-sent has to be able to say it. This is
+  //       what makes the set assertion worth having.
+  checkRejectedBy(
+    'reviews queue: a control the screen does not declare is caught by name',
+    withEditedFile(
+      QUEUE_DETAIL_RENDER,
+      (text) =>
+        replaceOnce(
+          text,
+          '<button type="button" data-testid="reply-copy">Copy reply</button>',
+          '<button type="button" data-testid="reply-copy">Copy reply</button>' +
+            '<button type="submit" data-testid="reply-auto-send">Send it for me</button>',
+        ),
+      () => runExpectingFailure('pnpm', queueUnit(QUEUE_RENDER_SUITE)),
+    ),
+    'declared-controls-only',
+  )
+
+  // 158f. The posting worded as an observation. There is no API access (docs/10 §4, OPEN-QUESTIONS Y3-gbp-api), so nothing here has
+  //       seen the reply on the listing — a stage that reads "posted to Google" makes the queue say the
+  //       one thing it cannot know, and no type refuses a different sentence.
+  checkRejectedBy(
+    'reviews queue: a stage sentence that asserts a reply is public is caught by name',
+    withEditedFile(
+      QUEUE_RENDER,
+      (text) =>
+        replaceOnce(
+          text,
+          "  claimed_as_posted: 'a named person says they posted it',",
+          "  claimed_as_posted: 'posted to Google',",
+        ),
+      () => runExpectingFailure('pnpm', queueUnit(QUEUE_RENDER_SUITE)),
+    ),
+    'the-claim-names-who-said-so',
+  )
+
+  // 158g. The escalation reason resolved from THIS build's lexicon instead of the version the verdict was
+  //       taken against. The happy path still passes — the stored version is usually the current one — so
+  //       the only thing that notices is the case about a version this build has never had.
+  checkRejectedBy(
+    'reviews queue: an explanation that falls back to today’s lexicon is caught by name',
+    withEditedFile(
+      QUEUE_REASON,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const lexicon = reviewEscalationLexiconFor(stored.routingLexiconVersion)',
+          '  const lexicon =\n' +
+            '    reviewEscalationLexiconFor(stored.routingLexiconVersion) ??\n' +
+            "    reviewEscalationLexiconFor('2026-09-19')",
+        ),
+      () => runExpectingFailure('pnpm', queueUnit(QUEUE_REASON_SUITE)),
+    ),
+    'lexicon-version-is-the-stored-one',
+  )
+
+  // 158h. The verdict bias inverted. A rule id this build does not declare must read as `escalate`: a row
+  //       written by a later build, a misspelling or a value left behind by a half-finished migration is
+  //       not permission to publish.
+  checkRejectedBy(
+    'reviews queue: an unrecognised rule read as auto_send is caught by name',
+    withEditedFile(
+      QUEUE_REASON,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const verdict = reviewVerdictForRule(stored.routingRuleId)',
+          "  const verdict = rule === null ? 'auto_send' : reviewVerdictForRule(stored.routingRuleId)",
+        ),
+      () => runExpectingFailure('pnpm', queueUnit(QUEUE_REASON_SUITE)),
+    ),
+    'unknown-rule-escalates',
+  )
+
+  // 158i. The lint refusal caught and discarded, which is 141a's defect arriving at the OTHER end of the
+  //       send path. The owner is told the reply was approved, the queue moves on, and the only thing that
+  //       changed is that `reply_approved_text` is still null.
+  checkRejectedBy(
+    'reviews queue: an approval that swallows the lint refusal is caught by name',
+    withEditedFile(
+      QUEUE_DETAIL_HANDLER,
+      (text) =>
+        replaceOnce(
+          text,
+          "    if (rules === null) throw error\n    return await refuse('reply_refused_by_the_linter', rules)\n  }\n  return seeOther(review.id, request, 'approved')",
+          "    if (rules === null) throw error\n  }\n  return seeOther(review.id, request, 'approved')",
+        ),
+      () => runExpectingFailure('pnpm', queueIntegration(QUEUE_ITEST)),
+    ),
+    'the-edit-is-re-linted-server-side',
+  )
+
+  // 158j. The actor id dropped from the audit row. The refusal is the DATABASE's, by its own private
+  //       SQLSTATE's message, which is what makes "a claim carries whoever made it" a property of the
+  //       schema rather than of this screen remembering to pass a principal.
+  checkRejectedBy(
+    'reviews queue: a posting claim with no named actor is refused by the database',
+    withEditedFile(
+      QUEUE_HANDLER,
+      (text) =>
+        replaceOnce(
+          text,
+          "  return UUID.test(principal.id)\n    ? { kind: 'staff', id: principal.id, label }\n    : { kind: 'staff', label }",
+          "  return { kind: 'staff', label }",
+        ),
+      () => runExpectingFailure('pnpm', queueIntegration(QUEUE_ITEST)),
+    ),
+    'ManualPostIsNotAttributed',
+  )
+
+  // 158k. The handler's own "already posted" pre-check removed, so the second claim reaches the UPDATE.
+  //       Migration 0128's trigger refuses it by name, which is the half that still holds when somebody
+  //       writes the statement by hand — and the pre-check is then shown to be a message rather than the
+  //       floor it reads as.
+  checkRejectedBy(
+    'reviews queue: a second posting claim is refused by the database, not by the pre-check',
+    withEditedFile(
+      QUEUE_DETAIL_HANDLER,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (review.postedManuallyAtIso !== null) return await refuse('already_posted')",
+          '  // pre-check removed by gate 158k',
+        ),
+      () => runExpectingFailure('pnpm', queueIntegration(QUEUE_ITEST)),
+    ),
+    'DeliveredReplyIsFrozen',
+  )
+
+  // 158l. The listing intersection removed, so a uuid in the address bar reaches any review in the table.
+  //       Two connections is the ordinary case (docs/10 §2) and a reply approved against another
+  //       connection's review is a reply posted as the wrong business.
+  checkRejectedBy(
+    'reviews queue: a review read outside the listings this system manages is caught by name',
+    withEditedFile(
+      QUEUE_DETAIL_HANDLER,
+      (text) => replaceOnce(text, '  return mine ? review : undefined', '  return review'),
+      () => runExpectingFailure('pnpm', queueIntegration(QUEUE_ITEST)),
+    ),
+    'a-review-belongs-to-one-listing',
+  )
+
+  // 158m. The permission folded back into the one the front desk holds. `review:record` is recording a
+  //       review somebody else published; this screen publishes the ANSWER to one, under the business's
+  //       name, at licensed health-adjacent premises. The catalogue has carried that sentence since
+  //       G-REV-02 and this is what makes it an assertion.
+  checkRejectedBy(
+    'reviews queue: an approval gated on the paste permission is caught by name',
+    withEditedFile(
+      QUEUE_HANDLER,
+      (text) =>
+        replaceOnce(
+          text,
+          "export const REVIEWS_QUEUE_PERMISSION: Permission = 'review:reply_approve'",
+          "export const REVIEWS_QUEUE_PERMISSION: Permission = 'review:record'",
+        ),
+      () => runExpectingFailure('pnpm', queueIntegration(QUEUE_ITEST)),
+    ),
+    'review:reply_approve',
+  )
+
+  // 158n. The authorisation refusal rendering the page it refuses. The paste form next door shipped this
+  //       defect first — its 401 document carried the forwarded review's full text, the connection id and
+  //       the Google account email — and this screen also carries the sentence a machine proposes to say
+  //       in public, so it is worse here.
+  checkRejectedBy(
+    'reviews queue: a refusal page that reveals the review is caught by name',
+    withEditedFile(
+      QUEUE_DETAIL_HANDLER,
+      (text) =>
+        replaceOnce(
+          text,
+          '      { refusal: refused, lintRules: [], reveal: false, ...NOTHING_TYPED },\n      REFUSAL_STATUS[refused],\n    )\n  }\n  const review = await reviewInScope(deps.sql, request.reviewId)',
+          '      { refusal: refused, lintRules: [], reveal: true, ...NOTHING_TYPED },\n      REFUSAL_STATUS[refused],\n    )\n  }\n  const review = await reviewInScope(deps.sql, request.reviewId)',
+        ),
+      () => runExpectingFailure('pnpm', queueIntegration(QUEUE_ITEST)),
+    ),
+    'refusal-reveals-nothing',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

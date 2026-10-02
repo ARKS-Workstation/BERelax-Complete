@@ -560,15 +560,26 @@ describe('acceptance — the approved reply records the lint version and the con
     const changed = await reproduceReplyLint(sql, id)
     expect(changed.kind).toBe('content_changed')
 
-    // A version this build has never had. The digest is repaired first, so the only thing wrong is the
-    // version — otherwise this case could pass for the reason above.
+    /*
+      A version this build has never had, on a row carrying a WHOLE stamp and no delivery timestamp — the
+      "approved, not yet posted" state G-REV-06's approval queue introduced, and the one `reproduceReplyLint`
+      reaches `unknown_lint_version` from. It used to be asserted by rewriting the version on the delivered
+      row above, and migration 0128's ZY342 now refuses that: the version is the record of WHICH rules
+      judged a published reply, so it is frozen once the reply is out, exactly as the digest is.
+
+      Nothing is lost, because the rewrite was never the subject. The real case is a row delivered by an
+      older build whose rule set this one no longer has, and the state that reproduces it is a complete
+      stamp naming a version `SEND_PATH_LINTERS` does not hold. The digest matches `CLEAN`, so the only
+      thing wrong is the version — otherwise this case could pass for the `content_changed` reason above.
+    */
     await sql`
       update google_reviews set reply_approved_text = ${CLEAN},
         reply_lint_content_sha256 = ${replyContentSha256(CLEAN)},
-        reply_lint_version = 'g-rev-05-send-path-0'
-      where id = ${id}
+        reply_lint_version = 'g-rev-05-send-path-0',
+        reply_lint_passed_at = now()
+      where id = ${undelivered}
     `
-    expect(await reproduceReplyLint(sql, id)).toEqual({
+    expect(await reproduceReplyLint(sql, undelivered)).toEqual({
       kind: 'unknown_lint_version',
       lintVersion: 'g-rev-05-send-path-0',
     })

@@ -231,6 +231,17 @@ export const TEST_PORT_BANDS = {
   // RESTRICTED_PORTS — the highest entry in that table below the ephemeral floor is 6697, and Chromium's
   // own list has nothing between 10080 and the floor — so `usableWidth` is the full 300.
   collector: { start: 18_200, width: 300 },
+  // G-REV-06's approval queue, which needs a real server and a real browser for four claims no pure render
+  // can make. Two are about a RESPONSE rather than a return value: the 403 a receptionist's POST gets and
+  // the 200 an owner's GET gets are status codes the F07 matrix produces through a session cookie, and
+  // there is no `?role=` to drive it with (`admin-guard.test.ts` refuses one across the whole of
+  // apps/web). The third is the CLIPBOARD: "Copy reply places the exact linted text on the clipboard
+  // byte-for-byte" is a claim about `navigator.clipboard` in a browser with a user gesture, and nothing
+  // short of one can make it. The fourth is axe plus the twelve-cell screenshot matrix, which need a
+  // rendered DOM.
+  // 18_800 is the band this unit was allocated. 17_000 through 18_700 are allocations held by units in
+  // `template-editor` and `book-flow` came to share one. [18_800, 19_100) contains none of
+  'reviews-queue': { start: 18_800, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

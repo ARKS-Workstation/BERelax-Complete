@@ -345,6 +345,113 @@ function assertLintStamp(stamp: ReplyLintStamp): void {
 }
 
 /**
+ * The SQLSTATEs `0128_reply_posting_claim.sql` raises (G-REV-06).
+ *
+ * Declared here because this module is the registry's named translator for both, and `pnpm sqlstate`
+ * checks that list in both directions — a second module carrying one of these literals fails the build
+ * until the registry names it too.
+ *
+ * The match is on the code alone. Matching on the message would make the translation depend on wording,
+ * and a reworded message would silently stop translating.
+ */
+export const REPLY_DELIVERY_SQLSTATE = {
+  /** `posted_manually_at` was set with no `audit_event` attributing the claim to a named staff actor. */
+  manualPostIsNotAttributed: 'ZY341',
+  /** The lint stamp or an already-set delivery instant was changed on a delivered row. */
+  deliveredReplyIsFrozen: 'ZY342',
+} as const
+
+const replySqlState = (err: unknown): string | undefined => {
+  const code = (err as { code?: unknown } | null)?.code
+  if (typeof code === 'string') return code
+  const carried = (err as { details?: { sqlState?: unknown } } | null)?.details?.sqlState
+  return typeof carried === 'string' ? carried : undefined
+}
+
+/**
+ * Translates a refusal from `0128_reply_posting_claim.sql` into an `AppError`, or `null` for anything else.
+ *
+ * The KINDS are chosen by what the caller has to go and do:
+ *
+ *   - `invariant_violated` for ZY341 — the person pressing *Marked as posted* did nothing wrong. THIS code
+ *     wrote a delivery timestamp without attributing the claim, which is a defect in the caller and not in
+ *     the data. A `validation` kind would put a message about the review in front of somebody whose review
+ *     is fine.
+ *   - `forbidden` for ZY342 — the statement will never be permitted, for any caller, with any data. A
+ *     published reply is corrected by posting a new one; the record of the old one is evidence.
+ */
+export function replyDeliveryRefusal(err: unknown): AppError | null {
+  const code = replySqlState(err)
+  const message = err instanceof Error ? err.message : String(err)
+  const details = { sqlState: code }
+  switch (code) {
+    case REPLY_DELIVERY_SQLSTATE.manualPostIsNotAttributed:
+      return new AppError('invariant_violated', message, { details })
+    case REPLY_DELIVERY_SQLSTATE.deliveredReplyIsFrozen:
+      return new AppError('forbidden', message, { details })
+    default:
+      return null
+  }
+}
+
+/** True for the refusal that says a delivered reply's record may not be edited. */
+export const isDeliveredReplyFrozenRefusal = (err: unknown): boolean =>
+  replySqlState(err) === REPLY_DELIVERY_SQLSTATE.deliveredReplyIsFrozen
+
+/**
+ * A human approved a reply, and nothing has been delivered yet (G-REV-06, docs/10 §6).
+ *
+ * The third stamp writer, and the only one that sets no delivery timestamp. It exists because the queue
+ * screen has two steps and docs/10 §6 names them separately — *mandatory human approval* → *owner sees the
+ * draft with Copy reply and a deep link* → *posts* → *clicks Marked as posted*. The bytes the owner copies
+ * have to be bytes that were linted, so the lint happens at approval; the delivery happens when a person
+ * says they have pasted it into Google, which may be minutes later and may never happen at all.
+ *
+ * It takes the same {@link ReplyLintStamp} as the two delivery writers, for 0113's reason restated: this
+ * package may not import `packages/core` (ADR 0001), so there is nothing here that could lint a reply —
+ * only record that a linter passed one. 0113's `google_reviews_delivery_needs_a_lint_pass` is written as
+ * *delivery implies a stamp* rather than as an equivalence, which is exactly what makes this state legal:
+ * a row may carry a whole stamp and no delivery timestamp, and that is what "approved, not yet posted"
+ * means.
+ *
+ * `delivery_mode` is deliberately NOT written. It is the intake path's answer (0020) and approving a reply
+ * does not change how the review arrived; writing it here would let an approval re-file a review as an API
+ * delivery. The timestamps are not written either, which is the whole point of the function.
+ *
+ * Re-approval overwrites the stamp on purpose, and 0128's ZY342 is what stops it once the reply has been
+ * delivered. Before that an owner may read their own approved text again and change their mind; the audit
+ * trail is append-only (ADR 0008), so every hash they approved stays recoverable even though the column
+ * holds only the last.
+ */
+export async function recordReplyApproved(
+  uow: UnitOfWork,
+  reviewId: string,
+  stamp: ReplyLintStamp,
+): Promise<void> {
+  assertLintStamp(stamp)
+  const rows = await uow.sql<{ id: string }[]>`
+    update google_reviews set
+      reply_approved_text       = ${stamp.approvedText},
+      reply_lint_version        = ${stamp.lintVersion},
+      reply_lint_content_sha256 = ${stamp.contentSha256},
+      reply_lint_passed_at      = now()
+    where id = ${reviewId} returning id
+  `
+  if (rows[0] === undefined) throw notFound(reviewId)
+  await uow.audit.record({
+    action: 'google_review.reply_approved',
+    entityType: 'google_review',
+    entityId: reviewId,
+    operation: 'update',
+    after: {
+      approved: true,
+      lintVersion: stamp.lintVersion,
+      contentSha256: stamp.contentSha256,
+    },
+  })
+}
+
+/**
  * The reply went out through the API, and the two-step acknowledgement that mode allows.
  *
  * Both writes set `delivery_mode` as well as the timestamp, because a review ingested in API mode can

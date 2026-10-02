@@ -19708,21 +19708,32 @@ units:
       the same bytes it lints against rather than a second spelling of them. Several fixtures quote a term the
       reply must not contain (cupping, full service, nurse); each is a term of a shipped lexicon, quoted from
       it, and none is a claim about this business'
-    - 'NOTE deferred to G-REV-06: the SOURCE of the auto-appended signature. The cap criterion needs the
+    - 'NOTE deferred to G-REV-07 (RE-POINTED from G-REV-06 by G-REV-06, which did NOT build it): the SOURCE
+      of the auto-appended signature. The cap criterion needs the
       mechanism, so renderFinalReply is the one implementation both linters measure and deliverApprovedReply
       takes signature: string | null -- 1,200 passes and 1,201 is refused with the signature counted, and the
       control is that the DRAFT alone is inside the cap in the refused case. What the business signs replies
       with is OPEN-QUESTIONS Y9-reply-signature, added by this unit: a plausible sign-off would be
       indistinguishable from a configured one and would publish under the owners name (brief rule 15). ADR 0063
       records the consequence the settings card will meet -- a signature is linted like the rest of the reply,
-      so one naming a person cannot be configured into a reply'
-    - 'NOTE deferred to G-REV-06: mandatory human approval itself, the Copy reply control, the deep link and
-      the Marked as posted action. This unit ships the function that screen calls, and it takes the approved
+      so one naming a person cannot be configured into a reply. G-REV-06 shipped the approval queue and
+      passes signature: null from it, with the reason in the handler: a plausible sign-off invented on that
+      screen would publish under the owner''s name. Y9-reply-signature is still open, so the remaining work
+      is the SETTING and not the mechanism, and it is handed to G-REV-07 as the only unit left on the reply
+      path -- a signature has to exist for both delivery modes, and that unit is the one that adds the
+      second'
+    - 'NOTE deferred to G-REV-06 (DEFERRAL SATISFIED): mandatory human approval itself, the Copy reply
+      control, the deep link and the Marked as posted action. This unit ships the function that screen calls, and it takes the approved
       text as an ARGUMENT rather than reading reply_draft, precisely so that the bytes an owner edited are the
       bytes that are judged. G-REV-06s ''editing re-lints'' criterion is satisfied by calling this function,
       and its ''the approved text hash is immutable afterwards, proven by a rejected UPDATE'' is NOT built
       here: 0113 makes the stamp whole-or-nothing and within the cap, and immutability after delivery is a
-      trigger that unit should add'
+      trigger that unit should add. G-REV-06 built all four: the approval is a server-side write that lints
+      the posted bytes through this unit''s own expression (extracted as lintOrRefuse so there is still one
+      lint call on the send path), Copy reply copies reply_approved_text rather than the textarea, the deep
+      link is placeReviewsDeepLink over the stored placeId, and migration 0128''s ZY342 is the trigger --
+      which freezes the lint VERSION and the DIGEST and deliberately NOT reply_approved_text, because this
+      unit''s own content_changed detector is reachable only while the digest cannot move'
     - 'NOTE deferred to G-REV-07: the API-mode submitter is an injected port (ReplySubmitter) and not a
       Business Profile client. That units dependency rule forbids the v4 host string from living anywhere but
       its own adapter, so building half of one here would create the second place it lives. What this unit owns
@@ -19794,7 +19805,7 @@ units:
       a deep link built from the stored placeId, a visible escalation reason in plain English, mandatory
       approval, and a Marked as posted action that writes delivery_mode='manual' and posted_manually_at.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - G-REV-05
@@ -19823,11 +19834,140 @@ units:
       afterwards, proven by a rejected UPDATE
     - Playwright captures the queue and the detail view at 3 viewports x 2 themes x 2 directions with zero
       pixel diff on an unchanged rerun; axe reports zero violations on both
+    - 'NOTE: the two screens are `route.ts` + `handler.ts` + `render.ts` + `view.ts` under
+      apps/web/app/(admin)/reviews/, not the `page.tsx` files this entry names, and the e2e is
+      apps/web/src/reviews-queue.itest.ts rather than apps/web/e2e/ (no such directory exists in this
+      build; every browser suite is a `.itest.ts` beside the application). Every admin surface here has
+      made the same `route.ts` choice and records the same reason: apps/web/src/routes/registry.ts
+      requires every registry DOCUMENT to be served in BOTH locales, so a page.tsx would need an Arabic
+      admin document W-SYS-01 has not built and would join a screenshot matrix whose RTL half must be a
+      real Arabic route. The three HR screens, the two settings screens, the diary, the pipeline board,
+      the Messages inbox, the template editor, the duplicate queue, the quick-book screen and G-REV-02''s
+      paste form one directory along all give it. The direction half of the twelve-cell matrix is
+      `?dir=rtl`, which re-renders the same English document mirrored - the device the duplicate queue and
+      the leave screen use, and a LAYOUT axis rather than a locale.'
+    - 'NOTE: the browser suite is SPLIT in two, and the split is the reason G-REV-02 gives for its own.
+      apps/web/src/reviews-queue.itest.ts holds the four claims that need a browser - the clipboard, the
+      full fallback walk, axe in twelve cells and a byte-identical repeat capture - and
+      apps/web/src/reviews-queue-handler.itest.ts holds the statuses, the refusals by name, the audit
+      actors and the two database floors, driven against the handlers directly with an injected clock.
+      `next start` serves whatever `.next` was last built, so a gate case that mutates a handler and runs
+      the browser suite proves nothing: four cases in G-REV-02''s first gate block did exactly that and
+      all four reported "exited zero; nothing was rejected". Eleven of this unit''s fourteen gate cases
+      therefore run a suite that needs no server at all. The handler suite needs no port band either,
+      which is why ONE band covers two suites.'
+    - 'NOTE: "Copy reply places the exact linted text on the clipboard" is implemented as a SEND path and
+      locked as ADR 0080. Approval is a WRITE: `approveReply` (added to G-REV-05''s deliver.ts) lints the
+      POSTED bytes through the one `lint(` expression `deliverApprovedReply` runs - extracted into
+      `lintOrRefuse` rather than duplicated, so there is still exactly one lint call on the send path - and
+      `recordReplyApproved` stores them as reply_approved_text with the version and digest that cleared
+      them. There is NO copy control before that, and the inline script reads the readonly textarea the
+      server filled rather than the editable one. Letting the button copy the textarea and linting at
+      *Marked as posted* reads as equivalent and defeats ADR 0063 entirely: the reply is already on a
+      public page by the time the refusal arrives, and every assertion about `deliverApprovedReply` still
+      passes. 0113''s delivery-implies-a-stamp CHECK is written as an implication rather than an
+      equivalence, which is what makes "approved, not yet posted" a legal row and needed no migration.'
+    - 'NOTE: *Marked as posted* records a CLAIM. There is no Business Profile API access (docs/10 §4,
+      OPEN-QUESTIONS Y3-gbp-api), so nothing in this build has ever seen a reply on the listing. The
+      claimant is deliberately NOT a second column - audit_event already carries actor_kind, actor_id and
+      occurred_at, and a copy on google_reviews is the brief''s drifting second statement with the drifting
+      copy on the row an auditor reads - so migration 0128''s ZY341 is a deferrable constraint trigger
+      refusing the write at COMMIT unless an audit_event in the same transaction attributes it to a staff
+      actor with a non-null actor_id (ZZ004''s shape, for ZZ004''s reason). The stage is
+      `claimed_as_posted` and reads "a named person says they posted it"; there is no `posted`, `published`
+      or `live` stage for it to be worded as, and gate 158f rewords it and a named test fails. The rule is
+      scoped to the UPDATE and the hole is stated rather than hidden: an INSERT arriving with the timestamp
+      already set slips past, because packages/db/src/schema/reviews.itest.ts inserts exactly such a row to
+      prove 0020''s two-mode decision and demanding an audit row from it would make this migration refuse a
+      correct test of a different rule.'
+    - 'NOTE on a decision reversed by measurement, and the reason it is in ADR 0080 rather than a comment.
+      ZY342 froze all four stamp columns first. Running G-REV-05''s own reply-delivery.itest.ts refused it:
+      that suite constructs a row whose stored text no longer hashes to its digest, which is exactly what
+      `reproduceReplyLint` reports as `content_changed` - and that outcome is reachable ONLY because the
+      digest cannot move. Freeze both and an edited row is indistinguishable from an untouched one; freeze
+      neither and whoever edits the text recomputes the hash and nothing notices. So ZY342 freezes the lint
+      VERSION, the DIGEST and an already-set delivery instant, and leaves reply_approved_text writable -
+      which makes an edit DETECTABLE rather than impossible, the honest limit ADR 0063 already states.
+      `reply_lint_passed_at` is outside it for a plainer reason: nothing compares it, and
+      recordReplyPostedManually on an API-answered review sets it to now() in the same statement, so a
+      trigger raising there would answer review-queue.itest.ts''s assertion about
+      google_reviews_delivery_fields_match_mode with this code''s name instead.'
+    - 'NOTE: `review:reply_approve` was added to the F07 catalogue by this unit and granted to the OWNER
+      alone, like content:publish. The catalogue entry for `review:record` has carried the argument since
+      G-REV-02 - "folding the two together would mean the role that types in a one-star review could also
+      publish the answer to it" - and permissions.test.ts now asserts it, including that the `system` role
+      is refused, because an agent approving its own draft is the mandatory-approval requirement deleted.
+      ONE permission and not two: splitting approval from the claim would create a role that may assert a
+      reply is public without being allowed to read the reply. It gates the GET as well as both writes,
+      because the queue carries a reviewer''s words about this business and the sentence a machine proposes
+      to answer them with.'
+    - 'NOTE: "removes the item from the queue" is implemented as a WORKLIST. /reviews lists the reviews
+      that still need somebody and `?show=all` is a link on the page saying what is hidden, because a queue
+      that keeps every review it has ever seen is one nobody reaches the bottom of - on a listing with a
+      hundred reviews the five needing a reply would be invisible - and because the thing that makes
+      *Marked as posted* worth clicking is that the item then leaves the list. The filter is applied over
+      `stageOf`''s answer in TypeScript rather than as a `where` clause: the stage is derived from the row
+      in exactly one place, and SQL cannot call that function.'
+    - 'NOTE: the deep-link scan is apps/web/src/reviews-deep-link.test.ts - a unit test rather than a
+      scripts/ gate, so it needs no new `pnpm verify` step and no entry in gate case 29''s array, and it
+      runs in the suite verify already runs. Three rules, each with a known-bad fixture in gate cases
+      158a-158c that writes the bad pattern into real source: deep-link-literal-place-id,
+      deep-link-identifier-in-a-url and deep-link-second-template. Test files, named fakes and fixture
+      corpora are exempt by file SHAPE rather than by a path allowlist, because an allowlist is a list
+      somebody adds a line to. The scan names TWO permitted builders and reports that as a finding rather
+      than permitting it quietly: `placeReviewsDeepLink` (G-REV-02, the reviews link docs/10 SS6 names, and
+      the one these screens render) and `mapsLinkFor` (G-CONN-07''s listing picker, a different URL form).
+      That is a pre-existing second statement of how to reach a listing; this unit reports it and does not
+      repair it, and what the scan makes impossible is a third.'
+    - 'NOTE on the dispatch''s own citation, corrected rather than copied: the absence of Business Profile
+      API access is docs/10 SS4 and OPEN-QUESTIONS Y3-gbp-api, NOT "ADR 0005", which is *non-production
+      cannot use a real provider*. It is an application nobody has answered rather than a decision anybody
+      took, which is why it is an open question and not a record. Three pre-existing ADR 0005 references in
+      scripts/test-gates.mjs (cases 96e, 133u) are correct and untouched.'
+    - 'NOTE: nothing SCHEDULES the router or the generator, which G-REV-03 and G-REV-04 each deferred by
+      name and no unit yet owns. The browser suite therefore pastes a review through the real form, routes
+      it with the REAL `routeReview` against the REAL lexicon (so the verdict and rule id the screen
+      explains are computed rather than chosen, and the suite asserts the launch mode returns `escalate`),
+      and records a real house rendering from `renderReplySkeleton` as the draft. What is simulated is the
+      cron and nothing else.'
+    - 'NOTE: allocations. USED - migration 0128, SQLSTATEs ZY341 and ZY342, gate block 158a-158z, ADR 0080,
+      test port band { start: 18_800, width: 300 } (declared as `reviews-queue`, claimed by
+      startWebServer). RELEASED UNUSED and deliberately left UNREGISTERED, because `pnpm sqlstate` refuses
+      an entry for a code no migration raises: ZY343 through ZY350. SCHEMA_VERSION is 128, the highest
+      migration on disk in this tree (0122 was the previous highest; 0123-0127 are held by units in flight
+      elsewhere and the ledger''s next-free sentence was not edited).'
     files:
-    - apps/web/app/(admin)/reviews/page.tsx
-    - apps/web/app/(admin)/reviews/[id]/page.tsx
+    - packages/db/migrations/0128_reply_posting_claim.sql
+    - packages/db/src/repositories/reviews.ts
+    - packages/db/src/sqlstate-registry.ts
+    - packages/db/src/index.ts
+    - packages/core/src/reviews/escalation-reason.ts
+    - packages/core/src/reviews/escalation-reason.test.ts
+    - packages/core/src/reviews/index.ts
+    - packages/core/src/access/permissions.ts
+    - packages/core/src/access/permissions.test.ts
+    - packages/google/src/reviews/deliver.ts
+    - packages/google/src/index.ts
+    - packages/harness/src/ports.ts
+    - apps/web/app/(admin)/reviews/route.ts
+    - apps/web/app/(admin)/reviews/handler.ts
+    - apps/web/app/(admin)/reviews/render.ts
+    - apps/web/app/(admin)/reviews/view.ts
+    - apps/web/app/(admin)/reviews/document.ts
+    - apps/web/app/(admin)/reviews/listings.ts
+    - apps/web/app/(admin)/reviews/queue-row.ts
+    - apps/web/app/(admin)/reviews/[id]/route.ts
+    - apps/web/app/(admin)/reviews/[id]/handler.ts
+    - apps/web/app/(admin)/reviews/[id]/render.ts
     - apps/web/app/(admin)/reviews/[id]/mark-posted/route.ts
-    - apps/web/e2e/review-fallback.spec.ts
+    - apps/web/src/reviews-queue.itest.ts
+    - apps/web/src/reviews-queue-handler.itest.ts
+    - apps/web/src/reviews-queue-render.test.ts
+    - apps/web/src/reviews-deep-link.test.ts
+    - apps/web/src/routes/registry.ts
+    - scripts/test-gates.mjs
+    - docs/adr/0080-copy-reply-is-a-send-path-and-marked-as-posted-is-a-named-persons-claim.md
+    - docs/adr/README.md
   - id: G-REV-07
     order: 167
     title: 'API delivery mode: the legacy v4 reviews adapter, isolated, flipped by a row'
@@ -19881,6 +20021,15 @@ units:
     - docs/adr/0009 records the isolation decision, and a quarterly 'read the Business Profile API changelog
       and deprecation pages' obligation is registered in the compliance calendar, asserted by querying obligation
       for the recurrence
+    - 'NOTE handed to this unit by G-REV-06: the SOURCE of the auto-appended reply signature, re-pointed
+      from G-REV-06 which shipped the approval queue and passes signature: null from it. The MECHANISM is
+      G-REV-05''s renderFinalReply and the 1,200-character cap is measured over it either way; what is
+      missing is the setting, and it is blocked on OPEN-QUESTIONS Y9-reply-signature because a plausible
+      sign-off invented in code would be indistinguishable from a configured one and would publish under
+      the owner''s name (brief rule 15). It is this unit''s because a signature has to exist for BOTH
+      delivery modes and this is the unit that adds the second. ADR 0063 records the consequence the
+      settings card meets: a signature is linted like the rest of the reply, so one naming a person cannot
+      be configured into one.'
     files:
     - packages/google/src/adapters/reviews-v4.ts
     - packages/google/src/reviews/reconcile.ts
