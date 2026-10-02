@@ -1889,13 +1889,6 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['import_staging.unprovenanced_row_ids'],
     translators: ['packages/migration/src/refusals.ts'],
   },
-  {
-    code: 'ZY231',
-    rule: 'A payments column may not hold text shaped like a card number.',
-    migration: '0117',
-    raisedBy: ['refuse_card_shaped_payment_text'],
-    translators: ['packages/db/src/repositories/payment-intent.ts'],
-  },
   // ZY221 and ZY222 are A-FIRST-05's, of the band ZY221-ZY230; the other eight are left free and
   // deliberately absent, because an entry for a code no migration raises is direction 3. Two and not one
   // because each names a different thing to go and do: the first is "that count is the only evidence a
@@ -1916,6 +1909,13 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     migration: '0116',
     raisedBy: ['analytics.assert_session_trading_basis'],
     translators: ['packages/db/src/repositories/analytics.ts'],
+  },
+  {
+    code: 'ZY231',
+    rule: 'A payments column may not hold text shaped like a card number.',
+    migration: '0117',
+    raisedBy: ['refuse_card_shaped_payment_text'],
+    translators: ['packages/db/src/repositories/payment-intent.ts'],
   },
   {
     code: 'ZZ001',
