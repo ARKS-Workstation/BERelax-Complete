@@ -335,6 +335,23 @@ export {
   withAgentRun,
 } from './repositories/agents.ts'
 export {
+  ANALYTICS_INGEST_REFUSALS,
+  ANALYTICS_SQLSTATE,
+  type AnalyticsIngestRefusal,
+  analyticsIngestRefusal,
+  type CollectIngestInput,
+  type CollectIngestResult,
+  countPreConsentLanding,
+  fileUnderTradingDate,
+  ingestCollectBatch,
+  type NewestSession,
+  newestSessionForUpdate,
+  readPreConsentLandings,
+  type SessionOrigination,
+  type SessionStitchDecision,
+  type TradingDateFiling,
+} from './repositories/analytics.ts'
+export {
   type DecidedTransition,
   TRANSITION_REFUSALS,
   type TransitionActor,
@@ -3805,6 +3822,53 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // answer (ADR 0043, 0061): the answer to all four of these is the same sentence — lint the reply and
 // deliver it through the send path.
 //
+// 116 is 0116_collect_ingest.sql — pre-consent staging, and the reason a session's trading date is the
+// date it says (A-FIRST-05, ADR 0066).
+//
+// One table and one column, and each answers a question the ingest route could not avoid.
+//
+// `analytics.pre_consent_landing` is the identifier-free half. The internal store is treated as
+// consent-gated while `Y5-analytics-basis` is open, so `analytics.visitor` and `analytics.session` are
+// created AT consent and never before it — which leaves the funnel's first stage, `landing`, with no way to
+// count a visitor who arrived, read, and left without answering a banner. Dropping the event loses the
+// denominator every conversion rate divides by; keeping it loses the position. The obvious third answer is
+// to STAGE the event until a decision arrives, and that answer is not available: a holding pen needs a key
+// to promote a row by, and a key before consent is the identifier the position withholds. So the
+// pre-consent path is an irreversible PROJECTION — one `+1` against a bucket of (business day, gap basis,
+// route) and nothing else — which is what makes two claims properties of the table rather than promises
+// about code. Consent never arriving needs no purge, because nothing identifying was written; and a subject
+// access request finds nothing because the row holds no column any of C-CRM-10's five erasure probes can
+// reach and no instant finer than a date. That last absence is deliberate: there is no `created_at` and no
+// `computed_at`, because a timestamp on a row whose count is 1 is a timestamp of one person's visit.
+// Retention keeps it indefinitely, beside the three rollups; ZY221 refuses a DELETE, a lowered count and a
+// count moved onto another key, because it is the only surviving record that the visit happened.
+//
+// `analytics.session.trading_date_basis` is the other half, and it exists because 0096 made
+// `trading_date` NOT NULL with a real key to `public.business_day`. Trading runs 11:00-02:00, so between
+// 02:00 and 11:00 an instant belongs to NO trading date while web traffic carries on — A-FIRST-02 refused
+// to invent an answer and recorded `Y5-funnel-gap-bucket`, but a row still has to name a date. It names the
+// next date the calendar opens and says WHY, which is 0096's own argument for `attribution.basis` one table
+// over. ZY222 is what makes that structural: `analytics.assert_session_trading_basis` compares `started_at`
+// against that business day's OWN `opens_at` and `closes_at` — not against a re-derived 11:00-02:00, which
+// would disagree with the calendar on exactly the dates somebody overrode the hours for — and refuses the
+// disagreement in BOTH directions, because a writer stamping every row with a gap reason loses the same
+// information as one stamping every row `trading`. The column has NO default, deliberately: `trading` is
+// exactly the value a caller who has not thought about the gap would get, and it would be wrong nine hours
+// out of every twenty-four.
+//
+// Two figures are second statements and each arrives with the check that holds it equal to the first. The
+// visitor cookie's `Max-Age` is `analytics.raw_retention_days()` in seconds, asserted against the function
+// itself by `apps/web/app/api/collect/collect.itest.ts` — a cookie outliving its own row would present an
+// id naming nothing. And the four words of `trading_date_basis` are also `TRADING_DATE_BASES` in
+// `@berelax/shared`, which `packages/core/src/analytics/ingest.ts` holds equal to `OutsideTradingReason` by
+// a two-way TYPE assertion, so a reason added to the resolver and not to the tuple fails `pnpm typecheck`.
+//
+// No CHECK on `event_name` and none on `bot_kind`: 0096 and A-FIRST-04 each recorded why a list in SQL
+// beside a union in TypeScript is two lists. No customer or booking reference, which is A-FIRST-08's to add
+// with its erasure classification on the same commit. And no `fbp`/`fbc` columns — those cookies exist only
+// once a Meta pixel has run, and the pixel cannot run before consent (A-MEAS-02), so the unit that makes
+// them reachable is the unit that owns them.
+//
 // Every number allocated through 99 has now landed: the run on disk is 1..99 less the permanent gaps above,
 // less 88, which M-TILL-13 released as a permanent gap because every table its screens touch already
 // existed. 85 and 89 through 99 arrived out of order, each with the unit that held it, 94 (G-REV-02) last of
@@ -3840,4 +3904,4 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // the last thing before SCHEMA_VERSION, and a merge that wants to add another edits this one instead:
 // `allocation-note.test.ts` is what refuses a second copy, and a second next-free claim in any wording, now
 // that saying so here has failed five times.
-export const SCHEMA_VERSION = 113 as const
+export const SCHEMA_VERSION = 116 as const

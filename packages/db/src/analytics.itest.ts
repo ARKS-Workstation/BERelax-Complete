@@ -143,6 +143,39 @@ async function seededTradingDate(tx: Sql): Promise<string> {
   return date
 }
 
+/**
+ * A seeded trading day WITH its opening instant, nearest to `wantedIso`.
+ *
+ * Added by A-FIRST-05, which made `analytics.session.trading_date_basis` NOT NULL and enforced it against
+ * `public.business_day`'s own instants (ZY222): `started_at` is inside the named day's `[opens_at,
+ * closes_at)` window exactly when the basis is `trading`. A fixture session therefore has to pick an instant
+ * and a trading date that agree, and the simplest instant that always does is the day's own opening.
+ *
+ * `order by abs(opens_at - wanted)` rather than the day CONTAINING `wanted`, because a fixture asking for
+ * "120 days ago" at whatever time of day the suite happens to run would frequently land in the 02:00-11:00
+ * gap, where no day contains it at all — and a helper that threw for that reason would make this file fail
+ * depending on the hour. The nearest day's opening is within a day of the age asked for, which is all any
+ * caller here needs: the retention window is 90 days.
+ */
+async function seededTradingDayNear(
+  tx: Sql,
+  wantedIso: string,
+): Promise<{ tradingDate: string; opensAtIso: string }> {
+  const [row] = await tx<{ trading_date: string; opens_at: string }[]>`
+    select to_char(trading_date, 'YYYY-MM-DD') as trading_date, opens_at::text as opens_at
+      from business_day
+     order by abs(extract(epoch from (opens_at - ${wantedIso}::timestamptz)))
+     limit 1
+  `
+  if (row === undefined) {
+    throw new Error(
+      'business_day is empty, so nothing in this file that writes a session could be about the ' +
+        'trading-date key. Run `pnpm seed` — the seeder writes 149 trading days.',
+    )
+  }
+  return { tradingDate: row.trading_date, opensAtIso: row.opens_at }
+}
+
 // ------------------------------------------------------------------------------------------------
 // Acceptance 1: the schema exists, and its column types are what money and time require
 // ------------------------------------------------------------------------------------------------
@@ -364,25 +397,36 @@ describe('the analytics schema', () => {
       `
       return await stateOf(tx`
         insert into analytics.session
-          (visitor_id, started_at, last_event_at, trading_date, landing_path, device_kind, breakpoint, bot)
-        values (${visitor?.visitor_id as string}, now(), now(), '1999-01-01', '/', 'mobile', 'sm', false)
+          (visitor_id, started_at, last_event_at, trading_date, trading_date_basis, landing_path,
+           device_kind, breakpoint, bot)
+        values (${visitor?.visitor_id as string}, now(), now(), '1999-01-01', 'trading', '/', 'mobile',
+                'sm', false)
       `)
     })
+    // The FOREIGN KEY is what answers, not A-FIRST-05's ZY222 trigger, and that ordering is the right one:
+    // PostgreSQL's referential-integrity triggers run before a user AFTER trigger, so a date the calendar
+    // does not hold is refused by the key that says so rather than by a basis check that cannot find a row
+    // to compare against.
     expect(refused.code).toBe('23503')
     expect(refused.message).toContain('session_trading_date_fk')
 
     // The control: the same insert on a date the seed DOES hold succeeds, so the refusal above is about
     // the date and not about the statement being wrong in some other way.
     const accepted = await rolledBack(async (tx) => {
-      const date = await seededTradingDate(tx)
+      // The day's own opening instant, so `trading_date_basis = 'trading'` is true by construction and
+      // ZY222 has nothing to object to — the control is about the FK, and a row refused for a second
+      // reason would prove nothing about the first.
+      const day = await seededTradingDayNear(tx, new Date().toISOString())
       const [visitor] = await tx<{ visitor_id: string }[]>`
         insert into analytics.visitor (first_seen_at, last_seen_at)
         values (now(), now()) returning visitor_id
       `
       return await stateOf(tx`
         insert into analytics.session
-          (visitor_id, started_at, last_event_at, trading_date, landing_path, device_kind, breakpoint, bot)
-        values (${visitor?.visitor_id as string}, now(), now(), ${date}, '/', 'mobile', 'sm', false)
+          (visitor_id, started_at, last_event_at, trading_date, trading_date_basis, landing_path,
+           device_kind, breakpoint, bot)
+        values (${visitor?.visitor_id as string}, ${day.opensAtIso}::timestamptz,
+                ${day.opensAtIso}::timestamptz, ${day.tradingDate}, 'trading', '/', 'mobile', 'sm', false)
       `)
     })
     expect(accepted.code).toBeUndefined()
@@ -727,18 +771,24 @@ describe('the 90-day raw retention', () => {
     const asOfMs = Date.now()
     const at = (daysAgo: number) => new Date(asOfMs - daysAgo * 86_400_000).toISOString()
     const outcome = await rolledBack(async (tx) => {
-      const date = await seededTradingDate(tx)
       const newSession = async (daysAgo: number): Promise<{ visitor: string; session: string }> => {
+        // The trading day NEAREST the age wanted, and its own opening as the session's instants: A-FIRST-05
+        // made `trading_date_basis` NOT NULL and holds it against `business_day`'s instants (ZY222), so a
+        // session's date and its `started_at` have to agree. The age is what this case is about and the
+        // nearest day's opening is within 24 hours of the age asked for — 120 days is still past the 90-day
+        // window and 1 day is still inside it, which is the whole claim.
+        const day = await seededTradingDayNear(tx, at(daysAgo))
         const [visitor] = await tx<{ visitor_id: string }[]>`
           insert into analytics.visitor (first_seen_at, last_seen_at)
           values (${at(daysAgo)}::timestamptz, ${at(daysAgo)}::timestamptz) returning visitor_id
         `
         const [session] = await tx<{ session_id: string }[]>`
           insert into analytics.session
-            (visitor_id, started_at, last_event_at, trading_date, landing_path, device_kind, breakpoint,
-             bot)
-          values (${visitor?.visitor_id as string}, ${at(daysAgo)}::timestamptz,
-                  ${at(daysAgo)}::timestamptz, ${date}, '/', 'mobile', 'sm', false)
+            (visitor_id, started_at, last_event_at, trading_date, trading_date_basis, landing_path,
+             device_kind, breakpoint, bot)
+          values (${visitor?.visitor_id as string}, ${day.opensAtIso}::timestamptz,
+                  ${day.opensAtIso}::timestamptz, ${day.tradingDate}, 'trading', '/', 'mobile', 'sm',
+                  false)
           returning session_id
         `
         return { visitor: visitor?.visitor_id as string, session: session?.session_id as string }
@@ -874,10 +924,16 @@ describe('the rollups, kept indefinitely', () => {
       select relation_name, policy, reason from analytics.retention_policy order by relation_name
     `
     const exempt = rows.filter((r) => r.policy === 'keep_indefinitely').map((r) => r.relation_name)
+    // `pre_consent_landing` joined the list with A-FIRST-05 (migration 0116, ADR 0066), and it belongs on
+    // it for a different reason from the three rollups: it holds no identifier at all — a business day, a
+    // route and a count, with no instant finer than the date — so there is nothing for retention to protect
+    // anybody from, and it is the only surviving record that a pre-consent visit happened, because the event
+    // itself was never stored. A 90-day window would silently delete the funnel's own denominator.
     expect(exempt).toEqual([
       'daily_funnel',
       'daily_source_revenue',
       'daily_traffic',
+      'pre_consent_landing',
       'retention_policy',
     ])
     // Every row says WHY, which is what makes the list readable rather than a set of table names. The
@@ -940,9 +996,10 @@ describe('the rollups, kept indefinitely', () => {
 
     expect(outcome.after).toBe(outcome.before)
     expect(outcome.mutated).not.toBe(outcome.before)
-    // The pass ran 400 times and reported the four exempt relations on every one of them. Without this the
-    // equality above is satisfied by 400 runs that all refused, or by a loop that never ran.
-    expect(outcome.exemptions).toBe(400 * 4)
+    // The pass ran 400 times and reported every exempt relation on every one of them. Without this the
+    // equality above is satisfied by 400 runs that all refused, or by a loop that never ran. FIVE since
+    // A-FIRST-05, not four: `pre_consent_landing` is on the exemption list too.
+    expect(outcome.exemptions).toBe(400 * 5)
     // And it was really doing work: advancing the clock 400 days past today drops every raw partition on
     // disk. The rollups survived a pass that was demonstrably removing things.
     expect(outcome.dropped).toBeGreaterThan(0)

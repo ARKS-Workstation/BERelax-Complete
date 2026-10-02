@@ -44673,6 +44673,505 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 144a-144z. (A-FIRST-05) `/api/collect`: the consent gate shown to be able to open by accident, the
+//            identifier shown to be able to arrive before consent, and the gap session shown to be able to
+//            read as daytime trade.
+//
+//            Every case breaks one thing and requires the named check to fire. The cases worth reading are
+//            144a to 144f, because each one is a ONE-LINE edit whose effect is invisible downstream: a
+//            consent gate opened by a substring, an absent cookie defaulted to granted, a pre-consent
+//            branch that falls through into the identified write, a cookie issued on it, a `Domain=` on
+//            that cookie, and the bot verdict used as a gate. Every one of them leaves a store full of rows
+//            that look exactly like consented rows, with every figure internally consistent — which is why
+//            the checks they fire are structural rather than behavioural, and why they are here rather than
+//            left to the integration suite's green tick.
+//
+//            None of these cases starts a server. The claims that need one — the rendered HTML a grep test
+//            reads for third-party analytics origins, and one POST through `route.ts`'s own wiring — are
+//            `apps/web/app/api/collect/collect.itest.ts`'s, and it is what `pnpm verify` runs after
+//            building the application. The claims here are about what the files SAY, which is what a
+//            deleted trigger and a removed return statement both are.
+{
+  const COLLECT_WIRE = 'packages/shared/src/analytics/collect.ts'
+  const CONSENT_SIGNAL = 'packages/shared/src/analytics/consent-signal.ts'
+  const CORE_INGEST = 'packages/core/src/analytics/ingest.ts'
+  const ROUTE_INGEST = 'apps/web/app/api/collect/ingest.ts'
+  const MIGRATION_0116 = 'packages/db/migrations/0116_collect_ingest.sql'
+  const ANALYTICS_MIRROR = 'packages/db/src/schema/analytics.ts'
+  const PORTS = 'packages/harness/src/ports.ts'
+
+  const WIRE_SUITE = 'packages/shared/src/analytics/collect.test.ts'
+  const CONSENT_SUITE = 'packages/shared/src/analytics/consent-signal.test.ts'
+  const CORE_SUITE = 'packages/core/src/analytics/ingest.test.ts'
+  const ROUTE_SUITE = 'apps/web/app/api/collect/ingest.test.ts'
+  const SQL_SUITE = 'packages/db/src/collect-ingest.test.ts'
+  const BREAKPOINT_SUITE = 'apps/web/src/breakpoint-capture.test.ts'
+  const PORT_SUITE = 'apps/web/src/test-ports.test.ts'
+
+  // Named for this block: `unit`, `tsc` and `mutate` are declared in several others, and the slicer
+  // concatenates whichever blocks it was asked for into ONE file, so two blocks sharing a helper name is a
+  // `SyntaxError` in any run that names both — and the failure points at neither of them.
+  const af5Args = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const af5Fail = (file) => runExpectingFailure('pnpm', af5Args(file))
+  const af5Pass = (file) => run('pnpm', af5Args(file))
+
+  /** Break one file one way and run one suite against the result. */
+  const af5Mutate = (path, find, into, suite) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, find, into),
+      () => af5Fail(suite),
+    )
+
+  // --- the consent gate ---------------------------------------------------------------------------
+  //
+  // 144a. Membership by SUBSTRING. A collector posting `analytics_storage_denied` would then be read as
+  //       granting `analytics_storage` — a consent gate opened by a string that says the opposite, and the
+  //       only visible consequence is more rows.
+  checkRejectedBy(
+    'collect gate: a consent signal matched as a substring is caught',
+    af5Mutate(
+      CONSENT_SIGNAL,
+      '    if (isConsentModeSignal(name)) granted.add(name)',
+      '    for (const known of CONSENT_MODE_SIGNALS) if (name.includes(known)) granted.add(known)',
+      CONSENT_SUITE,
+    ),
+    'denies a value that merely CONTAINS the signal name',
+  )
+
+  // 144b. An absent cookie defaulted to GRANTED. Every first request becomes an identified one, which is
+  //       the whole of the stricter reading of Y5-analytics-basis reversed by one line.
+  checkRejectedBy(
+    'collect gate: an absent consent cookie read as a grant is caught',
+    af5Mutate(
+      CONSENT_SIGNAL,
+      '  if (raw === null) return new Set()',
+      '  if (raw === null) return new Set(CONSENT_MODE_SIGNALS)',
+      CONSENT_SUITE,
+    ),
+    'denies when there is no cookie, no header, or an empty value',
+  )
+
+  // 144c. The cookie read by PREFIX, so `berelax_consent_version` decides whether an identifier is created.
+  checkRejectedBy(
+    'collect gate: a consent cookie read by prefix is caught',
+    af5Mutate(
+      CONSENT_SIGNAL,
+      '    if (pair.slice(0, index).trim() !== name) continue',
+      '    if (!pair.slice(0, index).trim().startsWith(name)) continue',
+      CONSENT_SUITE,
+    ),
+    'reads the cookie by exact name, never by prefix',
+  )
+
+  // --- what may happen before consent -------------------------------------------------------------
+  //
+  // 144d. The pre-consent branch falls THROUGH into the identified write. It still increments the counter,
+  //       so the figure the branch exists for is right; it also creates the visitor, the session, its
+  //       origination and its events, and issues the cookie. Nothing downstream can tell those rows from
+  //       consented ones, which is why this is the most expensive single line in the unit.
+  checkRejectedBy(
+    'collect gate: a pre-consent branch that falls through to the identified write is caught',
+    af5Mutate(ROUTE_INGEST, '    return accepted(null)', '    // fall through', ROUTE_SUITE),
+    'writes nothing but the counter before consent',
+  )
+
+  // 144e. A cookie issued on the pre-consent path. The acceptance line names the absence of a `Set-Cookie`
+  //       first, and this is it reinstated.
+  checkRejectedBy(
+    'collect gate: a Set-Cookie issued before consent is caught',
+    af5Mutate(
+      ROUTE_INGEST,
+      '    return accepted(null)',
+      "    return accepted(visitorCookie('00000000-0000-7000-8000-000000000000'))",
+      ROUTE_SUITE,
+    ),
+    'writes nothing but the counter before consent',
+  )
+
+  // --- the cookie's attributes --------------------------------------------------------------------
+  //
+  // 144f. A leading-dot `Domain`, which is what host-only excludes: the identifier would go to every
+  //       subdomain, including any future one this repository does not control.
+  checkRejectedBy(
+    'collect gate: a leading-dot Domain on the visitor cookie is caught',
+    af5Mutate(
+      ROUTE_INGEST,
+      "    'Path=/',\n    'HttpOnly',",
+      "    'Path=/',\n    'Domain=.berelax.example',\n    'HttpOnly',",
+      ROUTE_SUITE,
+    ),
+    'is host-only, Secure and SameSite=Lax, with no Domain attribute at all',
+  )
+
+  // 144g. `Secure` dropped. A first-party identifier in clear text on every request.
+  checkRejectedBy(
+    'collect gate: a visitor cookie without Secure is caught',
+    af5Mutate(ROUTE_INGEST, "    'Secure',\n", '', ROUTE_SUITE),
+    'is host-only, Secure and SameSite=Lax, with no Domain attribute at all',
+  )
+
+  // 144h. `SameSite=Strict`, which withholds the cookie on a cross-site top-level GET — every paid click
+  //       this business pays for. Every ad click would arrive as a new visitor and be re-attributed.
+  checkRejectedBy(
+    'collect gate: SameSite=Strict on the visitor cookie is caught',
+    af5Mutate(ROUTE_INGEST, "'SameSite=Lax',", "'SameSite=Strict',", ROUTE_SUITE),
+    'is never SameSite=Strict, which would make every ad click a new visitor',
+  )
+
+  // 144i. The cookie outliving the rows it names. 90 days is `analytics.raw_retention_days()`, and a
+  //       longer-lived cookie presents an id that names nothing.
+  checkRejectedBy(
+    'collect gate: a visitor cookie longer-lived than raw retention is caught',
+    af5Mutate(
+      ROUTE_INGEST,
+      'export const VISITOR_COOKIE_MAX_AGE_SECONDS = 90 * 24 * 60 * 60',
+      'export const VISITOR_COOKIE_MAX_AGE_SECONDS = 365 * 24 * 60 * 60',
+      ROUTE_SUITE,
+    ),
+    'lives exactly as long as the raw retention window, which is where the figure comes from',
+  )
+
+  // 144j. A visitor cookie value that is not a uuid accepted anyway, so a client-chosen string reaches a
+  //       `::uuid` cast and the refusal names a column instead of a cookie.
+  checkRejectedBy(
+    'collect gate: a visitor cookie that is not a uuid is caught',
+    af5Mutate(
+      ROUTE_INGEST,
+      'return UUID.test(value) ? value : null',
+      "return value === '' ? null : value",
+      ROUTE_SUITE,
+    ),
+    'treats a value that is not a uuid as no cookie at all',
+  )
+
+  // --- ADR 0062, which this unit is the first consumer of -----------------------------------------
+  //
+  // 144k. The bot verdict used as a gate. One `if` that saves a write, and the rows it drops are rows
+  //       nobody counted — a crawler's traffic silently absent from the denominator rather than flagged in
+  //       it. ADR 0062 states the rule because the alternative is an access-control decision resting on a
+  //       header.
+  checkRejectedBy(
+    'collect gate: the bot verdict used to drop a batch is caught',
+    af5Mutate(
+      ROUTE_INGEST,
+      '  const origination = resolution.decision',
+      '  if (classification.bot) return accepted(null)\n  const origination = resolution.decision',
+      ROUTE_SUITE,
+    ),
+    'never branches on the bot verdict, which ADR 0062 forbids',
+  )
+
+  // 144l. The clock read directly, so none of the three frozen-clock acceptance claims could be made.
+  checkRejectedBy(
+    'collect gate: a direct clock read in the ingest is caught',
+    af5Mutate(
+      ROUTE_INGEST,
+      '  const nowMs = deps.clock.now()',
+      '  const nowMs = Date.now()',
+      ROUTE_SUITE,
+    ),
+    'reads the clock only through the injected one',
+  )
+
+  // --- the caps -----------------------------------------------------------------------------------
+  //
+  // 144m. The envelope no longer strict. An unknown extra property is then a field the server silently
+  //       drops, which is a field a later unit will believe is stored.
+  checkRejectedBy(
+    'collect gate: a non-strict batch envelope is caught',
+    af5Mutate(
+      COLLECT_WIRE,
+      'export const collectBatchSchema = z.strictObject({',
+      'export const collectBatchSchema = z.object({',
+      WIRE_SUITE,
+    ),
+    'refuses an unknown extra property anywhere, which is the third cap',
+  )
+
+  // 144n. The batch cap widened past the figure the acceptance line names.
+  checkRejectedBy(
+    'collect gate: a batch cap above fifty events is caught',
+    af5Mutate(
+      COLLECT_WIRE,
+      'export const COLLECT_MAX_BATCH_EVENTS = 50',
+      'export const COLLECT_MAX_BATCH_EVENTS = 5_000',
+      WIRE_SUITE,
+    ),
+    'states each cap once, and the figures the acceptance list names',
+  )
+
+  // 144o. The closed taxonomy put back into the envelope, which is the defect this unit's own integration
+  //       suite found: the route's `unknown_event` refusal becomes a name nothing can raise, and the answer
+  //       a tag author needs is replaced by "your batch is unreadable".
+  checkRejectedBy(
+    'collect gate: the event name validated twice is caught',
+    af5Mutate(
+      COLLECT_WIRE,
+      '  name: z.string().min(1).max(64),',
+      "  name: z.enum(['page_view', 'service_viewed', 'price_viewed', 'cta_click', 'whatsapp_ref_shown']),",
+      WIRE_SUITE,
+    ),
+    'leaves the event name to the taxonomy',
+  )
+
+  // 144p. An instant with no offset accepted. Trading runs 11:00-02:00, so a zone-ambiguous instant lands
+  //       on either side of a business day boundary depending on who reads it.
+  checkRejectedBy(
+    'collect gate: a collected instant without an offset is caught',
+    af5Mutate(
+      COLLECT_WIRE,
+      'occurredAt: z.iso.datetime({ offset: true }),',
+      'occurredAt: z.string(),',
+      WIRE_SUITE,
+    ),
+    'requires an instant with an offset, so "when" cannot be zone-ambiguous',
+  )
+
+  // --- stitching and the limiter ------------------------------------------------------------------
+  //
+  // 144q. The inactivity window changed, so the acceptance line's own two figures stop holding.
+  checkRejectedBy(
+    'collect gate: a session window other than thirty minutes is caught',
+    af5Mutate(
+      COLLECT_WIRE,
+      'export const SESSION_INACTIVITY_MS = 30 * 60 * 1000',
+      'export const SESSION_INACTIVITY_MS = 60 * 60 * 1000',
+      CORE_SUITE,
+    ),
+    'continues at 29 minutes and starts a new one at 31',
+  )
+
+  // 144r. The stitch made an ABSOLUTE difference. A batched beacon flushing forty minutes late would then
+  //       open a second session for a visitor who never left, and one visit would report as two arrivals.
+  checkRejectedBy(
+    'collect gate: a session stitch on an absolute gap is caught',
+    af5Mutate(
+      CORE_INGEST,
+      '  const idleMs = args.atMs - args.lastEventAtMs',
+      '  const idleMs = Math.abs(args.atMs - args.lastEventAtMs)',
+      CORE_SUITE,
+    ),
+    'continues a session for an event that arrives EARLIER than its last one',
+  )
+
+  // 144s. The limiter counting REFUSED requests, which turns a rate limit into a lockout: every retry
+  //       extends the caller's own penalty and the window never frees.
+  checkRejectedBy(
+    'collect gate: a rate limiter that counts its own refusals is caught',
+    af5Mutate(
+      CORE_INGEST,
+      '      hitsMs: live,',
+      '      hitsMs: [...live, args.atMs],',
+      CORE_SUITE,
+    ),
+    'does not record a refused request, so retrying cannot extend the penalty',
+  )
+
+  // 144t. An INCLUSIVE window, which is the edit that would make `Retry-After: 0` reachable — a hit exactly
+  //        `windowMs` old stays live, the oldest one frees at `atMs`, and the honest figure is zero: an
+  //        instruction to retry immediately, issued to the caller already over its budget. It is also the
+  //        edit that lets one instant sit in two windows.
+  //
+  //        There is deliberately NO case breaking the `Math.max(1, …)` clamp itself, and that is a finding
+  //        rather than an omission: while the filter is strict the clamp cannot bind, so breaking it changes
+  //        no answer and no check could fire. The source says so where the clamp is.
+  checkRejectedBy(
+    'collect gate: an inclusive rate-limit window is caught',
+    af5Mutate(
+      CORE_INGEST,
+      'const live = args.hitsMs.filter((hit) => args.atMs - hit < windowMs)',
+      'const live = args.hitsMs.filter((hit) => args.atMs - hit <= windowMs)',
+      CORE_SUITE,
+    ),
+    'treats the window as half-open, so a hit exactly one window old has expired',
+  )
+
+  // 144u. The cap written as a literal instead of DERIVED from the batch cap, so raising how many events a
+  //       request may carry would silently stop raising how many a second a caller may send — two figures
+  //       where the specification gives one.
+  checkRejectedBy(
+    'collect gate: a request budget that is not the batch cap is caught',
+    af5Mutate(
+      CORE_INGEST,
+      'export const COLLECT_RATE_MAX_REQUESTS = COLLECT_MAX_BATCH_EVENTS',
+      'export const COLLECT_RATE_MAX_REQUESTS = 500',
+      CORE_SUITE,
+    ),
+    'refuses the 200 requests the acceptance line fires inside one frozen second',
+  )
+
+  // --- the three vocabularies -----------------------------------------------------------------
+  //
+  // 144v. A trading-date basis the resolver cannot produce. Caught by the COMPILER, because the tuple lives
+  //       in `shared` — `db` writes the column and may never import `core` — so the agreement with
+  //       `OutsideTradingReason` is a two-way type assertion rather than a derivation.
+  {
+    const result = withEditedFile(
+      COLLECT_WIRE,
+      (text) => replaceOnce(text, "  'premises_closed',\n", "  'premises_shut',\n"),
+      () => runExpectingFailure('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+    )
+    checkRejectedBy(
+      'collect gate: a trading-date basis the resolver cannot produce fails to compile',
+      result,
+      "is not assignable to type 'never'",
+    )
+  }
+
+  // 144w. The same divergence read from the SQL side: three places hold these four words — the migration's
+  //       two CHECKs, the Drizzle mirror and the shared tuple — and `pnpm db:drift` has nothing to say
+  //       about a CHECK list.
+  checkRejectedBy(
+    'collect gate: a basis vocabulary that disagrees with the migration is caught',
+    af5Mutate(
+      ANALYTICS_MIRROR,
+      "sql`${t.bucketBasis} in ('trading', 'before_opening', 'after_closing', 'premises_closed')`",
+      "sql`${t.bucketBasis} in ('trading', 'before_opening', 'after_closing')`",
+      SQL_SUITE,
+    ),
+    'is the same four words in the migration, the mirror and the shared tuple',
+  )
+
+  // 144x. The device vocabulary diverging from `session_device_kind_known`. A fifth kind here is a 23514
+  //       from an INSERT naming a constraint rather than the vocabulary that disagreed.
+  checkRejectedBy(
+    'collect gate: a device kind the database CHECK does not admit is caught',
+    af5Mutate(
+      COLLECT_WIRE,
+      "export const DEVICE_KINDS = ['mobile', 'tablet', 'desktop', 'unknown'] as const",
+      "export const DEVICE_KINDS = ['mobile', 'tablet', 'desktop', 'tv', 'unknown'] as const",
+      BREAKPOINT_SUITE,
+    ),
+    'has one device vocabulary, not three',
+  )
+
+  // 144y. The breakpoint ramp diverging from the design tokens, which is the one that fails silently: the
+  //       analytics page would report a device and breakpoint split in bands the site does not lay out in,
+  //       every figure internally consistent.
+  checkRejectedBy(
+    'collect gate: an analytics breakpoint band the tokens do not declare is caught',
+    af5Mutate(COLLECT_WIRE, "  { name: 'xxl', minWidth: 1600 },\n", '', BREAKPOINT_SUITE),
+    'holds the same names, in both directions, apart from the one named band below the floor',
+  )
+
+  // --- the two refusals the database makes, and the port registry ---------------------------------
+  //
+  // 144ba. A trigger deleted from the migration. Invisible to a database that already has it — the
+  //        integration suite stays green — and the next database built from `packages/db/migrations` has
+  //        neither refusal in it. Gate case 123e is the same shape one migration over.
+  checkRejectedBy(
+    'collect gate: a pre-consent counter trigger deleted from 0116 is caught',
+    af5Mutate(
+      MIGRATION_0116,
+      'create trigger pre_consent_landing_refuse_delete\n  before delete on analytics.pre_consent_landing\n  for each row execute function analytics.refuse_pre_consent_landing_loss();\n',
+      '',
+      SQL_SUITE,
+    ),
+    'guards the pre-consent counter against a DELETE and against a lowered count',
+  )
+
+  // 144bb. The basis check made one-directional. A writer stamping every row with a gap reason loses
+  //        exactly as much as one stamping every row `trading`, and a one-sided check accepts it.
+  checkRejectedBy(
+    'collect gate: a one-directional trading-basis check is caught',
+    af5Mutate(
+      MIGRATION_0116,
+      "  if v_inside <> (new.trading_date_basis = 'trading') then",
+      "  if not v_inside and new.trading_date_basis = 'trading' then",
+      SQL_SUITE,
+    ),
+    'holds a session’s trading-date basis against the calendar',
+  )
+
+  // 144bc. An instant put on the identifier-free counter. A timestamp on a row whose count is 1 is a
+  //        timestamp of one person's visit, and it is what makes "a subject access request finds nothing"
+  //        stop being true.
+  checkRejectedBy(
+    'collect gate: a timestamp on the pre-consent counter is caught',
+    af5Mutate(
+      MIGRATION_0116,
+      '  landings      bigint  not null,\n',
+      '  landings      bigint  not null,\n  last_counted_at timestamptz not null default now(),\n',
+      SQL_SUITE,
+    ),
+    'puts no instant of any kind on the counter, which is what identifier-free means here',
+  )
+
+  // 144bd. A DEFAULT on the session basis, which is the value a caller who has not thought about the
+  //        daytime gap receives — wrong nine hours out of every twenty-four.
+  checkRejectedBy(
+    'collect gate: a default on the session trading-date basis is caught',
+    af5Mutate(
+      MIGRATION_0116,
+      'alter table analytics.session add column trading_date_basis text;',
+      "alter table analytics.session add column trading_date_basis text default 'trading';",
+      SQL_SUITE,
+    ),
+    'gives the counter no default on the session basis',
+  )
+
+  // 144be. The retention classification removed. `analytics.run_retention` then refuses the whole pass with
+  //        ZY062 rather than retaining a new table for ever by omission — but only once somebody runs it,
+  //        so the static check is what fires on the commit.
+  checkRejectedBy(
+    'collect gate: a new analytics table with no retention policy row is caught',
+    af5Mutate(
+      MIGRATION_0116,
+      "  ('pre_consent_landing', 'keep_indefinitely', null, null,",
+      "  ('pre_consent_landings', 'keep_indefinitely', null, null,",
+      SQL_SUITE,
+    ),
+    'classifies the new table for retention, which the pass refuses to run without',
+  )
+
+  // 144bf. The port-band scan narrowed back to `apps/web/src`, which is where it looked until this unit
+  //        put a server-starting suite under `apps/web/app`. A scan that cannot see a suite reports its
+  //        band as declared-and-unused, and the next unit to need a band takes the one already in use —
+  //        at which point the second `next start` cannot bind and the suite answers from the first one's
+  //        server, where green and red both mean nothing.
+  checkRejectedBy(
+    'collect gate: a port scan that cannot see a suite outside src/ is caught',
+    af5Mutate(
+      PORT_SUITE,
+      "const WEB_ROOT = new URL('..', import.meta.url).pathname",
+      "const WEB_ROOT = new URL('.', import.meta.url).pathname",
+      PORT_SUITE,
+    ),
+    'reaches suites outside src/, which the scan could not see until A-FIRST-05',
+  )
+
+  // 144bg. A band this registry does not declare.
+  checkRejectedBy(
+    'collect gate: a suite drawing a port from an undeclared band is caught',
+    af5Mutate(PORTS, '  collect: { start: 16_400', '  collecting: { start: 16_400', PORT_SUITE),
+    'no band is declared for these',
+  )
+
+  // 144bz. The control, and it is not a formality: every file above, UNEDITED, passes every suite the cases
+  //        rely on. Without it a stale search string makes `withEditedFile` throw — which it reports
+  //        loudly — but a suite that had started failing for an unrelated reason would make every case
+  //        above report PASS about nothing.
+  {
+    for (const suite of [
+      WIRE_SUITE,
+      CONSENT_SUITE,
+      CORE_SUITE,
+      ROUTE_SUITE,
+      SQL_SUITE,
+      BREAKPOINT_SUITE,
+      PORT_SUITE,
+    ]) {
+      const rows = af5Pass(suite)
+      check(`collect gate: ${suite} passes unedited`, !rows.failed, rows.output)
+    }
+    const typed = run('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json'])
+    check('collect gate: the tree typechecks unedited', !typed.failed, typed.output)
+    const pure = run('pnpm', ['purity'])
+    check('collect gate: the collect wire contract passes pnpm purity', !pure.failed, pure.output)
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

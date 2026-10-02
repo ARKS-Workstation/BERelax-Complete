@@ -4,6 +4,41 @@
  */
 
 export {
+  ANALYTICS_BREAKPOINT_BANDS,
+  ANALYTICS_BREAKPOINTS,
+  type AnalyticsBreakpoint,
+  BREAKPOINT_UNKNOWN,
+  breakpointFor,
+  COLLECT_MAX_BATCH_EVENTS,
+  COLLECT_MAX_BODY_BYTES,
+  COLLECT_MAX_CLIENT_EVENT_ID_LENGTH,
+  COLLECT_MAX_QUERY_LENGTH,
+  COLLECT_MAX_REFERRER_LENGTH,
+  COLLECT_PATH,
+  COLLECT_REFUSALS,
+  type CollectBatch,
+  type CollectEvent,
+  type CollectRefusal,
+  collectBatchSchema,
+  collectEventSchema,
+  DEVICE_KINDS,
+  type DeviceKind,
+  deviceKindFor,
+  isTradingDateBasis,
+  SESSION_INACTIVITY_MS,
+  TRADING_DATE_BASES,
+  type TradingDateBasis,
+} from './analytics/collect.ts'
+export {
+  ANALYTICS_CONSENT_COOKIE,
+  ANALYTICS_STORAGE_SIGNAL,
+  analyticsStorageGranted,
+  CONSENT_MODE_SIGNALS,
+  CONSENT_SIGNAL_SEPARATOR,
+  type ConsentModeSignal,
+  grantedConsentSignals,
+} from './analytics/consent-signal.ts'
+export {
   ANALYTICS_EVENT_NAMES,
   ANALYTICS_EVENT_SCHEMAS,
   ANALYTICS_OPEN_QUESTIONS,

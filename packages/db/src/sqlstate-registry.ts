@@ -1884,6 +1884,27 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['reporting.assert_business_day_keys'],
     translators: [],
   },
+  // ZY221 and ZY222 are A-FIRST-05's, of the band ZY221-ZY230; the other eight are left free and
+  // deliberately absent, because an entry for a code no migration raises is direction 3. Two and not one
+  // because each names a different thing to go and do: the first is "that count is the only evidence a
+  // pre-consent visit happened, so do not lower it", and the second is "say which kind of date this is".
+  // Both are refusals whose absence would be SILENT and would move a published figure — a denominator
+  // quietly revised down, and nine hours a day of browsing counted as daytime trade — which is ADR 0043's
+  // test for whether a rule earns a private code rather than an anonymous 23514.
+  {
+    code: 'ZY221',
+    rule: 'An identifier-free pre-consent landing count may not be deleted, lowered, or moved to another day or route.',
+    migration: '0116',
+    raisedBy: ['analytics.refuse_pre_consent_landing_loss'],
+    translators: ['packages/db/src/repositories/analytics.ts'],
+  },
+  {
+    code: 'ZY222',
+    rule: "A session's trading-date basis must agree with the business day it names: started_at is inside that day's open window exactly when the basis is `trading`.",
+    migration: '0116',
+    raisedBy: ['analytics.assert_session_trading_basis'],
+    translators: ['packages/db/src/repositories/analytics.ts'],
+  },
   {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',
