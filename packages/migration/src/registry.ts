@@ -29,7 +29,14 @@ import { packagesImporter } from './importers/packages/import.ts'
  * merely stage a plaintext number, it would resolve no customer at all and quarantine every line while
  * looking like a clean refusal. Its door is `scripts/migrate-visits.mjs`.
  *
- * H-MIG-06 through H-MIG-11 add theirs here. `probe` is the framework's conformance importer, deliberately
+ * **H-MIG-06's `staff` importer is absent too**, and its missing dependency is a different one worth
+ * naming: `leaveYearStart` from `@berelax/core`, which decides which leave year an imported opening
+ * balance opens. There is no default for it on purpose — anchoring every balance to 1 January would be a
+ * leave year the policy does not use for anybody not engaged on that date, and the symptom is a
+ * carry-over forfeited on the wrong day, months later, in a job nobody is watching. Its door is
+ * `scripts/migrate-staff.mjs`.
+ *
+ * H-MIG-07 through H-MIG-11 add theirs here. `probe` is the framework's conformance importer, deliberately
  * listed rather than hidden: the CLI is what a person runs, and a CLI whose registry is empty cannot be
  * exercised at all — the first real importer would be the first time the command had ever been run. It
  * writes into the framework's conformance target and nothing reads that table, so the worst a mistaken

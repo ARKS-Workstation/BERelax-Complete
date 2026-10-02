@@ -21150,7 +21150,7 @@ units:
       credential expiries that gate availability, and leave opening balances that are explicitly flagged
       rather than silently accepted as zero.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - H-MIG-01
@@ -21186,10 +21186,44 @@ units:
       by a field-level policy test
     - the 19 therapist rows import with style skills and remain unpublishable until both a display name
       and a recorded photography consent exist, per decision 23
+    notes: 'Built as migration 0131 plus one importer. NOTE on the fourth acceptance line ("imported bank
+      and identity fields are encrypted at rest and unreadable by the receptionist role"): this importer
+      writes NEITHER, and the absence is the answer rather than a gap. `import_row.payload` is kept for
+      ever and is invisible to every erasure probe (ADR 0072, Y9-import-ledger), so an IBAN in a staff
+      workbook is an IBAN in that ledger permanently — strictly worse than the plaintext column
+      `employee_bank_detail` was built to avoid, because that column does not exist and this one could not
+      be removed afterwards. The field-level policy test in `packages/fixtures/src/staff-import.itest.ts`
+      therefore asserts four things: the sealed tables hold no plaintext column, the schema REFUSES a
+      plaintext identity reference (measured by attempting one), the receptionist''s field groups exclude
+      both, and the import has no cell and no payload key that could carry one. The sealed fields are
+      entered through the HR screens, which seal them under 0102''s envelope scheme — DEFERRED there and
+      not to a later H-MIG unit, because the screens already exist and the gap is data rather than code.
+      NOTE on the dispatch''s framing of the leave basis: the dispatch said an opening balance expressed in
+      CALENDAR days is refused, and that is what ZY371 does — but the refusal is a CONFIRMATION and not a
+      second arithmetic, because migration 0066 settled that the statutory entitlement is counted in
+      calendar days ("a leave day is a calendar day, never a working day") and a migration contradicting a
+      locked decision is not available. This business opens on every date, so the two readings are the same
+      quantity today; ZY371''s own message counts, from `business_day`, how many dates of the covering leave
+      year are not trading days, so a reader can see whether they differ at all. ADR 0083 records the
+      reasoning in full. NOTE: the 19 therapist rows themselves are NOT imported — `pnpm seed` creates the
+      headcount (P-HR-01) and `Y8-staff` is unanswered, so there is no file to import. What is built is the
+      importer, the workbook and every refusal, exercised against synthetic references in a band no fixture
+      uses. `employee.staff_reference` is still not UNIQUE in the database; this importer quarantines a
+      repeat and refuses both lines of an in-file one, and the schema-level question is left where 0030 left
+      it.'
     files:
+    - packages/db/migrations/0131_staff_import.sql
+    - packages/db/src/schema/imported-staff-row.ts
+    - packages/db/src/services/import-staff.ts
+    - packages/migration/src/importers/staff/workbook.ts
     - packages/migration/src/importers/staff/import.ts
     - packages/migration/src/importers/staff/leave-opening.ts
+    - packages/migration/src/importers/staff/index.ts
+    - packages/migration/src/importers/staff/import.test.ts
     - packages/core/src/hr/accrual.worked-examples.test.ts
+    - packages/fixtures/src/staff-import.itest.ts
+    - scripts/migrate-staff.mjs
+    - docs/adr/0083-a-staff-import-writes-the-facts-the-file-carried-and-infers-nothing.md
   - id: H-MIG-07
     order: 189
     title: Accounting opening balances and the period boundary lock

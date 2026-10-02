@@ -1798,6 +1798,27 @@ export {
   TemplateCannotCarryReconstruction,
 } from './services/import-package-liability.ts'
 export {
+  IMPORTED_LEAVE_SOURCE_NOTE,
+  type ImportedStaffCounts,
+  type ImportedStaffInput,
+  type ImportedStaffRowInput,
+  type InsertedImportedStaff,
+  insertImportedStaff,
+  isLeaveBalanceBasisRefusal,
+  readImportableDocumentTypes,
+  readImportedStaffCounts,
+  readLeaveRuleInForce,
+  recordImportedStaffRow,
+  STAFF_IMPORT_SQLSTATE,
+  STAFF_QUARANTINE_REASONS,
+  STAFF_QUARANTINES,
+  type StaffCredential,
+  type StaffQuarantine,
+  staffImportError,
+  staffReferenceIsHeld,
+  ZERO_LEAVE_BALANCE_QUESTION,
+} from './services/import-staff.ts'
+export {
   assertReversalMatches,
   CREDIT_NOTE_SQLSTATE,
   type CreditNoteLineInput,
@@ -4448,4 +4469,41 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // unregistered. The test port band { start: 19_400, width: 300 } offered to this group is released UNUSED:
 // nothing in H-MIG-05 starts a server.
 //
-export const SCHEMA_VERSION = 130 as const
+// 131 is 0131_staff_import.sql (H-MIG-06) — one column on `leave_movement`, one append-only record table
+// and four refusals: the nineteen employment records, and the four things this import will not infer.
+//
+// Three decisions in it are worth finding here rather than in the file.
+//
+// **`leave_movement.day_basis` is a CONFIRMATION and not an arithmetic.** `0066_leave.sql` settled that
+// the statutory entitlement is counted in calendar days ("a leave day is a calendar day, never a working
+// day") and `hundredths` is in those units throughout this ledger; nothing in 0131 changes that, and a
+// migration that did would contradict a locked decision. What ZY371 asks is the question
+// `0092_leave_approval.sql` already asks of a leave REQUEST from the other end — ZY020 refuses a period
+// bounded by a midnight inside a trading session — applied to the BALANCE every such request will be
+// spent against. This business opens on every date, so the two readings are the same quantity today;
+// which is exactly why nobody would notice the question was never asked, and why the refusal's own
+// message COUNTS, from `business_day`, how many dates of the covering leave year are not trading days.
+//
+// **ZY372 — a zero opening balance must be marked provisional — is a trigger and not a CHECK**, because
+// the message has to carry the remedy and a CHECK violation names the constraint and prints the failing
+// figure, which here is a zero and says nothing about what to do. docs/11 §7 is the authority: the
+// accrual engine needs a real opening balance rather than a zero, and nineteen silent zeros are a
+// business with no leave liability at all — a figure that reaches an end-of-service calculation and
+// nothing that would query it.
+//
+// **There is NO column anywhere in this migration, and no cell in the workbook behind it, for a bank
+// account, an Emirates ID number, a passport number, a visa number or a wage.** That is the unit's main
+// decision and it is an absence, so it is easy to read as an omission. `import_row.payload` is kept for
+// ever and no erasure reaches it (ADR 0072, Y9-import-ledger), so an IBAN in a staff workbook is an IBAN
+// in that ledger permanently — strictly worse than the plaintext column `employee_bank_detail` was built
+// to avoid, because that column does not exist and this one could not be removed afterwards. What the
+// import DOES write about a credential is its type and its expiry, which is the half
+// `readEligibleTherapists` gates availability on; a document number is not in that path at all.
+// `employee.is_publishable` is untouched for the same kind of reason: it is already GENERATED from
+// `display_name` and `photo_consent` (0030, decision 23), so an import cannot publish a therapist
+// whatever it writes, and re-stating the rule here would be the second statement that drifts.
+//
+// ZY371-ZY374 of the band ZY371-ZY380 are used; ZY375-ZY380 are released UNUSED and deliberately
+// unregistered. No test port band is used: nothing in H-MIG-06 starts a server.
+//
+export const SCHEMA_VERSION = 131 as const

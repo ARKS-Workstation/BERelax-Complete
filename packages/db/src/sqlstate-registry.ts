@@ -2175,6 +2175,42 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['refuse_future_migrated_appointment'],
     translators: ['packages/db/src/services/import-appointments.ts'],
   },
+  // ZY371-ZY374 are H-MIG-06's, of the band ZY371-ZY380; ZY375 to ZY380 are left free and deliberately
+  // unregistered, because an entry for a code no migration raises is refused. Four and not one because
+  // each names a different thing to go and do: ZY371 "confirm each day of the balance is a day this
+  // business rosters", ZY372 "supply the real figure or mark the zero provisional", ZY373 "a correction
+  // is a new record", ZY374 "this importer has a defect". The two that carry the unit's whole point are
+  // ZY371 and ZY374: the first is the only thing that asks what a reconstructed leave figure COUNTS,
+  // and the second is what makes "a therapist row without a recorded gender is quarantined" a property
+  // of the schema rather than a convention of one importer.
+  {
+    code: 'ZY371',
+    rule: 'An imported leave opening balance must be stated in days confirmed to be trading sessions.',
+    migration: '0131',
+    raisedBy: ['assert_leave_opening_balance_is_sound'],
+    translators: ['packages/db/src/services/import-staff.ts'],
+  },
+  {
+    code: 'ZY372',
+    rule: 'A leave opening balance of zero must be marked provisional and name its open question.',
+    migration: '0131',
+    raisedBy: ['assert_leave_opening_balance_is_sound'],
+    translators: ['packages/db/src/services/import-staff.ts'],
+  },
+  {
+    code: 'ZY373',
+    rule: 'An imported-staff record is append-only.',
+    migration: '0131',
+    raisedBy: ['refuse_imported_staff_row_change'],
+    translators: ['packages/db/src/services/import-staff.ts'],
+  },
+  {
+    code: 'ZY374',
+    rule: 'An imported-staff record must name an employee whose gender is recorded.',
+    migration: '0131',
+    raisedBy: ['assert_imported_staff_has_a_gender'],
+    translators: ['packages/db/src/services/import-staff.ts'],
+  },
   {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',

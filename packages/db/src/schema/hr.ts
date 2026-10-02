@@ -452,6 +452,19 @@ export const leaveMovement = pgTable(
     createdBy: text('created_by').notNull(),
     /** NOT NULL for an opening balance and null otherwise, held by a CHECK in the migration. */
     sourceNote: text('source_note'),
+    /**
+     * For an opening balance (0131): what the figure was confirmed to COUNT. Null for every other kind.
+     *
+     * `trading_session_day` is the only value an opening balance may carry, and ZY371 refuses
+     * `calendar_day` by name. It is NOT a second arithmetic — 0066 settled that the entitlement is
+     * counted in calendar days and `hundredths` is in those units throughout this ledger, and this
+     * business opens on every date, so the two readings are the same quantity today. What the basis
+     * records is that each day of the balance has been confirmed to be a day this business ROSTERS,
+     * which is what ZY020 demands of every day it will later be spent on; the refusal's own message
+     * counts, from `business_day`, how many dates of the covering leave year are not trading days, so a
+     * reader can see whether the two readings coincide.
+     */
+    dayBasis: text('day_basis'),
     isProvisional: boolean('is_provisional').notNull(),
     provisionalNote: text('provisional_note'),
     openQuestionId: text('open_question_id'),
@@ -482,6 +495,18 @@ export const leaveMovement = pgTable(
     check(
       'leave_movement_request_matches_kind',
       sql`(${t.kind} in ('reserved', 'released')) = (${t.leaveRequestId} is not null)`,
+    ),
+    // 0131. Whole or nothing with the kind: an accrual's unit is not in question — it came from
+    // `leave_entitlement_rule.monthlyAccrualHundredths`, which this system wrote — so a basis on one
+    // would be a second statement of something already settled, and the row carrying the wrong one
+    // would look exactly as authoritative.
+    check(
+      'leave_movement_day_basis_matches_kind',
+      sql`(${t.kind} = 'opening_balance') = (${t.dayBasis} is not null)`,
+    ),
+    check(
+      'leave_movement_day_basis_is_known',
+      sql`${t.dayBasis} is null or ${t.dayBasis} in ('trading_session_day', 'calendar_day')`,
     ),
     check(
       'leave_movement_rule_matches_kind',

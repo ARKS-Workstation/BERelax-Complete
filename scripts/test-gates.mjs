@@ -50507,6 +50507,363 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   check('visits: the pairing suite passes against the real tree', !run('pnpm', pairSuite()).failed)
 }
 
+// 161a-161z. (H-MIG-06) The staff import shown to be unable to stop refusing: every guess it must not
+//            make, and the one acceptance line whose answer is an ABSENCE.
+//
+//            The absence is where the cases start, because it is the one a later reader will "fix". The
+//            acceptance line reads *"imported bank and identity fields are encrypted at rest and
+//            unreadable by the receptionist role"*, and this import writes NEITHER — there is no column
+//            and no cell for an IBAN, an Emirates ID number, a passport number, a visa number or a wage,
+//            because `import_row.payload` is kept for ever and is invisible to every erasure probe. A
+//            future reader adding the column would be doing something that looks like completing the
+//            unit, so 161a and 161b are two independent scans that fail the moment one appears: one over
+//            the WORKBOOK's column list and one over the staged payload's key set.
+//
+//            Then the three guesses:
+//
+//              * **a gender.** 161c removes the quarantine, so a blank cell imports an employee with a
+//                null gender — which does not fail, it quietly makes that therapist unassignable to
+//                every gender-specified request. 161d removes ZY374's enforcement from the migration, so
+//                the quarantine is a convention again.
+//              * **a leave balance's unit.** 161e turns the `calendar_day` quarantine into an
+//                acceptance, 161f makes the whole-line quarantine a partial one (import the person,
+//                leave the balance out) which is ZY372's failure reached the long way round, and 161g
+//                removes the `business_day` count from ZY371's message — the half that makes the refusal
+//                say whether the two readings differ at all.
+//              * **a zero.** 161h stops marking an imported zero provisional. The arithmetic cannot tell
+//                an unconfirmed zero from a confirmed one, which is the worked examples' sixth case, so
+//                this is the only thing that can.
+//
+//            161i and 161j are about the committed worked examples themselves: 161i changes the rounding
+//            direction in `ceilDiv`'s caller so 27/28 of 250 reads 241 instead of 242, which is the
+//            figure that would silently reverse; 161j changes the seeded policy literal, which the
+//            pairing suite holds equal to the row it restates.
+//
+//            161k is the credential expiry that gates availability, broken at the import end rather than
+//            at the gate's: a past expiry written as a future one. 161l is the Drizzle mirror, 161m and
+//            161n the two directions of the SQLSTATE registry, 161o `pnpm db:conventions` on
+//            `imported_staff_row`'s append-only claim.
+//
+//            161y and 161z are the controls: every case above is satisfied by something FAILING, so one
+//            has to be satisfied by the real tree passing — the two pure suites and the pairing suite,
+//            all unedited.
+//
+//            Nothing here edits `0131_staff_import.sql` in order to test a rule the DATABASE enforces at
+//            runtime, except where the gate genuinely reads the file's text (161m, 161n, 161o) or where
+//            the message's own content is the claim (161d, 161g) — in those two the suite's probe reads
+//            the message, so the edited file is what the next `psql` would apply and the pairing suite
+//            applies it itself. ZY371-ZY374 are proved against a real PostgreSQL by
+//            `packages/fixtures/src/staff-import.itest.ts`.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const WORKBOOK = 'packages/migration/src/importers/staff/workbook.ts'
+  const STAFF_IMPORTER = 'packages/migration/src/importers/staff/import.ts'
+  const STAFF_SERVICE = 'packages/db/src/services/import-staff.ts'
+  const ACCRUAL = 'packages/core/src/hr/leave-accrual.ts'
+  const STAFF_MIRROR = 'packages/db/src/schema/imported-staff-row.ts'
+  const STAFF_REGISTRY = 'packages/db/src/sqlstate-registry.ts'
+  const STAFF_MIGRATION = 'packages/db/migrations/0131_staff_import.sql'
+
+  const STAFF_UNIT_SUITE = 'packages/migration/src/importers/staff/import.test.ts'
+  const WORKED_EXAMPLES = 'packages/core/src/hr/accrual.worked-examples.test.ts'
+  const STAFF_PAIR_SUITE = 'packages/fixtures/src/staff-import.itest.ts'
+
+  const staffPureSuites = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.config.ts',
+    STAFF_UNIT_SUITE,
+    WORKED_EXAMPLES,
+  ]
+  const staffPairSuite = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    STAFF_PAIR_SUITE,
+  ]
+
+  /**
+   * One anchored edit to a shipped module, then the suite that must fail because of it.
+   *
+   * Named for this block rather than reusing block 160's `breakVisitImport`, and the reason is
+   * mechanical rather than stylistic: two blocks defining a helper of the same shape is how git found
+   * the bodies as shared context and INTERLEAVED two blocks at a merge (block 133's note).
+   */
+  const breakStaffImport = (name, file, find, into, rule, args = staffPureSuites()) => {
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        file,
+        (source) => replaceOnce(source, find, into),
+        () => runExpectingFailure('pnpm', args),
+      ),
+      rule,
+    )
+  }
+
+  // ---- the absence that must stay an absence -----------------------------------------------------
+
+  // 161a. A bank column added to the workbook. The ledger keeps every payload for ever, so this is the
+  //       one defect in the unit that could not be undone once a real file had been imported.
+  breakStaffImport(
+    'staff: a bank-account column added to the workbook must be caught',
+    WORKBOOK,
+    `  Object.freeze({
+    name: 'leave_balance_as_at',`,
+    `  Object.freeze({
+    name: 'bank_iban',
+    hint: 'The account this person is paid into.',
+  }),
+  Object.freeze({
+    name: 'leave_balance_as_at',`,
+    'has no cell for a bank account, an identity number or a wage',
+  )
+
+  // 161b. The same defect reached through the PAYLOAD rather than the column list. Two scans because a
+  //       key can be added to one without the other, and either alone is the permanent copy.
+  breakStaffImport(
+    'staff: an identity key added to the staged payload must be caught',
+    STAFF_IMPORTER,
+    `export const DECLARED_STAFF_PAYLOAD_KEYS = [
+  'staffReference',`,
+    `export const DECLARED_STAFF_PAYLOAD_KEYS = [
+  'passportNumber',
+  'staffReference',`,
+    'has no cell for a bank account, an identity number or a wage',
+  )
+
+  // ---- the gender ---------------------------------------------------------------------------------
+
+  // 161c. The quarantine, removed. A blank cell then imports an employee with a null gender, which does
+  //       not fail: it makes that therapist unassignable to every gender-specified request while
+  //       looking like an ordinary row.
+  breakStaffImport(
+    'staff: importing a therapist with no recorded gender must be caught',
+    STAFF_IMPORTER,
+    `  if (staged.gender === '') return quarantine(STAFF_QUARANTINES.genderNotRecorded)`,
+    `  if (staged.gender === '' && false) return quarantine(STAFF_QUARANTINES.genderNotRecorded)`,
+    // The pairing case's own name, which is how block 154 anchors a case against a suite whose
+    // assertion diff is not guaranteed to reach the captured output: a quarantine that did not happen
+    // leaves `lastQuarantineReason()` answering whatever the previous line wrote, so the vocabulary
+    // string is not reliably printed and the test name is.
+    'names the reason and creates no employment record',
+    staffPairSuite(),
+  )
+
+  // 161d. ZY374's RAISE, deleted from the migration — which is how the gender refusal would actually be
+  //       lost: not by somebody removing the registry entry, but by somebody simplifying the function
+  //       that raises it and leaving the entry behind. `pnpm sqlstate` checks both directions, and this
+  //       is the direction that catches a refusal silently becoming a no-op.
+  //
+  //       It is 161n's shape pointed at a different code deliberately. 161n proves the checker notices a
+  //       code nothing raises; this proves THIS unit's load-bearing refusal is one of the codes it is
+  //       watching, which is a claim about the registration and not about the checker. Removing the
+  //       TRIGGER instead would have proved nothing: the function would still carry the raise, so
+  //       `pnpm sqlstate` would still see the code raised, and the database the suites run against has
+  //       already had 0131 applied so no statement could see the edit either.
+  checkRejectedBy(
+    'staff: deleting ZY374 from the migration while it stays registered fails pnpm sqlstate',
+    withEditedFile(
+      STAFF_MIGRATION,
+      (source) =>
+        replaceOnce(source, `    using errcode = 'ZY374',`, `    using errcode = 'ZS002',`),
+      () => runExpectingFailure('pnpm', ['sqlstate']),
+    ),
+    'ZY374',
+  )
+
+  // ---- the leave balance's unit -------------------------------------------------------------------
+
+  // 161e. The `calendar_day` quarantine, turned into an acceptance. ZY371 then refuses the insert, so
+  //       the run FAILS rather than quarantining — which is a different and worse outcome: the whole
+  //       file stops instead of one line being named.
+  breakStaffImport(
+    'staff: accepting a calendar-day leave balance must be caught',
+    STAFF_IMPORTER,
+    `  if (staged.leaveOpeningBasis === LEAVE_BASES.calendarDay) {`,
+    `  if (false && staged.leaveOpeningBasis === LEAVE_BASES.calendarDay) {`,
+    'leave_balance_in_calendar_days',
+    staffPairSuite(),
+  )
+
+  // 161f. The basis cell NORMALISED away at staging, so a `calendar_day` file imports as though it had
+  //       been confirmed. This is the same defect as 161e reached one layer earlier and it is worth its
+  //       own case: 161e leaves the cell intact and stops acting on it, where this one destroys the
+  //       claim the cell exists to carry — after which nothing downstream, including ZY371, can tell
+  //       that the question was never answered.
+  breakStaffImport(
+    'staff: normalising the leave basis away at staging must be caught',
+    STAFF_IMPORTER,
+    `    leaveOpeningBasis: cell.leaveOpeningBasis,`,
+    `    leaveOpeningBasis: 'trading_session_day',`,
+    'leave_balance_in_calendar_days',
+    staffPairSuite(),
+  )
+
+  // 161g. The two bases collapsed into one value, so `calendar_day` and `trading_session_day` become
+  //       the same claim and the vocabulary stops distinguishing "checked" from "assumed" at all. The
+  //       pairing suite's quarantine case is what fails, and it fails by name.
+  //
+  //       Deliberately NOT an edit to ZY371's message in the migration, although the message's
+  //       `business_day` count is a claim the pairing suite asserts: the database the suites run against
+  //       has already had 0131 applied, so an edit to the file changes nothing a statement can see and a
+  //       PASS would be a report about a file nothing read (block 134's reason). The cases that DO edit
+  //       that file below all run a checker which reads it as text.
+  breakStaffImport(
+    'staff: collapsing the two leave bases into one value must be caught',
+    'packages/migration/src/importers/staff/leave-opening.ts',
+    `  calendarDay: 'calendar_day',`,
+    `  calendarDay: 'trading_session_day',`,
+    'leave_balance_in_calendar_days',
+    staffPairSuite(),
+  )
+
+  // ---- the zero -----------------------------------------------------------------------------------
+
+  // 161h. An imported zero, no longer marked provisional. Twelve months forward from an unconfirmed
+  //       zero and from a confirmed one are the same 3,000 hundredths — the worked examples' sixth case
+  //       — so the mark is the only thing that can tell them apart, and ZY372 is what refuses the row.
+  breakStaffImport(
+    'staff: an imported zero leave balance that is not marked provisional must be caught',
+    STAFF_SERVICE,
+    `  const isZero = input.leaveOpeningHundredths === 0`,
+    `  const isZero = false`,
+    // The pairing case's own name. ZY372 then refuses the insert and the run throws, so what reaches the
+    // captured output is the failing test rather than a diff carrying the code.
+    'records a ZERO balance as provisional, naming its open question',
+    staffPairSuite(),
+  )
+
+  // ---- the committed worked examples --------------------------------------------------------------
+
+  // 161i. The rounding direction. 250 x 27 / 28 is 241.07…, so rounding up is 242 and down is 241 —
+  //       both plausible on a screen, and the decision is recorded in `leave-accrual.ts` as "of two
+  //       errors, the one to make is the visible one that does not take something away".
+  breakStaffImport(
+    'staff: reversing the accrual rounding direction must be caught by a committed example',
+    ACCRUAL,
+    `  return Math.floor((numerator + denominator - 1) / denominator)`,
+    `  return Math.floor(numerator / denominator)`,
+    'rounds a pro-rated month UP',
+  )
+
+  // 161j. The seeded policy literal in the worked examples, changed. The pairing suite reads that file
+  //       as text and holds each field equal to the row, which is the check that makes restating the
+  //       policy in a pure test safe at all.
+  breakStaffImport(
+    'staff: a worked-example policy that disagrees with the seeded rule must be caught',
+    WORKED_EXAMPLES,
+    `  monthlyAccrualHundredths: 250,`,
+    `  monthlyAccrualHundredths: 200,`,
+    'restates migration 0066 version 1 field for field',
+    staffPairSuite(),
+  )
+
+  // ---- the credential that gates availability -----------------------------------------------------
+
+  // 161k. A lapsed expiry written as a future one. The gate is `readEligibleTherapists`' and this unit
+  //       adds no availability code, so the only way the import can break it is by writing the wrong
+  //       date — which is exactly what this case does.
+  //
+  //       The anchor and the replacement are assembled from single-quoted strings, not written as
+  //       template literals: a `${...}` inside one would be interpolated HERE, by this file, which is
+  //       the mistake block 160 records as having written `ReferenceError` into the module it edited.
+  breakStaffImport(
+    'staff: rewriting a lapsed credential expiry as a future one must be caught',
+    STAFF_SERVICE,
+    '        ${credential.expiresOn}::date',
+    '        greatest(${credential.expiresOn}::date, current_date + 1)',
+    'credential_expired',
+    staffPairSuite(),
+  )
+
+  // ---- the gates this unit had to stay inside -----------------------------------------------------
+
+  // 161l. The Drizzle mirror. SQL-first (ADR 0006), and `pnpm db:drift` holds the two equal.
+  checkRejectedBy(
+    'staff: a Drizzle mirror missing a column of imported_staff_row fails db:drift',
+    withEditedFile(
+      STAFF_MIRROR,
+      (source) => replaceOnce(source, `    quarantineReason: text('quarantine_reason'),`, ''),
+      () => runExpectingFailure('pnpm', ['db:drift']),
+    ),
+    'quarantine_reason',
+  )
+
+  // 161m. Direction one of the registry: a code 0131 raises and the registry does not name.
+  checkRejectedBy(
+    'staff: an unregistered SQLSTATE raised by 0131 fails pnpm sqlstate',
+    withEditedFile(
+      STAFF_REGISTRY,
+      (source) =>
+        replaceOnce(
+          source,
+          `  {
+    code: 'ZY372',
+    rule: 'A leave opening balance of zero must be marked provisional and name its open question.',
+    migration: '0131',
+    raisedBy: ['assert_leave_opening_balance_is_sound'],
+    translators: ['packages/db/src/services/import-staff.ts'],
+  },
+`,
+          '',
+        ),
+      () => runExpectingFailure('pnpm', ['sqlstate']),
+    ),
+    'ZY372',
+  )
+
+  // 161n. Direction two: a registered code no migration raises.
+  checkRejectedBy(
+    'staff: a registered SQLSTATE no migration raises fails pnpm sqlstate',
+    withEditedFile(
+      STAFF_MIGRATION,
+      (source) => replaceOnce(source, `errcode = 'ZY372'`, `errcode = 'ZY371'`),
+      () => runExpectingFailure('pnpm', ['sqlstate']),
+    ),
+    'ZY372',
+  )
+
+  // 161o. `imported_staff_row` claims to be append-only, and `pnpm db:conventions` reads the claim.
+  checkRejectedBy(
+    'staff: an append-only imported_staff_row without its DELETE guard fails db:conventions',
+    withEditedFile(
+      STAFF_MIGRATION,
+      (source) =>
+        replaceOnce(
+          source,
+          `create trigger imported_staff_row_no_delete
+  before delete on imported_staff_row
+  for each row execute function refuse_imported_staff_row_change();`,
+          '',
+        ),
+      () => runExpectingFailure('pnpm', ['db:conventions']),
+    ),
+    'imported_staff_row',
+  )
+
+  // ---- the controls ------------------------------------------------------------------------------
+
+  // 161y. The two pure suites, unedited: the workbook's shape, every named rejection, and the committed
+  //       worked examples whose figures were derived by hand.
+  check(
+    "staff: the importer's pure suites pass against the real tree",
+    !run('pnpm', staffPureSuites()).failed,
+  )
+
+  // 161z. The pairing suite, unedited: the five quarantines, the credential gate, the field-level policy
+  //       over the sealed columns, the publishability generation and all four refusals.
+  check(
+    'staff: the pairing suite passes against the real tree',
+    !run('pnpm', staffPairSuite()).failed,
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
