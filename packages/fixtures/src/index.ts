@@ -10,6 +10,7 @@ export * from './cash-up.ts'
 export * from './checkout.ts'
 export * from './clock.ts'
 export * from './credit-note.ts'
+export * from './customer-import.ts'
 export * from './duplicate-queue.ts'
 // `invoice.ts` joined the barrel for M-TILL-13: `FIXTURE_ISSUER` and `FIXTURE_HOURS` are what
 // `checkoutMapping` defaults to, so a test comparing the till's transcription against it has to be able to

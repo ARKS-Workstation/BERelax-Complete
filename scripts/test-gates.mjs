@@ -47507,6 +47507,465 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 150a-150z. (H-MIG-04) The consent floor shown to be able to fail, and the ledger shown to hold no number.
+//
+// The unit's whole subject is an ABSENCE — a reconstructed contact list arrives with no marketing consent —
+// and an absence is the hardest thing in this repository to test, because a case asserting "no row" passes
+// when the import did nothing at all. So this block does two things a suite cannot do for itself.
+//
+// **Every refusal is shown to fire, BY ITS SQLSTATE.** `ZY271` is the floor as a property of the database:
+// a GRANTED consent row whose `capture_source` is `'import'` is refused for any purpose that gates a send.
+// A bare non-zero exit would be satisfied by a typo in a column name (ADR 0003), and here it would also be
+// satisfied by the row bouncing off `consent_wording_hash_matches` instead — which is a different refusal
+// about a different thing, and the one a reader would be sent to investigate.
+//
+// **And the rule is shown to be as NARROW as it claims.** 150h to 150k are the controls, and they carry more
+// of this block than the refusals do: a trigger that refused every consent row, or every row captured by an
+// import, would pass 150a and 150b and would leave the booking form unable to record an opt-in at all — the
+// failure mode where a privacy guard becomes an outage. So an ordinary capture, a WITHDRAWAL captured by an
+// import, and a grant on a purpose that does not gate a send must all still be accepted.
+//
+// `ZY273` is this unit's ZY256. The distinct-customer count every acceptance line is read off is
+// `imported_contact.outcome = 'created'`, and a record saying `created` with no customer behind it would
+// report an import of people who are not in the database while satisfying ZY196 perfectly well, because the
+// record itself carries provenance. 150e, 150f and 150g are its three ways of being wrong, and 150n breaks
+// the code that writes the column and requires the DATABASE to catch it.
+//
+// Every probe runs inside `begin; … ; rollback;`, and the ones about a DEFERRED trigger issue
+// `set constraints all immediate` first — a transaction that never commits never fires one, which is the
+// trap `runImport`'s dry run is arranged against and would make three of these cases report a refusal that
+// never happened.
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const E164 = 'packages/core/src/identity/e164.ts'
+  const E164_SUITE = 'packages/core/src/identity/e164.test.ts'
+  const DEDUP = 'packages/migration/src/importers/customers/dedup.ts'
+  const IMPORTER = 'packages/migration/src/importers/customers/import.ts'
+  const IMPORTER_UNIT = 'packages/migration/src/importers/customers/import.test.ts'
+  const IMPORTER_PROPERTY = 'packages/migration/src/importers/customers/import.property.test.ts'
+  const SERVICE = 'packages/db/src/services/import-contacts.ts'
+  const PAIR_SUITE = 'packages/fixtures/src/customer-import.itest.ts'
+  const contactUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const contactItest = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  /*
+    One imported contact, built from literals so every probe below can vary exactly one thing.
+
+    The holder is on `+97159`, which is not an allocated UAE mobile prefix — a fixture number that could
+    ring a real handset eventually does — and in the `0150` block, which nothing else uses. The staging run
+    and row exist because ZY273 walks from the record through `import_staging.entity_provenance` to the run
+    that produced it, so a probe with no ledger behind it would be refused for having no provenance rather
+    than for the thing it is about.
+  */
+  const CU = '88888888-8888-8888-8888-888888880001'
+  const RUN = '88888888-8888-8888-8888-888888880002'
+  const ROW = '88888888-8888-8888-8888-888888880003'
+  const REC = '88888888-8888-8888-8888-888888880004'
+  const WORDING =
+    '(select id from consent_wording where purpose = $$%s$$ order by version desc limit 1)'
+  const WORDING_HASH =
+    '(select content_hash from consent_wording where purpose = $$%s$$ order by version desc limit 1)'
+
+  const PREAMBLE = [
+    `insert into customer (id, phone_e164, created_via) values ('${CU}', '+971590150001', 'import')`,
+    'insert into import_staging.import_run (id, importer, importer_version, source_file, ' +
+      `source_file_hash, mode, state, target_tables, actor_label) values ('${RUN}', 'customers', '1', ` +
+      "'gate-150-contacts.tsv', repeat('c', 64), 'live', 'running', " +
+      "array['public.imported_contact', 'public.customer'], 'gate fixture')",
+    'insert into import_staging.import_row (id, run_id, line_number, row_hash, payload, state) values ' +
+      `('${ROW}', '${RUN}', 1, repeat('d', 64), '{}'::jsonb, 'pending')`,
+  ].join('; ')
+
+  /** The record. `over` replaces one column's value, which is the whole of each probe. */
+  const record = (over = {}) => {
+    const values = { id: `'${REC}'`, outcome: `'created'`, reason: 'null', claim: 'false', ...over }
+    return (
+      'insert into imported_contact (id, contact_hmac, pepper_version, outcome, quarantine_reason, ' +
+      `consent_claim_discarded) values (${values.id}, repeat('a', 64), 'gate', ${values.outcome}, ` +
+      `${values.reason}, ${values.claim})`
+    )
+  }
+
+  /** Provenance for one target of the staged row. ZY273 reads exactly this. */
+  const prov = (table, targetId) =>
+    'insert into import_staging.import_provenance (import_row_id, target_schema, target_table, ' +
+    `target_id) values ('${ROW}', 'public', '${table}', '${targetId}')`
+
+  /** A consent row, as a capture source, a kind and a purpose. The wording is resolved from the seed. */
+  const consent = (source, kind, purpose, withWording = true) =>
+    'insert into consent (contact_customer_id, channel, purpose, kind, recorded_at, ' +
+    'consent_wording_id, wording_hash, capture_source, capture_actor_kind, capture_actor_label, ' +
+    `capture_locale) values ('${CU}', 'sms'::message_channel, '${purpose}', '${kind}'::consent_kind, ` +
+    `'2099-08-01T09:00:00Z'::timestamptz, ` +
+    `${withWording ? WORDING.replace('%s', purpose) : 'null'}, ` +
+    `${withWording ? WORDING_HASH.replace('%s', purpose) : 'null'}, ` +
+    `'${source}', 'system', 'gate fixture', 'en')`
+
+  /*
+    `VERBOSITY=verbose`, which is what makes these probes assert on the CODE rather than on prose.
+
+    psql prints `ERROR:  <message>` and nothing else by default — no SQLSTATE anywhere in the output — so a
+    probe matching `ZY271` against a default-verbosity run fails on a refusal that fired perfectly well.
+    That is how the first version of this block reported seven failures about seven correct refusals.
+    Verbose prints `ERROR:  ZY271: <message>`, so `checkRejectedBy` can anchor on the five characters that
+    identify the rule (ADR 0043) instead of on a sentence that a reword would silently stop matching.
+    0119's block anchors on the same codes because its own messages BEGIN with them; this is the general
+    arrangement and it works for a refusal raised by any migration, including 0056's and 0111's.
+  */
+  const psqlProbe = (statement, immediate = false) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-v',
+      'VERBOSITY=verbose',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${statement}${immediate ? '; set constraints all immediate' : ''}; rollback;`,
+    ])
+
+  // Written as data so the rule name sits beside the statement that must trip it. Anything added here
+  // states its own rule, which is the only form of this gate that cannot drift into "something failed".
+  const probes = [
+    {
+      // 150a. The consent floor. A list that says these people opted in is still not an opt-in: the proof
+      //       TDRA asks for is the exact wording the person was SHOWN, and `consent_wording` holds only the
+      //       statements this system published.
+      name: 'contact import gate refuses a granted marketing consent captured by an import',
+      rule: 'ZY271',
+      immediate: false,
+      sql: `${PREAMBLE}; ${consent('import', 'granted', 'marketing')}`,
+    },
+    {
+      // 150b. The SECOND send-gating purpose, and it is not a duplicate of 150a. The rule reads
+      //       `consent_purpose.is_send_gating` rather than naming `marketing`, so a version that had
+      //       hard-coded the one purpose would pass 150a and leave review requests importable.
+      name: 'contact import gate refuses an imported grant for review requests too',
+      rule: 'ZY271',
+      immediate: false,
+      sql: `${PREAMBLE}; ${consent('import', 'granted', 'review_request')}`,
+    },
+    {
+      // 150c. The record of what an import did is the evidence of what it did. A correction is a new import.
+      name: 'contact import gate refuses an UPDATE to an imported-contact record',
+      rule: 'ZY272',
+      immediate: false,
+      sql:
+        `${PREAMBLE}; ${record()}; ${prov('imported_contact', REC)}; ${prov('customer', CU)}; ` +
+        `update imported_contact set outcome = 'matched' where id = '${REC}'`,
+    },
+    {
+      // 150d. The other event, which is where this defect always hides: one trigger copied for the other
+      //       event with the word not changed.
+      name: 'contact import gate refuses a DELETE of an imported-contact record',
+      rule: 'ZY272',
+      immediate: false,
+      sql:
+        `${PREAMBLE}; ${record()}; ${prov('imported_contact', REC)}; ${prov('customer', CU)}; ` +
+        `delete from imported_contact where id = '${REC}'`,
+    },
+    {
+      // 150e. A record that resolves to no file and no line is evidence of nothing. This table's half of
+      //       ZY196, and the first thing a hand-written row gets wrong.
+      name: 'contact import gate refuses a record that names no staged source row',
+      rule: 'ZY273',
+      immediate: true,
+      sql: `${PREAMBLE}; ${record()}`,
+    },
+    {
+      // 150f. The case the distinct count rests on: `created` with nothing behind it. ZY196 is satisfied —
+      //       the record carries provenance — so nothing else in the system would notice.
+      name: 'contact import gate refuses a created record with no customer behind it',
+      rule: 'ZY273',
+      immediate: true,
+      sql: `${PREAMBLE}; ${record()}; ${prov('imported_contact', REC)}`,
+    },
+    {
+      // 150g. The other direction, which matters as much: a customer nothing accounts for. A count over the
+      //       outcome column could never show it.
+      name: 'contact import gate refuses a matched record whose line created a customer anyway',
+      rule: 'ZY273',
+      immediate: true,
+      sql:
+        `${PREAMBLE}; ${record({ outcome: `'matched'` })}; ${prov('imported_contact', REC)}; ` +
+        `${prov('customer', CU)}`,
+    },
+  ]
+
+  if (!dbUrl) {
+    check(
+      'contact import gate: a database is configured',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    for (const { name, rule, sql: statement, immediate } of probes) {
+      checkRejectedBy(name, psqlProbe(statement, immediate), rule)
+    }
+
+    /*
+      150h to 150k. The controls, and the reason the seven above mean anything.
+
+      The first is the ordinary one every gate needs: the legitimate row has to be ACCEPTED, or a renamed
+      table, a missing seed or a wrong connection string would reject every probe and this block would
+      report seven passes while examining nothing.
+
+      The other three are specific to ZY271 and they are the ones that would otherwise go wrong quietly. A
+      trigger that refused a consent row too widely does not look like a privacy bug: it looks like the
+      booking form being unable to record an opt-in, the preference centre being unable to record a
+      withdrawal, or an intake consent being refused — and each of those is an outage rather than a
+      refusal somebody reads.
+    */
+    const accepted = [
+      {
+        // 150h. A legitimate imported contact: the record, its provenance, and the customer its line
+        //       created. Every probe above varies one value of this.
+        name: 'contact import gate: a legitimate imported contact is accepted',
+        sql: `${PREAMBLE}; ${record()}; ${prov('imported_contact', REC)}; ${prov('customer', CU)}`,
+        why:
+          'the fixture every probe above varies ONE value of was itself refused, so none of them is ' +
+          'measuring what it names',
+      },
+      {
+        // 150i. The path that must keep working. An opt-in at the confirm step of a booking is what the
+        //       whole floor exists to make meaningful, and a rule that refused it would be the privacy
+        //       guard becoming the outage.
+        name: 'contact import gate: an opt-in captured at the booking form is still accepted',
+        sql: `${PREAMBLE}; ${consent('booking_form', 'granted', 'marketing')}`,
+        why: 'ZY271 is refusing an ordinary capture, which makes the consent floor an outage',
+      },
+      {
+        // 150j. A withdrawal captured by an import. Permitted deliberately: it only ever restricts
+        //       sending, and a list saying "these people asked us to stop" must be importable without
+        //       argument. 0056 accepts a withdrawal with no wording for the same reason.
+        name: 'contact import gate: a WITHDRAWAL captured by an import is still accepted',
+        sql: `${PREAMBLE}; ${consent('import', 'withdrawn', 'marketing', false)}`,
+        why:
+          'ZY271 is refusing an imported withdrawal, which would make this system easier to opt into ' +
+          'than out of',
+      },
+      {
+        // 150k. A purpose that does not gate a send. `clinical_processing` is the lawful basis for holding
+        //       an intake form rather than permission to message anybody (0056), so refusing it here would
+        //       be this unit deciding something it has no business deciding.
+        name: 'contact import gate: an imported grant for a non-send-gating purpose is untouched',
+        sql: `${PREAMBLE}; ${consent('import', 'granted', 'clinical_processing')}`,
+        why:
+          'ZY271 is refusing a purpose that gates no send, so the rule is wider than the vocabulary ' +
+          'column it is supposed to follow',
+      },
+    ]
+    for (const { name, sql: statement, why } of accepted) {
+      const result = psqlProbe(statement, true)
+      check(name, !result.failed, `${why}:\n${result.output}`)
+    }
+  }
+
+  // 150l. The minimised payload, which is this unit's answer to Y9-import-ledger as a CHECK rather than a
+  //       decision. Widen the key set and the importer's own control case has to fire by the name of the
+  //       rule — because the ledger keeps `import_row.payload` for ever, with no DELETE grant anywhere in
+  //       `import_staging` and `jsonb` invisible to all five of C-CRM-10's catalogue probes.
+  checkRejectedBy(
+    'contact import: a staged payload carrying the number is caught by name',
+    withEditedFile(
+      DEDUP,
+      (source) =>
+        replaceOnce(
+          source,
+          "  'quarantineReason',\n] as const",
+          "  'quarantineReason',\n  'phoneAsListed',\n] as const",
+        ),
+      () => runExpectingFailure('pnpm', contactUnit(IMPORTER_UNIT)),
+    ),
+    'staged-payload-must-carry-only-the-minimised-keys',
+  )
+
+  // 150m. The digest itself. Return the value instead of keying it and the property test has to find a
+  //       digit run of the source in the ledger — which is the whole claim, and the one a change to
+  //       `importContactHmac` would otherwise break silently.
+  checkRejectedBy(
+    'contact import: a payload keyed with the plaintext is caught by the property test',
+    withEditedFile(
+      SERVICE,
+      (source) =>
+        replaceOnce(
+          source,
+          '  return suppressionKey(pepper, keyKind, JSON.stringify(value))',
+          '  return `${keyKind}${value}`',
+        ),
+      () => runExpectingFailure('pnpm', contactUnit(IMPORTER_PROPERTY)),
+    ),
+    // The SHAPE check is what fires, and it is the right anchor: a digest that is not 64 hex characters
+    // cannot be a keyed digest, and the digit scan beside it is what covers a number put into another key.
+    // Anchoring on the scan instead would have been anchoring on the assertion that runs second.
+    'the staged digest is not a keyed digest',
+  )
+
+  /*
+    150n. The outcome column, and the reason ZY273 exists.
+
+    `applyContactRow` writes `created` or `matched` according to whether the customer insert conflicted, and
+    the DISTINCT COUNT every acceptance line in this unit is read off is a count of the first. Report
+    `created` for both and that count becomes a report of people who are not in the database — and ZY196 is
+    satisfied throughout, because the record itself carries provenance.
+
+    The mutation is on the OUTCOME and not on the resolver, and the difference is which guard fires. Making
+    `resolveOrCreateImportedCustomer` answer `created: true` for a matched row makes `apply` return a
+    `customer` entity for it too, and `import_provenance_one_per_target` then refuses the COMMIT as a unique
+    violation — a real guard, and not this one. Changing only the column leaves the entities right and the
+    record wrong, which is exactly the state ZY273 exists to refuse.
+
+    The refusal is anchored on its MESSAGE and not on `ZY273`, because this one arrives through vitest
+    rather than through psql: the SQLSTATE is on the error object and the reporter prints the message.
+  */
+  checkRejectedBy(
+    'contact import: a record whose outcome is not what the import did is refused by the database',
+    withEditedFile(
+      IMPORTER,
+      (source) =>
+        replaceOnce(
+          source,
+          "    outcome: resolved.created ? 'created' : 'matched',",
+          "    outcome: 'created',",
+        ),
+      () =>
+        runExpectingFailure('pnpm', [...contactItest(PAIR_SUITE), '-t', 'writes no consent row']),
+    ),
+    'ImportedContactOutcomeDisagrees',
+  )
+
+  // 150o. Identity is not SMS targeting, and the landline is the case that proves it. H-MIG-04's third
+  //       acceptance line names `02 557 6533`; refuse it and the acceptance case has to fail naming the
+  //       `+971` form it asks for.
+  checkRejectedBy(
+    'contact import: a landline that no longer normalises is caught by name',
+    withEditedFile(
+      E164,
+      (source) =>
+        replaceOnce(
+          source,
+          "      ? accept(nsn, 'landline')\n      : { ok: false, reason: 'wrong_length' }",
+          "      ? { ok: false, reason: 'wrong_length' }\n      : { ok: false, reason: 'wrong_length' }",
+        ),
+      () => runExpectingFailure('pnpm', contactUnit(E164_SUITE)),
+    ),
+    '+97125576533',
+  )
+
+  // 150p. The other half of that separation, and the dangerous direction. A landline reported as
+  //       MESSAGEABLE would put an SMS on a number nothing can reach, and the census against
+  //       `normalisePhoneResult` is what refuses it — so the census has to be seen to fire.
+  checkRejectedBy(
+    'contact import: a landline reported as messageable is caught by the census',
+    withEditedFile(
+      E164,
+      (source) =>
+        replaceOnce(
+          source,
+          "  return { ok: true, e164: e164 as E164, lineType, messageable: lineType === 'mobile' }",
+          '  return { ok: true, e164: e164 as E164, lineType, messageable: true }',
+        ),
+      () => runExpectingFailure('pnpm', contactUnit(E164_SUITE)),
+    ),
+    'disagree',
+  )
+
+  // 150q. The dedup. Stop consulting what the file has already named and every line counts as a first
+  //       occurrence — which is the figure the fourth acceptance line is about, and the one a suite
+  //       asserting only a total row count would not notice.
+  checkRejectedBy(
+    'contact import: a dedup that forgets what the file already named is caught',
+    withEditedFile(
+      DEDUP,
+      (source) =>
+        replaceOnce(
+          source,
+          '    if (seen.has(staged.payload.contactHmac)) {',
+          '    if (false && seen.has(staged.payload.contactHmac)) {',
+        ),
+      () => runExpectingFailure('pnpm', contactUnit(IMPORTER_UNIT)),
+    ),
+    'counts the people the list is about, not the lines it has',
+  )
+
+  // 150r. The importer must not be able to resolve a digest it did not parse. Resolve through a previous
+  //       file's plan instead of refusing and the number a line is about becomes whatever was imported
+  //       last — which is this unit's one unforgivable failure, attaching a record to somebody else's
+  //       number.
+  checkRejectedBy(
+    'contact import: resolving a digest the parsed file does not hold is caught',
+    withEditedFile(
+      IMPORTER,
+      (source) =>
+        replaceOnce(
+          source,
+          '      plan = planContactImport(options, parseContactWorkbook(sourceText))\n      return plan.rows',
+          '      const next = planContactImport(options, parseContactWorkbook(sourceText))\n' +
+            '      plan = plan === null ? next : plan\n      return next.rows',
+        ),
+      () => runExpectingFailure('pnpm', contactUnit(IMPORTER_UNIT)),
+    ),
+    'refuses a digest from a file it has since re-parsed',
+  )
+
+  // 150s. Nothing in the customer importer writes a consent row, as a SCAN rather than a review note.
+  //       The database refusal above is the guarantee; this is the thing a reader of the diff would
+  //       otherwise have to take on trust, and it is the change somebody makes when a list "already has
+  //       the consents in it".
+  {
+    const CONSENT_WRITES = /recordConsent|insert\s+into\s+consent/i
+    const modules = [
+      E164,
+      DEDUP,
+      IMPORTER,
+      'packages/migration/src/importers/customers/workbook.ts',
+    ]
+    const offenders = modules.filter((path) => CONSENT_WRITES.test(readFileSync(path, 'utf8')))
+    check(
+      'contact import: no module of the customer importer writes a consent row',
+      offenders.length === 0,
+      `${offenders.join(', ')} names a consent write. The import records that a claim was DISCARDED ` +
+        '(`imported_contact.consent_claim_discarded` and one audit row) and writes nothing to `consent`; ' +
+        'ZY271 refuses the row either way, and a module that tried would be refused at run time instead ' +
+        'of in review.',
+    )
+    // The control: the scan can FIND one. A pattern that matched nothing would report every module as
+    // clean, which is the failure ADR 0002 is about and the reason `pnpm boundaries` once cruised zero.
+    check(
+      'contact import: the consent-write scan can find a consent write',
+      CONSENT_WRITES.test(readFileSync('packages/db/src/repositories/consent.ts', 'utf8')),
+      'the scan found no consent write in the repository that exists to make them, so it is matching ' +
+        'nothing and the case above is vacuous',
+    )
+  }
+
+  // The two repository-wide checks this unit's schema is the business of, run here rather than assumed:
+  // 0121 adds a table and three rules, and the mirror and the SQLSTATE registry are what stop any of them
+  // being unmirrored or unregistered with nothing saying so.
+  {
+    const drift = run('pnpm', ['db:drift'])
+    check(
+      'contact import: the schema and its Drizzle mirror still agree',
+      !drift.failed,
+      drift.output,
+    )
+    const codes = run('pnpm', ['sqlstate'])
+    check(
+      'contact import: every private SQLSTATE 0121 raises is registered, in order',
+      !codes.failed,
+      codes.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

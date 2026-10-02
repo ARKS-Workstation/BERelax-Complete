@@ -242,7 +242,10 @@ describe('the erasure rule registry', () => {
     const registrars = [...new Set([...ERASURE_RULES.values()].map((r) => r.registeredBy))]
     expect(registrars).toContain('C-CRM-10')
     /*
-      A legibility ceiling and not a rule, which is why it moved from 6 to 10 when P-HR-11 became the sixth.
+      A legibility ceiling and not a rule, which is why it moved from 6 to 10 when P-HR-11 became the sixth,
+      and from 10 to 13 when H-MIG-03 and H-MIG-04 became the tenth and eleventh — the migration's own two
+      tables, one of them classified by the unit that needed an erasure to run in order to prove something
+      about the import ledger.
 
       What the case actually means is asserted twice over and neither part is this number: C-CRM-10 still
       accounts for the majority (below), and the NAMED list two cases down makes a new registrar a diff
@@ -250,7 +253,7 @@ describe('the erasure rule registry', () => {
       for the right reason and asks for the wrong fix — the sixth unit to classify a table it created is the
       registry working, not a set growing out of hand.
     */
-    expect(registrars.length).toBeLessThan(10)
+    expect(registrars.length).toBeLessThan(13)
     expect(
       [...ERASURE_RULES.values()].filter((r) => r.registeredBy === 'C-CRM-10').length,
     ).toBeGreaterThan(ERASURE_RULES.size / 2)
@@ -303,12 +306,22 @@ describe('the erasure rule registry', () => {
       and P-HR-12's `wps_export.file_sha256` were both unclassified when they merged, which ADR 0034 turned
       into a refused erasure rather than a silently unclassified column — nine cases in `rights.itest.ts`
       failed with "the catalogue holds columns no erasure rule classifies" until each got a rule.
+
+      And a THIRD time, for H-MIG-03: `imported_package_sale.package_sale_id` was unclassified when 0119
+      merged, so the engine refused every erasure on that tree. H-MIG-04 wrote the rule — it cannot
+      demonstrate its own decision about the migration ledger without running one — and `registeredBy` still
+      names H-MIG-03, because this case's claim is about the unit that CREATED the table and a rule owned by
+      whoever happened to notice would make the field say something else. The prose in the rule says who
+      classified it. H-MIG-04's own entry is `imported_contact.contact_hmac`, a column named `_hmac` on
+      purpose so the credential probe reaches it.
     */
     expect([...units].sort()).toEqual([
       'C-AUTO-07',
       'C-CRM-10',
       'G-REV-02',
       'G-REV-05',
+      'H-MIG-03',
+      'H-MIG-04',
       'P-HR-11',
       'P-HR-12',
       'W-SITE-10',

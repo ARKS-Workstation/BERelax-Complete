@@ -11,7 +11,18 @@ import { packagesImporter } from './importers/packages/import.ts'
  * choice is a value in the tree that a reader can enumerate, not a string on a command line that resolves to
  * whatever is on disk. A typo then names nothing instead of running something.
  *
- * H-MIG-04 through H-MIG-11 add theirs here. `probe` is the framework's conformance importer, deliberately
+ * **H-MIG-04's `customers` importer is deliberately NOT here, and that is the one absence worth reading.**
+ * This array is a module-level frozen value, so a registered importer cannot have read anything when it is
+ * constructed — see the `packages` paragraph below, which is the same constraint met a different way. That
+ * importer needs two things no frozen array can hold: the suppression PEPPER, which is a secret reaching the
+ * application through `packages/config` (a package this one may not import), and the phone normaliser from
+ * `@berelax/core` (which it may not import either). Built without them it would have to stage the plaintext
+ * number — the one thing `0121_customer_import.sql` exists to prevent — or throw, and an entry that cannot
+ * run is worse than no entry in a list a person is supposed to be able to enumerate and run, which is the
+ * reason H-MIG-02 recorded for leaving its own out. The door is `scripts/migrate-contacts.mjs`, which reads
+ * the pepper exactly as the send path does and builds the importer with it.
+ *
+ * H-MIG-05 through H-MIG-11 add theirs here. `probe` is the framework's conformance importer, deliberately
  * listed rather than hidden: the CLI is what a person runs, and a CLI whose registry is empty cannot be
  * exercised at all — the first real importer would be the first time the command had ever been run. It
  * writes into the framework's conformance target and nothing reads that table, so the worst a mistaken

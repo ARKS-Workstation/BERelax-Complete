@@ -1984,6 +1984,42 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['package_sale_reconstruction_is_attested'],
     translators: ['packages/db/src/services/import-package-liability.ts'],
   },
+  // ZY271-ZY273 are H-MIG-04's, of the band ZY271-ZY280; ZY274 through ZY280 are left free and
+  // deliberately absent, because an entry for a code no migration raises is direction 3. Three and not one
+  // because each names a different thing to go and do — "import the contact with no consent and capture it
+  // at the next booking", "a correction is a new import against the corrected file", and "this code wrote a
+  // record that does not describe what it did".
+  //
+  // ZY271 is the one that carries the unit. It is the consent floor as a property of the DATABASE: "every
+  // imported customer gets marketing_consent = false with no flag able to change it" is a claim about an
+  // importer's options, and a later unit, a job or a psql session can falsify it without touching the
+  // importer at all. There is no `marketing_consent` column — 0056 made consent an append-only log, so the
+  // floor is the ABSENCE of a row — and the only enforceable statement of an absence is a refusal.
+  //
+  // ZY273 is this unit's ZY256: the count every acceptance line is read off is `outcome = 'created'`, and a
+  // record saying `created` with no customer behind it would report an import of people who are not in the
+  // database while satisfying ZY196, because the record itself carries provenance.
+  {
+    code: 'ZY271',
+    rule: 'A granted consent for a send-gating purpose may not be captured by an import.',
+    migration: '0121',
+    raisedBy: ['refuse_imported_promotional_consent'],
+    translators: ['packages/db/src/services/import-contacts.ts'],
+  },
+  {
+    code: 'ZY272',
+    rule: 'An imported-contact record may not be updated or deleted.',
+    migration: '0121',
+    raisedBy: ['refuse_imported_contact_change'],
+    translators: ['packages/db/src/services/import-contacts.ts'],
+  },
+  {
+    code: 'ZY273',
+    rule: "An imported-contact record must name a staged source row and its outcome must be that row's.",
+    migration: '0121',
+    raisedBy: ['assert_imported_contact_outcome'],
+    translators: ['packages/db/src/services/import-contacts.ts'],
+  },
   {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',

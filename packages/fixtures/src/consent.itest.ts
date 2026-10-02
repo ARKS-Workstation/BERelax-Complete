@@ -528,13 +528,17 @@ describe('acceptance — the capture context is mandatory at the DATABASE, not o
       capture_actor_kind: 'staff',
       capture_actor_label: 'Receptionist',
       capture_locale: 'en',
+      // Overridable only because `import` cannot carry a GRANT — see the control below. Every other
+      // probe in this block leaves it alone, which is why it is a default rather than a parameter.
+      kind: 'granted',
       ...overrides,
     }
     return tx`
       insert into consent
         (contact_customer_id, channel, purpose, kind, recorded_at, consent_wording_id, wording_hash,
          capture_source, capture_actor_kind, capture_actor_label, capture_locale)
-      values (${secondId}, 'email', 'marketing', 'granted', ${PROBE_AT_ISO}::timestamptz,
+      values (${secondId}, 'email', 'marketing', ${values.kind}::consent_kind,
+              ${PROBE_AT_ISO}::timestamptz,
               ${marketingWordingId}, decode(${marketingWordingHash}, 'hex'),
               ${values.capture_source}, ${values.capture_actor_kind}, ${values.capture_actor_label},
               ${values.capture_locale})
@@ -586,12 +590,29 @@ describe('acceptance — the capture context is mandatory at the DATABASE, not o
     expect(
       await probe((tx) => sqlstateOf(captureInsert(tx, { capture_actor_kind: 'agent' }))),
     ).toBe('23514')
-    // The control: every source the contract declares IS accepted, so the CHECK is not narrower than the
-    // vocabulary. A closed set the application can spell and the database cannot is a 500 on a real capture.
+    /*
+      The control: every source the contract declares IS accepted, so the CHECK is not narrower than the
+      vocabulary. A closed set the application can spell and the database cannot is a 500 on a real capture.
+
+      `import` is exercised with a WITHDRAWAL and every other source with this block's grant, and the
+      difference is H-MIG-04's `ZY271` (migration 0121) rather than a narrowing of any CHECK here. That
+      rule refuses a GRANTED consent captured at `import` for a purpose that gates a send, which is the
+      combination `@berelax/shared`'s own note on the value already described as impossible — "the
+      reconstructed-contacts path (Y8-customers), which imports with no promotional consent at all" — and
+      which nothing enforced until 0121. The value stays fully spellable: a withdrawal arrives through it,
+      and so does a grant for a purpose that gates no send.
+
+      The claim this loop makes is therefore unchanged and is still the one that matters: no source in the
+      contract is unusable at the database. Gate cases 150i to 150k hold the other half shut — an ordinary
+      capture, an imported withdrawal and a non-send-gating imported grant must all still be accepted — so
+      a ZY271 that grew wider than its own sentence fails by name there rather than turning the booking
+      form's opt-in into a 500 here.
+    */
     for (const source of CONSENT_CAPTURE_SOURCES) {
+      const kind = source === 'import' ? 'withdrawn' : 'granted'
       expect(
-        await probe((tx) => sqlstateOf(captureInsert(tx, { capture_source: source }))),
-        source,
+        await probe((tx) => sqlstateOf(captureInsert(tx, { capture_source: source, kind }))),
+        `${source} (${kind})`,
       ).toBeNull()
     }
   })
