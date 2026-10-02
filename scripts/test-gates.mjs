@@ -51245,6 +51245,308 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   )
 }
 
+// 157a-157z. (A-FIRST-07) The WhatsApp ref loop: every rule about the CODE shown to be able to stop
+//            holding, and the two refusals only a database can make shown to fire.
+//
+//            The unit's subject is a join key that leaves the system and comes back typed in by a person,
+//            so almost every claim here is about something being IMPOSSIBLE rather than about something
+//            working: a code that cannot carry an identifier, an alphabet in which a misread cannot
+//            produce another valid code, an attribution that cannot name a session nobody proved, a URL
+//            that cannot be assembled from a number somebody typed in. None of those can be seen to hold
+//            by looking at a passing test; each needs the fixture that breaks it (ADR 0003).
+//
+//            The cases come in four groups and each fails in a way the other three cannot see:
+//
+//              * **the URL can be assembled somewhere else.** 157a and 157b are the two directions of the
+//                `wa-me-number-literal` scan: a hand-built link with a number in it, and a SECOND file
+//                mentioning the host at all. The second is the one a literal grep cannot make — the
+//                defect is not a number typed twice, it is `wa.me/${facts.phoneWhatsapp}` written inline,
+//                which carries no literal, skips the E.164 refusal and publishes the Y1-nap placeholder.
+//              * **the alphabet can quietly widen.** 157c and 157d put `U` back, once in the alphabet and
+//                once in the range class, and require the two tests that hold those spellings equal to
+//                notice. `U` is the character the whole exclusion is for: with I, O, 0 and 1 already out,
+//                a misread of `U` as `V` is the only one left that produces ANOTHER VALID CODE.
+//              * **the rule can stop being the rule.** 157e to 157h break one comparison each — the
+//                expiry, the conflict, the attribution's source, the five-bucket denominator — and
+//                require the named test back BY NAME.
+//              * **the database can stop refusing.** 157i and 157j are the registry: a code deleted and a
+//                code whose `raisedBy` no longer names the function that raises it. 157k DISABLES the
+//                trigger in the database and requires the integration suite to notice, which is the only
+//                way to see ZY331 and ZY332 fail — they are a trigger a migration has already applied, so
+//                there is no file to edit. If a run of this block is killed between the two statements,
+//                `alter table booking_whatsapp_ref_capture enable trigger
+//                booking_whatsapp_ref_capture_attribution_is_proved` is the recovery; brief rule 13 is
+//                about exactly that hazard.
+//
+//            157y and 157z are the controls: every case above is satisfied by something FAILING, so two
+//            have to be satisfied by the real tree. 157y runs the three edited files unedited; 157z proves
+//            the `wa.me` scan reads a real number of files, because a scan that read nothing would report
+//            no offenders and pass for ever.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const SHARED_REF = 'packages/shared/src/whatsapp-ref.ts'
+  const CORE_REF = 'packages/core/src/booking/ref-capture.ts'
+  const REGISTRY = 'packages/db/src/sqlstate-registry.ts'
+  const LINK_TEST = 'packages/shared/src/whatsapp-link.test.ts'
+  const SHAPE_TEST = 'packages/shared/src/whatsapp-ref.test.ts'
+  const MINT_TEST = 'packages/db/src/repositories/whatsapp-ref.test.ts'
+  const RULE_TEST = 'packages/core/src/booking/ref-capture.test.ts'
+  const LOOP_ITEST = 'apps/web/src/whatsapp-ref-loop.itest.ts'
+  const CAPTURE_TRIGGER = 'booking_whatsapp_ref_capture_attribution_is_proved'
+
+  const unit = (...files) => ['exec', 'vitest', 'run', ...files]
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // ---- the URL can be assembled somewhere else -------------------------------------------------
+
+  // 157a. A hand-built `wa.me` link with a number in it, in a file that has no business holding one.
+  checkRejectedBy(
+    'ref loop: a hand-built wa.me URL anywhere in the repository is refused by name',
+    withFixture(
+      'packages/ui/src/__gate_fixture__whatsapp.ts',
+      // The number is on the unallocated +971 59 fixture band, so even the fixture cannot reach a handset.
+      "export const CHAT = 'https://wa.me/971590000999'\n",
+      () => runExpectingFailure('pnpm', unit(LINK_TEST)),
+    ),
+    'wa-me-number-literal',
+  )
+
+  // 157b. The other direction, and the one a literal grep cannot make: a second file that merely MENTIONS
+  //       the host. An interpolated link carries no number to find, so the rule has to be "one composer",
+  //       and that is a claim about the SET of files rather than about any one line.
+  checkRejectedBy(
+    'ref loop: a second file mentioning wa.me at all is refused by the exemption list',
+    withFixture(
+      'packages/ui/src/__gate_fixture__whatsapp-mention.ts',
+      '/** Opens wa.me/ in the customer’s own client. */\nexport const NOTE = 1\n',
+      () => runExpectingFailure('pnpm', unit(LINK_TEST)),
+    ),
+    'names every file that mentions wa.me at all',
+  )
+
+  // ---- the alphabet can quietly widen ---------------------------------------------------------
+
+  // 157c. `U` back in the alphabet. The draw test names the character, so the failure says which
+  //       exclusion stopped holding rather than only that a pattern did not match.
+  checkRejectedBy(
+    'ref loop: U put back into the alphabet is refused by name',
+    withEditedFile(
+      SHARED_REF,
+      (source) =>
+        replaceOnce(
+          source,
+          "export const WHATSAPP_REF_ALPHABET = 'ABCDEFGHJKMNPQRSTVWXYZ23456789'",
+          "export const WHATSAPP_REF_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'",
+        ),
+      () => runExpectingFailure('pnpm', unit(MINT_TEST)),
+    ),
+    'U must not be in the alphabet',
+  )
+
+  // 157d. `U` back in the RANGE class, which is the spelling the SQL CHECK and the HTML pattern are built
+  //       from. A hand-written range set is exactly the kind of thing a reader checks by eye and gets
+  //       wrong, and this is the test that holds it to the alphabet.
+  checkRejectedBy(
+    'ref loop: the range class widened past the alphabet is refused by name',
+    withEditedFile(
+      SHARED_REF,
+      (source) =>
+        replaceOnce(
+          source,
+          "export const WHATSAPP_REF_CODE_CLASS = 'A-HJKM-NP-TV-Z2-9'",
+          "export const WHATSAPP_REF_CODE_CLASS = 'A-HJKM-NP-Z2-9'",
+        ),
+      () => runExpectingFailure('pnpm', unit(SHAPE_TEST)),
+    ),
+    'the character class and the alphabet describe the same set',
+  )
+
+  // ---- the rule can stop being the rule -------------------------------------------------------
+
+  // 157e. The expiry comparison removed, so every code is alive for ever — which is the state the whole
+  //       unit exists to leave behind, and it looks exactly like working software.
+  checkRejectedBy(
+    'ref loop: a code with no expiry is refused by the test that states the lifetime',
+    withEditedFile(
+      CORE_REF,
+      (source) => replaceOnce(source, 'if (matched.expiresAt <= input.at) {', 'if (false) {'),
+      () => runExpectingFailure('pnpm', unit(RULE_TEST)),
+    ),
+    'records an expired code as expired, keeps the code, and claims no session',
+  )
+
+  // 157f. The conflict comparison removed, so a code another customer has claimed is claimed again —
+  //       silently reassigning a conversation, which is the one thing the acceptance line forbids.
+  checkRejectedBy(
+    'ref loop: a silently reassigned code is refused by the test that states the conflict',
+    withEditedFile(
+      CORE_REF,
+      (source) =>
+        replaceOnce(
+          source,
+          'if (matched.claimedByCustomerId !== null && matched.claimedByCustomerId !== input.customerId) {',
+          'if (false) {',
+        ),
+      () => runExpectingFailure('pnpm', unit(RULE_TEST)),
+    ),
+    'records a code another customer has claimed as a conflict, and does not reassign it',
+  )
+
+  // 157g. The attribution taken from somewhere other than the code's own row. This is the defect with no
+  //       symptom: a booking credited to a session nobody proved reads exactly like one credited right.
+  checkRejectedBy(
+    'ref loop: an attribution that is not the code’s own session is refused by name',
+    withEditedFile(
+      CORE_REF,
+      (source) =>
+        replaceOnce(
+          source,
+          'attributedSessionId: matched.sessionId,',
+          'attributedSessionId: input.customerId,',
+        ),
+      () => runExpectingFailure('pnpm', unit(RULE_TEST)),
+    ),
+    'records the match the caller found, and keeps no typed text beside it',
+  )
+
+  // 157h. A bucket dropped from the five the denominator is made of. A fifth outcome absent from the
+  //       counts is a capture rate computed over a subset of the bookings while looking exactly right,
+  //       and the type is what holds the five together.
+  checkRejectedBy(
+    'ref loop: a capture count bucket dropped from the empty value fails the typecheck by name',
+    withEditedFile(
+      CORE_REF,
+      (source) =>
+        replaceOnce(
+          source,
+          'export const EMPTY_REF_CAPTURE_COUNTS: RefCaptureCounts = Object.freeze({\n  matched: 0,\n  unknownCode: 0,\n  notOffered: 0,\n  refExpired: 0,',
+          'export const EMPTY_REF_CAPTURE_COUNTS: RefCaptureCounts = Object.freeze({\n  matched: 0,\n  unknownCode: 0,\n  notOffered: 0,',
+        ),
+      () => runExpectingFailure('pnpm', ['typecheck']),
+    ),
+    'refExpired',
+  )
+
+  // ---- the database can stop refusing ---------------------------------------------------------
+
+  // 157i. ZY331's registry entry deleted. `pnpm sqlstate` DERIVES the codes from the migrations, so a
+  //       code a migration raises with no entry is a code two rules could come to share.
+  checkRejectedBy(
+    'ref loop: ZY331 raised with no registry entry is refused by name',
+    withEditedFile(
+      REGISTRY,
+      (source) =>
+        replaceOnce(
+          source,
+          "  {\n    code: 'ZY331',\n    rule: 'A booking may not claim a WhatsApp ref code whose lifetime had already run out.',\n    migration: '0127',\n    raisedBy: ['refuse_unproved_ref_attribution'],\n    translators: ['packages/db/src/repositories/whatsapp-ref.ts'],\n  },\n",
+          '',
+        ),
+      () => runExpectingFailure('pnpm', ['sqlstate']),
+    ),
+    'ZY331',
+  )
+
+  // 157j. ZY332's `raisedBy` re-pointed at a function that does not raise it. The entry still exists, so
+  //       the cheap "is it registered" direction passes; what is wrong is that the entry is no longer TRUE,
+  //       which is the state a renamed trigger function leaves behind.
+  checkRejectedBy(
+    'ref loop: ZY332 claiming a function that does not raise it is refused by name',
+    withEditedFile(
+      REGISTRY,
+      (source) =>
+        replaceOnce(
+          source,
+          "    code: 'ZY332',\n    rule: 'A matched capture row must be attributed to the session its ref code was issued into.',\n    migration: '0127',\n    raisedBy: ['refuse_unproved_ref_attribution'],",
+          "    code: 'ZY332',\n    rule: \"A matched capture row must be attributed to the session its ref code was issued into.\",\n    migration: '0127',\n    raisedBy: ['refuse_something_else'],",
+        ),
+      () => runExpectingFailure('pnpm', ['sqlstate']),
+    ),
+    'ZY332',
+  )
+
+  /*
+    157k. The trigger DISABLED in the database, which is the only way to see ZY331 and ZY332 fail.
+
+    They are a trigger a migration has already applied, so unlike every other case in this block there is
+    no file to edit: editing `0127_whatsapp_ref_lifetime.sql` would change a migration that has already run
+    and the database would go on refusing exactly as before, so the case would report PASS having proved
+    nothing. 152o takes the same route for `refuse_journal_change()` and for the same reason.
+
+    The recovery, if a run of this block is killed between the two statements, is in the block header and
+    is one statement. `enable trigger` is in a `finally`.
+  */
+  {
+    const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+    if (!dbUrl) {
+      check(
+        'ref loop: the attribution trigger shown to be what refuses an unproved claim',
+        false,
+        'TEST_DATABASE_URL or DATABASE_URL is required: this case disables a trigger in the database, ' +
+          'which cannot be done by editing a file (see the comment above it).',
+      )
+    } else {
+      const psql = (statement) =>
+        execFileSync(
+          'psql',
+          ['--no-psqlrc', '-v', 'ON_ERROR_STOP=1', '-q', dbUrl, '-c', statement],
+          {
+            ...CHILD,
+          },
+        )
+      const alter = (verb) =>
+        psql(`alter table booking_whatsapp_ref_capture ${verb} trigger ${CAPTURE_TRIGGER}`)
+      alter('disable')
+      let result
+      try {
+        result = runExpectingFailure('pnpm', integration(LOOP_ITEST))
+      } finally {
+        alter('enable')
+      }
+      checkRejectedBy(
+        'ref loop: the attribution trigger shown to be what refuses an unproved claim',
+        result,
+        'refuses a matched row naming an expired code',
+      )
+    }
+  }
+
+  // ---- the controls ---------------------------------------------------------------------------
+
+  // 157y. Every case above is satisfied by something FAILING, so the unedited tree has to be seen to pass.
+  //       All four files in one run, because a case that passes only when it is the only thing running is
+  //       a case about the runner.
+  check(
+    'ref loop: the four ref-code test files pass unedited, which is the control',
+    (() => {
+      const result = runBothStreams(
+        'pnpm',
+        unit(SHARED_REF.replace('.ts', '.test.ts'), LINK_TEST, MINT_TEST, RULE_TEST),
+      )
+      return !result.failed
+    })(),
+    'the unedited ref-code tests did not pass, so every rejection above may be about something else',
+  )
+
+  // 157z. The scan's own non-vacuity, read off its output rather than assumed: a walk that returned
+  //       nothing would report no offenders and pass for ever, which is ADR 0002's failure mode. The
+  //       assertion lives inside the test (`files scanned` above 500); this proves that assertion is the
+  //       thing keeping it honest, by requiring the number to be stated at all.
+  check(
+    'ref loop: the wa.me scan states how many files it read',
+    readFileSync(LINK_TEST, 'utf8').includes("expect(scanned, 'files scanned').toBeGreaterThan("),
+    'the wa.me scan no longer asserts a floor on how many files it read, so a walk that returned nothing ' +
+      'would report no offenders and pass for ever',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

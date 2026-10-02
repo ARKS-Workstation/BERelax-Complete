@@ -411,6 +411,34 @@ export const ROUTES = [
       'is somewhere a relay naturally posts. Dynamic because it reads the clock once and writes.',
   },
   {
+    id: 'whatsapp-ref',
+    path: '/api/whatsapp',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'A-FIRST-07s WhatsApp reference-code issue: the one place a code is minted, bound to the browser ' +
+      'session, and composed into the wa.me link whose first line is "Ref: <code>". A server round trip ' +
+      'rather than a link on the page because a code has to be unguessable, unique and on disk before the ' +
+      'front desk can type it back in, and none of those is available to a static href. GET, because the ' +
+      'caller is a link a customer taps and a fetch cannot hand the navigation to WhatsApp; it writes a ' +
+      'row anyway, and a second tap issuing a second code is the contract (0079: many codes, one session) ' +
+      'rather than a defect - what would be wrong is a cached response, which no-store refuses on every ' +
+      'answer. It REFUSES with 503 whatsapp_number_unanswered in every environment today, because ' +
+      'premises.phone_whatsapp holds the Y1-nap placeholder and docs/13 SS3 records two candidate numbers ' +
+      'with nothing ranking them; no code is minted on any refusal, deliberately, since codes_issued is ' +
+      'the denominator of the capture rate and a code minted into an unsendable message would make our own ' +
+      'missing configuration read as a front-desk failure. Under /api rather than /api/v1 for ' +
+      '/api/collects reasons - it is the other half of a client this repository ships, /api is exempt from ' +
+      'proxy.ts canonicalisation, and a reference code is locale-neutral. Not indexable and nothing to ' +
+      'index: it answers a 303 or a plain-text refusal, both noindex, and the code is in a Location ' +
+      'header. Nothing is read from the query string: the session comes from the first-party cookie, so a ' +
+      '?visitor= would put that identifier in every access log and forwarded link.',
+  },
+  {
     id: 'book',
     path: '/book',
     kind: 'document',

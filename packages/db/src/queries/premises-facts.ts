@@ -362,3 +362,37 @@ export async function readPremisesFacts(sql: Sql): Promise<PremisesFacts | null>
     })),
   }
 }
+
+/**
+ * The WhatsApp number as the row holds it, and `null` when there is no row at all.
+ *
+ * ## Why this exists beside {@link readPremisesFacts} rather than inside it
+ *
+ * `readPremisesFacts` is six statements: the premises row, the legal entity, the hours, the closures, the
+ * catalogue prices and the price-on-request offerings. That is right for a fact sheet and wrong for the
+ * WhatsApp call to action, which needs ONE column and is on the path a campaign makes busy — reading the
+ * price list to decide whether a phone number is dialable is work nobody asked for.
+ *
+ * It is not a second statement of a fact. Both read the same column of the same singleton; what differs is
+ * the projection, and there is still exactly one place the value is INTERPRETED (`whatsappLinkFor` in
+ * `@berelax/shared`, which refuses anything that is not E.164 and therefore refuses the Y1-nap
+ * placeholder). A second COPY of the number would be the defect docs/09 §4 is about; a narrower read of it
+ * is not.
+ *
+ * `whatsappIsPlaceholder` is returned beside it for the reason {@link PremisesFacts} returns it: it is
+ * `is_placeholder_text()` evaluated by PostgreSQL, so a caller that wants to say WHY there is no link does
+ * not have to re-implement the marker test in TypeScript. The link builder does not consult it — a
+ * positive E.164 test refuses the placeholder and every other unusable value — and the two agreeing is
+ * asserted in `apps/web/src/whatsapp-ref-loop.itest.ts` rather than assumed.
+ */
+export async function readWhatsappNumber(
+  sql: Sql,
+): Promise<{ readonly phoneWhatsapp: string | null; readonly isPlaceholder: boolean } | null> {
+  const [row] = await sql<{ phone_whatsapp: string | null; is_placeholder: boolean }[]>`
+    select phone_whatsapp, is_placeholder_text(phone_whatsapp) as is_placeholder
+      from premises where id = 1
+  `
+  return row === undefined
+    ? null
+    : { phoneWhatsapp: row.phone_whatsapp, isPlaceholder: row.is_placeholder }
+}

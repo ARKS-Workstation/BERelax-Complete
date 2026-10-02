@@ -78,6 +78,10 @@ function view(over: Partial<QuickBookView> = {}): QuickBookView {
       matched: 0,
       unknownCode: 0,
       notOffered: 3,
+      // Zero and not absent: the two A-FIRST-07 outcomes are counts like the other three, and an omitted
+      // field would be a denominator short of two buckets.
+      refExpired: 0,
+      refConflict: 0,
       total: 3,
       claim: 'loop_unconfirmed',
       sentence: 'Reported, not judged.',
@@ -282,7 +286,10 @@ describe('the ref field is the first optional field in DOM order', () => {
     // phone had it and the server folds case before it compares. The canonical-only pattern blocked the
     // submit with the browser's own validation bubble and no request was made — a page that silently did
     // nothing. `packages/shared/src/whatsapp-ref.test.ts` holds the property; this is the attribute.
-    expect(html).toContain('a-hj-np-z')
+    // The lower-case half of the class, as A-FIRST-07 narrowed it (no l, no u). Spelled rather than
+    // interpolated from the constant, deliberately: interpolating it would make this assertion true for
+    // any class at all, and the thing it is for is that the attribute carries the LOWER-CASE half at all.
+    expect(html).toContain('a-hjkm-np-tv-z')
     expect(html).toContain(`maxlength="${WHATSAPP_REF_CODE_LENGTH}"`)
     // `autocomplete="off"`: a code belongs to ONE conversation, and a browser offering the last one is a
     // browser offering a wrong attribution.

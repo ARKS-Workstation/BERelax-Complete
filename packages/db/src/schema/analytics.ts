@@ -59,8 +59,27 @@ import {
  * A-FIRST-08 the attribution writer and A-FIRST-09 the rollup job; the schema exists first because the
  * partitions and the retention are what make the rest of A-FIRST safe to build.
  */
+/** The wording hash. Same representation as `consent.wordingHash` and the ciphertext columns in 0008. */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType: () => 'bytea',
+})
+
 export const analyticsSchema = pgSchema('analytics')
 
+/**
+ * The eight ordered funnel steps, ending at PAID — and NOT a list written here.
+ *
+ * An enum rather than a CHECK list because the ORDER is the measurement: "conversion is paid / landing,
+ * never booking_created / landing" is a statement about which step is last, and `pg_enum.enumsortorder` is
+ * the only place a database stores an order.
+ *
+ * The members come from `FUNNEL_STAGES` in `@berelax/shared`, which is the tuple A-FIRST-02 derives its
+ * whole vocabulary from. Writing them out again would be a third statement of one fact with no checker over
+ * it — `pnpm db:drift` compares tables and columns and has nothing to say about an enum's members. Migration
+ * 0096 is the second, unavoidably, because SQL cannot import; `analytics.itest.ts` asserts `pg_enum`'s
+ * ordered labels equal this tuple, which is what makes the migration a mirror rather than a second opinion.
+ * It is the shape `whatsappRefCaptureOutcome` is pinned to `REF_CAPTURE_OUTCOMES` in.
+ */
 /**
  * The eight ordered funnel steps, ending at PAID — and NOT a list written here.
  *
@@ -78,6 +97,7 @@ export const analyticsSchema = pgSchema('analytics')
 export const funnelStepName = analyticsSchema.enum('funnel_step_name', FUNNEL_STAGES)
 
 /** One row per first-party visitor cookie, created at consent and never before it (A-FIRST-05). */
+/** One row per first-party visitor cookie, created at consent and never before it (A-FIRST-05). */
 export const visitor = analyticsSchema.table(
   'visitor',
   {
@@ -90,6 +110,7 @@ export const visitor = analyticsSchema.table(
   (t) => [check('visitor_last_seen_not_before_first', sql`${t.lastSeenAt} >= ${t.firstSeenAt}`)],
 )
 
+/** One row per 30-minute-inactivity session, holding the origination signals AS RECEIVED. */
 /** One row per 30-minute-inactivity session, holding the origination signals AS RECEIVED. */
 export const session = analyticsSchema.table(
   'session',
@@ -189,6 +210,13 @@ export const session = analyticsSchema.table(
  * row on the same window but not in lockstep, and `on delete cascade` from `session` would turn a session
  * purge into a DELETE the ZY065 trigger refuses — two rules that cannot both be satisfied.
  */
+/**
+ * Raw collected events. Partitioned by month on `occurredAt` and append-only (ZY065).
+ *
+ * `sessionId` carries NO foreign key and must not: retention drops a partition here and purges a session
+ * row on the same window but not in lockstep, and `on delete cascade` from `session` would turn a session
+ * purge into a DELETE the ZY065 trigger refuses — two rules that cannot both be satisfied.
+ */
 export const event = analyticsSchema.table(
   'event',
   {
@@ -216,6 +244,7 @@ export const event = analyticsSchema.table(
 )
 
 /** The materialised funnel (A-FIRST-09). Partitioned by month, and deliberately NOT append-only. */
+/** The materialised funnel (A-FIRST-09). Partitioned by month, and deliberately NOT append-only. */
 export const funnelStep = analyticsSchema.table(
   'funnel_step',
   {
@@ -237,6 +266,7 @@ export const funnelStep = analyticsSchema.table(
   ],
 )
 
+/** What A-FIRST-03's resolver made of a session's raw signals, with the basis and the version beside it. */
 /** What A-FIRST-03's resolver made of a session's raw signals, with the basis and the version beside it. */
 export const attribution = analyticsSchema.table(
   'attribution',
@@ -267,6 +297,14 @@ export const attribution = analyticsSchema.table(
   ],
 )
 
+/**
+ * The three nightly rollups, kept INDEFINITELY (docs/03, Volume discipline).
+ *
+ * Every dimension in a primary key is NOT NULL with an empty-string default rather than nullable, and that
+ * is a correctness decision: a null never equals a null, so a nullable dimension would let the same
+ * campaign-less day upsert a second row every night, and A-FIRST-09's "two runs produce byte-identical
+ * rows" depends on it.
+ */
 /**
  * The three nightly rollups, kept INDEFINITELY (docs/03, Volume discipline).
  *
@@ -357,6 +395,15 @@ export const dailySourceRevenue = analyticsSchema.table(
  * one generic statement rather than a `case` in the function — a branch a new table would not be in, which
  * is a policy row that looks enforced and is a no-op.
  */
+/**
+ * One row per base table in this schema, saying what retention does to it and why.
+ *
+ * The explicit exemption list, and the list `analytics.run_retention` READS: a table here with no row
+ * stops the pass with ZY062 rather than being retained for ever by omission, and a row naming a relation
+ * that is not in this schema stops it with ZY063. `ageColumn` and `purgeOrder` are what make the row purge
+ * one generic statement rather than a `case` in the function — a branch a new table would not be in, which
+ * is a policy row that looks enforced and is a no-op.
+ */
 export const retentionPolicy = analyticsSchema.table(
   'retention_policy',
   {
@@ -411,6 +458,33 @@ export const retentionPolicy = analyticsSchema.table(
  * count is 1 is a timestamp of one person's visit, which would make "identifier-free" false. The coarsest
  * thing here is a date, and it is also the finest.
  */
+/**
+ * The identifier-free pre-consent landing counter (migration 0116, A-FIRST-05, ADR 0066).
+ *
+ * The internal store is treated as consent-gated while `Y5-analytics-basis` is open, so `visitor` and
+ * `session` are created AT consent and never before it. A visitor who arrives, reads and leaves without
+ * answering the banner has still LANDED, and `landing` is the funnel's denominator — so the visit is
+ * reduced at the boundary to `+1` against a bucket carrying a business day and a route, and nothing else
+ * is written: no visitor, no session, no event row and no `Set-Cookie`.
+ *
+ * Three things the mirror cannot say, and that a caller writing from these definitions would get wrong:
+ *
+ *   1. **The reduction is irreversible, deliberately.** There is no key to promote a staged landing by,
+ *      because a key before consent is the identifier the position withholds. So nothing here is ever
+ *      turned into a session, and consent never arriving needs no purge.
+ *   2. **It is monotonic, not append-only.** The increment is the write that has to keep working;
+ *      `analytics.refuse_pre_consent_landing_loss` raises `ZY221` for a DELETE, for an UPDATE that lowers
+ *      `landings`, and for one that moves a count onto another key. A delete built from these definitions
+ *      typechecks perfectly and is refused by the server.
+ *   3. **`bucketDate` carries NO foreign key to `public.business_day`,** which is the one place this table
+ *      differs from the three rollups. An instant in the daytime gap belongs to no trading date, and the
+ *      whole point of this row is that such a visit is counted rather than refused — so the basis says
+ *      which kind of date it is instead, and it is IN THE KEY, so the two kinds can never be summed.
+ *
+ * There is no `createdAt` and no `computedAt`, and their absence is the claim: an instant on a row whose
+ * count is 1 is a timestamp of one person's visit, which would make "identifier-free" false. The coarsest
+ * thing here is a date, and it is also the finest.
+ */
 export const preConsentLanding = analyticsSchema.table(
   'pre_consent_landing',
   {
@@ -434,11 +508,69 @@ export const preConsentLanding = analyticsSchema.table(
   ],
 )
 
-/** The wording hash. Same representation as `consent.wordingHash` and the ciphertext columns in 0008. */
-const bytea = customType<{ data: Buffer; driverData: Buffer }>({
-  dataType: () => 'bytea',
-})
-
+/**
+ * The ref loop per day (0127, A-FIRST-07): codes issued into conversations, and how many came back.
+ *
+ * A fourth rollup beside `dailyTraffic`, `dailyFunnel` and `dailySourceRevenue`, and NOT rows in
+ * `dailyFunnel`, because a code issue is not one of the eight funnel steps, carries no origination tuple
+ * and "claimed" is not an `excluded` — A-FIRST-01 deferred the shape to the unit that built the loop.
+ *
+ * Two things the mirror cannot say:
+ *
+ *   - **It is RECOMPUTED, never incremented.** `rollUpDailyRefCapture` counts both figures out of
+ *     `whatsapp_ref` and `booking_whatsapp_ref_capture` in one statement and upserts the row, so two runs
+ *     over the same day produce identical rows and the rollup cannot disagree with the tables it is
+ *     derived from. That is the opposite of `preConsentLanding` above, which is a counter with a trigger
+ *     refusing a decrease — because there the raw rows are never written at all and the count is the only
+ *     evidence, while here both sides are still on disk.
+ *   - **`codesClaimed` is paired with the day the CODE was issued**, not the day the booking was taken.
+ *     The other pairing mixes cohorts and can exceed the denominator, which is what the
+ *     `claimed_within_issued` CHECK refuses.
+ */
+/**
+ * The ref loop per day (0127, A-FIRST-07): codes issued into conversations, and how many came back.
+ *
+ * A fourth rollup beside `dailyTraffic`, `dailyFunnel` and `dailySourceRevenue`, and NOT rows in
+ * `dailyFunnel`, because a code issue is not one of the eight funnel steps, carries no origination tuple
+ * and "claimed" is not an `excluded` — A-FIRST-01 deferred the shape to the unit that built the loop.
+ *
+ * Two things the mirror cannot say:
+ *
+ *   - **It is RECOMPUTED, never incremented.** `rollUpDailyRefCapture` counts both figures out of
+ *     `whatsapp_ref` and `booking_whatsapp_ref_capture` in one statement and upserts the row, so two runs
+ *     over the same day produce identical rows and the rollup cannot disagree with the tables it is
+ *     derived from. That is the opposite of `preConsentLanding` above, which is a counter with a trigger
+ *     refusing a decrease — because there the raw rows are never written at all and the count is the only
+ *     evidence, while here both sides are still on disk.
+ *   - **`codesClaimed` is paired with the day the CODE was issued**, not the day the booking was taken.
+ *     The other pairing mixes cohorts and can exceed the denominator, which is what the
+ *     `claimed_within_issued` CHECK refuses.
+ */
+export const dailyRefCapture = analyticsSchema.table(
+  'daily_ref_capture',
+  {
+    /** Always a date `public.business_day` holds — `fileUnderTradingDate`'s answer. */
+    tradingDate: date('trading_date').notNull(),
+    /** `analytics.session`'s own column, label for label. In the key (Y5-funnel-gap-bucket). */
+    tradingDateBasis: text('trading_date_basis').notNull(),
+    /** `bigint({ mode: 'bigint' })`: a denominator kept indefinitely must not lose precision. */
+    codesIssued: bigint('codes_issued', { mode: 'bigint' }).notNull(),
+    codesClaimed: bigint('codes_claimed', { mode: 'bigint' }).notNull(),
+    computedAt: timestamp('computed_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({
+      name: 'daily_ref_capture_pkey',
+      columns: [t.tradingDate, t.tradingDateBasis],
+    }),
+    check(
+      'daily_ref_capture_basis_known',
+      sql`${t.tradingDateBasis} in ('trading', 'before_opening', 'after_closing', 'premises_closed')`,
+    ),
+    check('daily_ref_capture_counts_nonneg', sql`${t.codesIssued} >= 0 and ${t.codesClaimed} >= 0`),
+    check('daily_ref_capture_claimed_within_issued', sql`${t.codesClaimed} <= ${t.codesIssued}`),
+  ],
+)
 /**
  * The three kinds of analytics consent record (migration 0125, A-MEAS-02).
  *
@@ -452,6 +584,28 @@ export const consentDecision = analyticsSchema.enum('consent_decision', [
   'withdrawn',
 ])
 
+/**
+ * The analytics consent record (migration 0125, A-MEAS-02; docs/04 §8).
+ *
+ * Four things the mirror cannot say, and each of them will mislead a caller who writes from these
+ * definitions rather than reading 0125:
+ *
+ *   1. **It holds no identifier and names no visitor, deliberately.** There is no `visitorId` column to
+ *      forget: the visitor row is created AT consent by `ingestCollectBatch` — "the ONE place the server
+ *      decides who owns an identifier" — and does not exist yet when the banner is answered, so a column
+ *      here would be a second identifier-minting site. The consequence is stated out loud in 0125's
+ *      header: nothing says which visitor made which decision, and the operative state the gate reads is
+ *      on `session` instead.
+ *   2. **It is append-only.** UPDATE and DELETE raise `ZY311` for every role, the owner and
+ *      `berelax_retention` included. A `db.update(consentRecord)` typechecks perfectly and is refused by
+ *      the server.
+ *   3. **The wording snapshot is checked by 0056's own trigger**, attached to this table rather than
+ *      copied: `assert_consent_wording_hash()` raises `ZP002` when `wordingHash` disagrees with the
+ *      referenced version's generated `contentHash`.
+ *   4. **Its `retention_policy` row says `keep_indefinitely`**, which is honest because the row holds no
+ *      identifier — and load-bearing, because `analytics.run_retention` raises `ZY062` for a base table in
+ *      this schema with no row at all.
+ */
 /**
  * The analytics consent record (migration 0125, A-MEAS-02; docs/04 §8).
  *

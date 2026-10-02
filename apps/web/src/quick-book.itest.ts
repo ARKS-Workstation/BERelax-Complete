@@ -101,6 +101,8 @@ const CASE_DAYS = 24
  */
 const PHONE_PREFIX = '+9715200007'
 const REF_CODE = 'QB34'
+/** The session the code is issued into. A uuid, which is all `session_reference` may now hold. */
+const REF_SESSION = '0195b000-0000-7000-8000-000000000034'
 
 /** The five fixture therapists, and what each one is for. */
 const STAFF = {
@@ -373,7 +375,9 @@ beforeAll(async () => {
   // The matched code, through the writer A-FIRST will use rather than a hand-written row: a row inserted by
   // hand would be a code the issuing path never produced, which is the one thing this table must not hold.
   await withUnitOfWork(sql, { kind: 'staff', label: MARKER }, (uow) =>
-    issueWhatsappRef(uow, { sessionReference: `${MARKER} conversation`, refCode: REF_CODE }),
+    // A uuid since migration 0127 — `whatsapp_ref.session_reference` is `analytics.session.session_id`
+    // and the type is what stops a contact detail being stored there.
+    issueWhatsappRef(uow, { sessionReference: REF_SESSION, refCode: REF_CODE }),
   )
 
   server = await startWebServer({

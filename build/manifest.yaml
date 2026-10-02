@@ -12869,8 +12869,11 @@ units:
     - 'NOTE: daily_funnel is keyed on (trading_date, step, source, medium, campaign) and carries entered plus
       excluded. The ref-capture numerator and denominator A-FIRST-07''s acceptance line asks to be written to
       daily_funnel are day-level rather than step-level figures, so their shape is deferred to A-FIRST-07
-      rather than guessed at here — repeating a day-level count on every step row is the drift this build
-      warns about most.'
+      rather than guessed at here — DEFERRAL SATISFIED: A-FIRST-07 made them analytics.daily_ref_capture, a
+      fourth rollup beside this schema''s three, on the same keep_indefinitely policy and keyed on
+      analytics.session''s own (trading_date, trading_date_basis) pair, with codes_claimed paired to the day
+      the CODE was issued so the numerator and the denominator are one cohort. Repeating a day-level count
+      on every step row is the drift this build warns about most.'
     - 'NOTE: event.event_name is text with no CHECK, deliberately: the closed versioned taxonomy belongs to
       A-FIRST-02 and a list here plus a Zod enum there is two lists. The FUNNEL is different and IS in the
       database, as the enum analytics.funnel_step_name with its eight members in docs/03 order, because the
@@ -13527,7 +13530,7 @@ units:
       field on the staff quick-book screen that claims it, and attribute the resulting booking back to the
       originating session — reporting capture rate rather than assuming it.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - A-FIRST-05
@@ -13537,9 +13540,14 @@ units:
     blocked_on_owner:
     - Y12-ref-loop
     - Y1-nap
-    provisional: Ref field present and capture rate reported rather than assumed; WhatsApp number is the
-      prototype's 052 510 8633 read from the premises row and flagged provisional; ref TTL 7 days as a provisional
-      setting.
+    provisional: 'Ref field present and capture rate reported rather than assumed; ref TTL 7 days as a
+      provisional setting (booking.whatsapp_ref_ttl_days, Y12-ref-ttl). The WhatsApp NUMBER half of this
+      line is REVERSED, the way B-CAT-06 reversed the same claim for the premises seed. It used to name the
+      prototype''s number as read from the premises row and flagged provisional; premises.phone_whatsapp
+      holds WHATSAPP-PENDING-Y1-NAP instead, because docs/13 §3 records two published numbers, nothing
+      ranks them, and a provisional flag on one of them is indistinguishable from a number the owner had
+      confirmed. The link is composed from the row, so the issue route answers 503
+      whatsapp_number_unanswered and mints no code at all until Y1-nap is answered.'
     acceptance:
     - 'round-trip integration test: session → whatsapp_cta_click → generated code → wa.me URL whose text
       begins ''Ref: <code>'' → quick-book claim → booking.attributed_session_id equals the original session
@@ -13555,12 +13563,74 @@ units:
       only from the premises row'
     - ref-capture rate = codes claimed ÷ codes issued per business_day is written to daily_funnel; a fixture
       with 10 issued and 4 claimed yields exactly 40.0%
+    - 'NOTE: the ref code, its shape and its outcome vocabulary already existed. B-UI-04 shipped migration
+      0079 (whatsapp_ref, booking_whatsapp_ref_capture, the three-member outcome enum), decideRefCapture and
+      refCaptureRate in @berelax/core, the quick-book ref field and its notice, and the normaliser and
+      pattern in @berelax/shared — 0079''s own header names "the unit that owns the conversation" as the one
+      that would fill three gaps. This unit filled them, so its files are the existing modules plus
+      migration 0127, rather than the packages/core/src/analytics/ref-code.ts the plan guessed at: a second
+      ref-code module beside the one that ships would be two statements of one alphabet.'
+    - 'NOTE: the acceptance line''s alphabet (excluding I, L, O, U, 0 and 1) was WIDER than the one 0079
+      shipped (I, O, 0 and 1), so migration 0127 narrows the CHECK, the alphabet and the range class
+      together. Safe now and not later: whatsapp_ref is still empty, so no issued code is retrospectively
+      refused. The argument is in ADR 0079 — with I/O/0/1 already out, U misread as V is the only remaining
+      pair whose wrong character is ITSELF in the alphabet, so it is the only one left that can produce
+      another VALID code.'
+    - 'NOTE: "first/last touch are copied onto booking and customer" is DEFERRED to A-FIRST-08, which owns
+      it: its own acceptance lines name first-touch immutability, last touch before booking creation, the
+      offline fallback and the merge repointing, and its declared migration is NNNN_attribution_columns.sql.
+      A-FIRST-01 recorded the same deferral. What this unit provides is the join A-FIRST-08 reads for a desk
+      booking: booking_whatsapp_ref_capture.attributed_session_id, non-null for `matched` alone and refused
+      by ZY332 when it is not the code''s own session.'
+    - 'NOTE: "written to daily_funnel" is written to analytics.daily_ref_capture instead, which A-FIRST-01
+      explicitly deferred to this unit ("day-level rather than step-level figures, so their shape is
+      deferred to A-FIRST-07"). daily_funnel is keyed on (trading_date, step, source, medium, campaign) with
+      `entered` and `excluded`: a code issue is not one of the eight funnel steps, has no origination tuple,
+      and "claimed" is not an exclusion, so writing it there needs either a ninth enum member no funnel
+      draws or a second meaning for two columns A-FIRST-09 and A-FIRST-10 read. The new table is a fourth
+      rollup beside the three of 0096, on the same keep_indefinitely policy and keyed on
+      analytics.session''s own (trading_date, trading_date_basis) pair.'
+    - 'NOTE: the WhatsApp NUMBER is not the prototype''s 052 510 8633 and this unit invents none. Y1-nap is
+      open, premises.phone_whatsapp holds WHATSAPP-PENDING-Y1-NAP, and the issue route answers 503
+      whatsapp_number_unanswered and mints NO CODE — deliberately, because codes_issued is the denominator
+      of the capture rate and a code minted into an unsendable message would make a missing phone number
+      read as a front-desk failure. The integration suite sets the row to a +971 59 synthetic number for one
+      case and restores what it read in a finally, because the acceptance line is that the link is composed
+      from the row.'
+    - 'NOTE: the ref TTL is a new setting, booking.whatsapp_ref_ttl_days, provisionally 7 days against a new
+      OPEN-QUESTIONS row Y12-ref-ttl (bounded 1 to 90, the second being analytics.raw_retention_days() so a
+      code cannot outlive the session it names). A code that expired with NOTHING referencing it should
+      eventually be purged; that is a nightly pass and a cron needs an agent row, so it is handed to
+      A-FIRST-09 with the rollups, and whatsapp_ref_expires_at_idx exists as the predicate it will need.'
+    - 'NOTE: no WhatsApp provider, credential or sender id was added, and that is the shape rather than a
+      deferral: the message is composed as a wa.me URL and sent by the CUSTOMER''S OWN client, so there is
+      no outbound call to make. The server-side WhatsApp send stays `unregistered` in
+      SENDER_IDENTITY_ROUTES (ADR 0016) and nothing here touches the messaging choke point.'
+    - 'NOTE: no Playwright spec was added. apps/web/e2e/ does not exist in this repository — browser-driven
+      assertions live in apps/web/src/*.itest.ts behind startWebServer — and apps/web/src/quick-book.itest.ts
+      (B-UI-04) already drives the ref field, its pattern, its lower-case paste and its notice in a browser.
+      A second copy would be a second suite over one screen. The allocated test port band
+      { start: 18_500, width: 300 } is therefore RELEASED unused: this unit''s round trip starts no server.'
     files:
-    - packages/core/src/analytics/ref-code.ts
-    - packages/core/src/analytics/ref-code.test.ts
-    - apps/web/app/(admin)/quick-book/ref-field.tsx
+    - packages/db/migrations/0127_whatsapp_ref_lifetime.sql
+    - packages/shared/src/whatsapp-ref.ts
+    - packages/shared/src/premises-links.ts
+    - packages/shared/src/whatsapp-link.test.ts
+    - packages/core/src/booking/ref-capture.ts
+    - packages/core/src/booking/ref-capture.test.ts
     - packages/db/src/repositories/whatsapp-ref.ts
-    - apps/web/e2e/ref-loop.spec.ts
+    - packages/db/src/repositories/whatsapp-ref.test.ts
+    - packages/db/src/schema/whatsapp-ref.ts
+    - packages/db/src/schema/analytics.ts
+    - packages/db/src/settings/availability.ts
+    - packages/db/src/sqlstate-registry.ts
+    - packages/config/src/settings/registry.ts
+    - apps/web/app/api/whatsapp/route.ts
+    - apps/web/app/api/whatsapp/issue.ts
+    - apps/web/app/(admin)/quick-book/ref-claim.ts
+    - apps/web/src/whatsapp-ref-loop.itest.ts
+    - scripts/test-gates.mjs
+    - docs/adr/0079-a-ref-code-is-a-lifetime-a-uuid-and-an-attribution-the-database-proved.md
   - id: A-FIRST-08
     order: 111
     title: First-touch and last-touch attribution onto customer and booking

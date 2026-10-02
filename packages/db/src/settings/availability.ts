@@ -4,7 +4,9 @@ import {
   GENDER_MATCHING_SETTING_KEY,
   type GenderMatchingMode,
   genderMatchingMode,
+  PROVISIONAL_WHATSAPP_REF_TTL_DAYS,
   WHATSAPP_REF_EXPECTED_SETTING_KEY,
+  WHATSAPP_REF_TTL_SETTING_KEY,
 } from '@berelax/shared'
 import type { Sql } from '../connection.ts'
 import { readSetting, type WriteResult, writeSetting } from '../settings-store.ts'
@@ -146,6 +148,35 @@ export async function readFrontDeskMinLeadMinutes(sql: Sql): Promise<number> {
  */
 export async function readWhatsappRefExpected(sql: Sql): Promise<boolean> {
   return (await readSetting<unknown>(sql, WHATSAPP_REF_EXPECTED_SETTING_KEY)) === true
+}
+
+/**
+ * How many days a WhatsApp ref code stays claimable — Y12-ref-ttl, as a value.
+ *
+ * `wholeMinutes`' shape and not `readWhatsappRefExpected`', and the difference is which direction is safe.
+ * An unreadable `whatsapp_ref_expected` has a safe reading — `false` claims nothing about the front desk —
+ * so that one normalises. An unreadable lifetime has none: a large value is an immortal join key, a zero
+ * is a code that is dead before the customer can use it, and both look exactly like working software. So a
+ * stored value that is not a whole number of days in range REFUSES, and the caller does not issue a code.
+ *
+ * Read ONCE, at issue, and stamped on the row (migration 0127). This function is therefore called on the
+ * issue path and nowhere else: a claim path that read it again would be comparing against a window that
+ * may have been answered since the code was handed out.
+ */
+export async function readWhatsappRefTtlDays(sql: Sql): Promise<number> {
+  const stored = await readSetting<unknown>(sql, WHATSAPP_REF_TTL_SETTING_KEY)
+  if (stored === null || stored === undefined) return PROVISIONAL_WHATSAPP_REF_TTL_DAYS
+  if (typeof stored !== 'number' || !Number.isInteger(stored) || stored < 1 || stored > 90) {
+    throw new AppError(
+      'invariant_violated',
+      `${WHATSAPP_REF_TTL_SETTING_KEY} is ${JSON.stringify(stored)}, which is not a whole number of days ` +
+        'between 1 and 90. There is no safe fallback: a long window is a reference code that never stops ' +
+        'being claimable, a zero-day one is dead before the customer can use it, and both look like ' +
+        'working software. Correct the setting rather than issuing a code under a lifetime nobody chose.',
+      { details: { key: WHATSAPP_REF_TTL_SETTING_KEY, stored } },
+    )
+  }
+  return stored
 }
 
 /**

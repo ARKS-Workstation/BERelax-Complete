@@ -513,7 +513,10 @@ function ratePanel(view: QuickBookView): string {
     `<p data-testid="quick-book-rate-claim" ${attribute('data-claim', rate.claim)}>${safeText(rate.sentence)}</p>`,
     `<p><span data-testid="quick-book-rate-matched">${safeText(String(rate.matched))}</span> matched, ` +
       `<span data-testid="quick-book-rate-unknown">${safeText(String(rate.unknownCode))}</span> not ` +
-      `recognised, <span data-testid="quick-book-rate-blank">${safeText(String(rate.notOffered))}</span> ` +
+      `recognised, <span data-testid="quick-book-rate-expired">${safeText(String(rate.refExpired))}</span> ` +
+      `expired, <span data-testid="quick-book-rate-conflict">${safeText(String(rate.refConflict))}</span> ` +
+      `already claimed, ` +
+      `<span data-testid="quick-book-rate-blank">${safeText(String(rate.notOffered))}</span> ` +
       `with no code, of <span data-testid="quick-book-rate-total">${safeText(String(rate.total))}</span> ` +
       'bookings taken at the desk.</p>',
     rate.openQuestionId === null

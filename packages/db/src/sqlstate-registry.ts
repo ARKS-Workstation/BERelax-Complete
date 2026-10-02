@@ -2137,6 +2137,31 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['dispatch_consent_gap', 'assert_dispatch_consent'],
     translators: ['packages/db/src/repositories/analytics-consent.ts'],
   },
+  // ZY331-ZY332 are A-FIRST-07's, of the band ZY331-ZY340; ZY333 through ZY340 are left free and
+  // deliberately absent, because an entry for a code no migration raises is direction 3. Two and not one
+  // because each names a different thing to go and do: "record `ref_expired`, keep the code and take the
+  // booking" against "this attribution is wrong — find out which session the conversation really was".
+  //
+  // Both are the half of "an invented attribution is unrepresentable" that a CHECK cannot state. 0079 put
+  // the code/outcome implication in a CHECK and said why ("a property of the column rather than of
+  // whichever handler wrote the row"); an attribution that names a SESSION is the same claim one table
+  // further away, and a CHECK may not read another row. The rule is in `decideRefCapture`, which takes the
+  // code's row rather than a predicate and so has no other session in scope to credit — and that holds for
+  // the quick-book handler and for nothing else that can write this row.
+  {
+    code: 'ZY331',
+    rule: 'A booking may not claim a WhatsApp ref code whose lifetime had already run out.',
+    migration: '0127',
+    raisedBy: ['refuse_unproved_ref_attribution'],
+    translators: ['packages/db/src/repositories/whatsapp-ref.ts'],
+  },
+  {
+    code: 'ZY332',
+    rule: 'A matched capture row must be attributed to the session its ref code was issued into.',
+    migration: '0127',
+    raisedBy: ['refuse_unproved_ref_attribution'],
+    translators: ['packages/db/src/repositories/whatsapp-ref.ts'],
+  },
   {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',

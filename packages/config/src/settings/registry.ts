@@ -45,6 +45,7 @@ import {
   PROVISIONAL_RIGHTS_SLA_DAYS,
   PROVISIONAL_SUPERVISORY_AUTHORITY,
   PROVISIONAL_WHATSAPP_REF_EXPECTED,
+  PROVISIONAL_WHATSAPP_REF_TTL_DAYS,
   REBUILD_OBLIGATION_NOTICES_JOB,
   REBUILD_SCHEDULED_STEPS_JOB,
   REMINDER_OFFSETS_SETTING_KEY,
@@ -62,6 +63,7 @@ import {
   rightsSupervisoryAuthoritySchema,
   STRICT_GENDER_MATCHING,
   WHATSAPP_REF_EXPECTED_SETTING_KEY,
+  WHATSAPP_REF_TTL_SETTING_KEY,
 } from '@berelax/shared'
 import { z } from 'zod'
 
@@ -407,6 +409,53 @@ export const SETTINGS = [
       note:
         'False assumed. Nobody has said the front desk will paste the ref code, so attribution degrades ' +
         'to unknown and the funnel reports the gap rather than inventing the join.',
+    },
+  }),
+  define({
+    /**
+     * How long a WhatsApp ref code stays claimable — **Y12-ref-ttl**, as a value the issue path reads.
+     *
+     * ## Why there is an expiry at all, which is the decision rather than the number
+     *
+     * A code with no expiry is a join key for ever. The four characters sit in the customer's chat
+     * history, and a year later the front desk can still type them in and attribute a booking to a
+     * conversation nobody remembers — against an analytics session the 90-day retention purge removed
+     * months earlier. So the question is not whether to expire but what the window is.
+     *
+     * Seven days is the provisional answer and it is the direction that fails SAFELY. Too short records
+     * `ref_expired`, which keeps the code, takes the booking and shows up as a visible count somebody can
+     * act on; too long produces confident attributions nobody can check. The asymmetry is the argument,
+     * exactly as it is for `booking.front_desk_min_lead_minutes` above.
+     *
+     * ## What changing it does and does not do
+     *
+     * The figure is read ONCE, at issue, and stamped on the row as `whatsapp_ref.expires_at`. Answering
+     * this question therefore governs codes issued afterwards and never rewrites the recorded outcome of a
+     * booking already taken — which is a property of migration 0127 rather than of this entry, and is why
+     * the column is not a recomputation.
+     *
+     * At least one day, because a zero-day code is dead the instant it is issued and the column's own
+     * CHECK (`expires_at > issued_at`) refuses it; at most 90, which is the raw analytics retention window
+     * (`analytics.raw_retention_days()`). A code outliving the session it names would be a join key
+     * pointing at a row that has been purged, and the ceiling is read off that figure rather than chosen.
+     */
+    key: WHATSAPP_REF_TTL_SETTING_KEY,
+    tier: 'operational',
+    schema: z.number().int().min(1).max(90),
+    defaultValue: PROVISIONAL_WHATSAPP_REF_TTL_DAYS,
+    label: 'WhatsApp ref code lifetime',
+    help: 'How many days a reference code from a WhatsApp conversation can still be claimed at the desk. An expired code still takes the booking; the attribution is recorded as expired.',
+    editableBy: OWNER_MANAGER,
+    audited: true,
+    // Nothing about availability or the catalogue changes. What changes is how long a code is claimable,
+    // which a report's wording reflects — the same tag `booking.whatsapp_ref_expected` takes, and NOT
+    // `availability`, which would purge the slot memo for a change that cannot alter a slot.
+    invalidates: ['content'],
+    provisional: {
+      openQuestionId: 'Y12-ref-ttl',
+      note:
+        'Seven days assumed. Nobody has measured how long a WhatsApp conversation takes to become a ' +
+        'booking, and the alternative to a guessed window is no window — a join key that never dies.',
     },
   }),
   define({
