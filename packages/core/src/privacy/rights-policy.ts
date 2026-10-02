@@ -1683,6 +1683,78 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
     why: 'The Arabic rendering of the salon’s own address on its own credit note.',
     registeredBy: 'C-CRM-10',
   }),
+
+  // --- the migration's own records ---------------------------------------------------------------
+  rule({
+    key: 'public.imported_contact.contact_hmac',
+    dataClass: 'operational',
+    action: 'retain_append_only',
+    why:
+      'The record of what one line of a reconstructed contact list became (0121, H-MIG-04), found by ' +
+      'the CREDENTIAL probe on the `_hmac` column-name family — and the column is named that way ON ' +
+      'PURPOSE, so that this probe reaches it and an erasure cannot run until somebody classifies it. ' +
+      'A column called `phone_digest` would have been invisible to all five probes, which is the exact ' +
+      'accident Y9-import-ledger is about. ' +
+      'It holds `HMAC-SHA256(json(number), SUPPRESSION_PEPPER)` and no number: 0064’s argument applies ' +
+      'unchanged, so an unpeppered digest would be a phone number with extra steps and this one is not ' +
+      'reversible without a secret the database does not hold. `imported_contact` refuses UPDATE and ' +
+      'DELETE for every role including the owner (ZY272) and the application role holds neither ' +
+      'privilege, so neither a redaction nor a deletion of this column is a statement an erasure could ' +
+      'make — which is what `retain_append_only` says, and why it is not `retain_for_subject`: unlike ' +
+      '`suppression.key_hmac`, nothing is kept here IN the subject’s interest. It is kept because it is ' +
+      'the evidence that an import happened and what it did. ' +
+      'The erasure is still COMPLETE in the sense that matters: the plaintext lives only in ' +
+      '`customer.phone_e164`, which is pseudonymised one entry up, so after an erasure the digest ' +
+      'cannot be recomputed from anything in this database and the row stops resolving to a person. ' +
+      'That is the whole of H-MIG-04’s answer to Y9-import-ledger, and the reason the staging ledger ' +
+      'stages this digest rather than the number it was computed over.',
+    subjectReason:
+      'We keep a one-way cryptographic fingerprint of the number that appeared on the contact list your ' +
+      'record was created from, together with what we did with that line. It cannot be reversed into ' +
+      'your number, and once your record is erased there is nothing left in our systems it can be ' +
+      'matched against. We keep it so that we can always show where a record came from and that it was ' +
+      'imported without any marketing consent.',
+    registeredBy: 'H-MIG-04',
+  }),
+  /*
+    H-MIG-03's column, classified here as COLLATERAL and not as this unit's work.
+
+    `imported_package_sale.package_sale_id` is a foreign key to `package_sale`, which carries a customer
+    id, so probe 3 enumerates it — and nothing classified it. That is not a latent tidiness problem: the
+    engine REFUSES to run while any probed column is unclassified, so on the tree this unit started from
+    C-CRM-10's erasure was non-functional for every subject, with `rights.itest.ts` red on the one case
+    that reports it. The unit report carries the baseline proof.
+
+    It is repaired here because H-MIG-04 cannot pass otherwise. This unit's own decision — that the
+    plaintext number lives only in `customer.phone_e164` and that an erasure therefore reaches it — is only
+    demonstrable by RUNNING an erasure, which is what `customer-import.itest.ts` does. Nothing else about
+    0119, its registry entries or its suites was touched.
+  */
+  rule({
+    key: 'public.imported_package_sale.*',
+    dataClass: 'financial',
+    action: 'retain_append_only',
+    why:
+      'What H-MIG-02’s workbook said about one reconstructed package, kept beside the `package_sale` it ' +
+      'produced (0119, H-MIG-03). Found by probe 3 through `package_sale_id`, whose parent carries a ' +
+      'customer id. ' +
+      'Retained, and `retain_append_only` rather than `inherits_parent` because the two reasons are ' +
+      'different and only one of them is about the parent: ZY255 refuses UPDATE and DELETE on this table ' +
+      'for every role including the owner, so an erasure cannot act on it at all. The parent’s own rule ' +
+      'is `retain_statutory` under the financial obligation, which this row is part of the evidence for — ' +
+      'it is what an imported deferred-revenue balance rests on when it disagrees with what the owner ' +
+      'believes, and `import_staging.entity_provenance` resolves it to the line of the file it was typed ' +
+      'on. ' +
+      'The wildcard covers the table because every column of it is one statement about the same ' +
+      'reconstructed package and the same refusal applies to all of them; `holder_phone_e164` is the one ' +
+      'worth noticing, and no probe reaches it today — probe 2 matches `phone_e164` exactly, not as a ' +
+      'suffix. If a probe ever does, the answer is this one and it needs its own entry saying so.',
+    subjectReason:
+      'Where a prepaid package on your record came from: the line of the reconstructed list it was typed ' +
+      'on, and what that line said. We are required to keep the records behind the balances in our ' +
+      'accounts, and this is the evidence for one of them.',
+    registeredBy: 'H-MIG-03',
+  }),
 ])
 
 // ------------------------------------------------------------------------------------------------

@@ -40,6 +40,7 @@ export * from './identity.ts'
  * file deliberately does not mirror. `schema.importStaging.importRow` reads the way the SQL does.
  */
 export * as importStaging from './import-staging.ts'
+export * from './imported-contact.ts'
 export * from './invoice.ts'
 export * from './leave-approval.ts'
 export * from './ledger.ts'

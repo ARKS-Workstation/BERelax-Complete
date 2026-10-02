@@ -20762,7 +20762,7 @@ units:
       gets marketing_consent = false with no flag able to change it, transactional messaging stays permitted,
       and consent is captured at the next booking with its wording version.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - C-CRM-01
@@ -20793,11 +20793,162 @@ units:
       merge a second time is a no-op
     - the consent capture step appears at an imported customer's next booking and stores the wording version
       and its hash, asserted end to end
+    - 'NOTE: allocations actually used, and the one that is FREE. Migration **0121**
+      (`0121_customer_import.sql`), SCHEMA_VERSION raised to 121, gate block `// 150a-150z.` (22 cases),
+      **ADR 0072**, and private SQLSTATEs **ZY271-ZY273** of the allocated ZY271-ZY280 band — ZY274 through
+      ZY280 are left FREE and deliberately UNREGISTERED, because an entry for a code no migration raises is
+      what direction 3 of `pnpm sqlstate` refuses (H-MIG-01 left ZY200 free, and H-MIG-03 ZY259 and ZY260,
+      for the same reason). The allocated test port band `{ start: 16_100, width: 300 }` was NOT used and is
+      NOT declared in `TEST_PORT_BANDS`: this unit starts no server — it adds no route and no page, and every
+      claim it makes is proved against real PostgreSQL or with nothing running — and a declared-but-unused
+      band fails `apps/web/src/test-ports.test.ts`, so declaring it would have been the defect. `apps/web`
+      was not built, per the dispatch.'
+    - 'NOTE: the decision, which is ADR 0072 and is the whole unit. **There is no `marketing_consent` column
+      anywhere in this schema and 0121 does not add one.** The manifest sentence asks for
+      `marketing_consent = false with no flag able to change it`, and a flag is the wrong shape twice: 0056
+      made consent an APPEND-ONLY LOG, so "no marketing consent" is the ABSENCE of a row — not a false, and
+      specifically not a `withdrawn` row either, because nobody withdrew anything and nobody was ever asked
+      (0056''s own comment: a row saying nothing happened "is a row a later reader treats as a decision") —
+      and a boolean beside the log would be a second statement of what the log holds, which the first
+      disagreement resolves in favour of the cheaper read. The claim "the importer exposes no option" is also
+      true and also not enforceable: a later unit, a job or a `psql` session falsifies it without touching
+      the importer. So the floor is **ZY271**, a refusal: a GRANTED `consent` row whose `capture_source` is
+      `''import''` is refused for every purpose that gates a send, read from `consent_purpose.is_send_gating`
+      rather than listed again. What makes such a row FALSE is precise and is what keeps the rule narrow:
+      `consent_wording` holds only the statements this system published and SHOWED, 0056 requires a grant to
+      name one, and a contact rebuilt from a chat thread was shown none — so the row claims words were read
+      that nobody displayed, which is exactly the artefact docs/04 §5 says TDRA asks a promotional sender to
+      produce. Gate cases 150i, 150j and 150k are the controls that carry more of the block than the
+      refusals do: an ordinary capture at the booking form, a WITHDRAWAL captured by an import, and a grant
+      on a non-send-gating purpose must all still be accepted, because a rule that refused any of them would
+      be the privacy guard becoming an outage.'
+    - 'NOTE: **Y9-import-ledger is ANSWERED** — H-MIG-01 left it for this unit and the answer is in ADR 0072
+      and `docs/OPEN-QUESTIONS.md`. The staging ledger keeps `import_row.payload` for ever, append-only by
+      ZY192 with no DELETE grant anywhere in `import_staging`, and `payload` is `jsonb`, which none of
+      C-CRM-10''s five catalogue probes can see inside — so a phone number there is not retained against an
+      obligation, it is UNREACHABLE. The provisional answer (stage the fields the importer reads) is a real
+      answer for a package liability, where the payload is figures and the identifier is one field of it, and
+      is NOT enough for a contact list, where the payload IS the identifier. So **the number does not go in
+      at all**: what is staged is `HMAC-SHA256(json(value), SUPPRESSION_PEPPER)` — 0064''s instrument, under
+      this unit''s own key kinds so the two key spaces stay disjoint — plus the pepper''s LABEL, the consent
+      claim as a boolean, and the rejection reason for a line that could not be read. `validate` refuses a
+      payload carrying any other key BY NAME, so the decision is a check rather than a convention (gate 150l
+      widens the key set and requires the refusal). The plaintext lives in `customer.phone_e164` and nowhere
+      else, and `customer-import.itest.ts` runs a real erasure to show it: the number is pseudonymised, the
+      `imported_contact` record stands, and the digest stops resolving to a person. `contact_hmac` is NAMED
+      for the probe — `CREDENTIAL_COLUMN_PATTERN` matches `_hmac`, so the erasure engine REFUSES until
+      `rights-policy.ts` classifies it, where a `phone_digest` would have been invisible to all five probes.
+      The one cost is asserted rather than noted: a pepper rotation changes every digest, so a re-import
+      after one applies every line again — as `matched`, because the unique index on `customer.phone_e164` is
+      the real dedup and the digest is only the forecast.'
+    - 'NOTE: the two deferrals this unit was handed are both satisfied, and nothing in another unit''s entry
+      was edited to say so (the brief permits touching another entry only to record a deferral being handed
+      TO it). H-MIG-02 deferred phone NORMALISATION here because "a workbook that quietly repaired
+      `0501234567` would decide which customer a balance belongs to using a rule this unit never proved":
+      `e164IdentityResult` in `packages/core/src/identity/e164.ts` is that rule, and the cell is QUARANTINED
+      rather than repaired when it cannot be read. H-MIG-03 deferred the holder''s existence here —
+      `CustomerUnknown` names this unit, because "a record created from a package workbook would go round
+      your consent floor" — and the customer import is what creates those records, so it runs first.'
+    - 'NOTE: **identity is not SMS targeting**, and that is why a second normaliser exists beside
+      `normalisePhoneResult` rather than inside it. The third acceptance line names `052 510 8633` and
+      `02 557 6533`, and the second is a LANDLINE: `normalisePhoneResult` refuses it as
+      `landline_not_an_sms_target`, correctly, because every caller of that function is a send path or an OTP
+      path and a code sent to a landline is a customer waiting for a message that never comes. A customer
+      whose number is their office landline is still a customer and `customer_phone_is_e164` stores
+      `+97125576533` happily, so `e164IdentityResult` answers the canonical form AND whether anything can be
+      sent to it. Widening the send normaliser would have made every send path attempt an SMS to a landline;
+      refusing the row would have dropped real customers; repairing the number would have put a balance on
+      somebody else''s record. The digit FOLDING is shared (`phoneTokens`, so there are two readings of a
+      UAE number in this repository and not three) and the VERDICT is not; the census in `e164.test.ts`
+      holds the two in the only relationships they may have, and it FOUND a third — `0800` is unsendable to
+      one and unstorable to the other, so both refuse and only the word differs. Neither acceptance number
+      is ever written to a row: both are the business''s own (docs/13 §3, `WHATSAPP_CANDIDATES` and
+      `PREMISES_NAP.phoneLandline`), `REAL_BUSINESS_NUMBERS` names both, and the workbook''s own example was
+      changed to a `+97159` number for the same reason.'
+    - 'NOTE: a QUARANTINE is deliberately not a REJECTION, which is the one place this unit departs from
+      H-MIG-02. That unit refuses a whole FILE on one bad row because its artefacts are liabilities and a
+      half-imported liability reconciles to nothing; the framework''s rejection path fails the entire run by
+      design. One unreadable cell in a two-thousand-line contact list must not stop the other 1,999
+      arriving, so an unreadable cell is APPLIED as an `imported_contact` record with the reason and no
+      customer, provenanced to its own line of the file. Every rejection this importer CAN raise is about
+      the staged PAYLOAD instead — the minimisation guard above — and the five are named, fixtured and
+      asserted by name in `import.test.ts`.'
+    - 'NOTE: there is **no entry in `IMPORTERS`**, and the door is `scripts/migrate-contacts.mjs`. The
+      registry is a module-level frozen array, so a registered importer cannot have read anything when it is
+      constructed (H-MIG-03''s own note), and this one needs two things no frozen array can hold: the
+      suppression PEPPER, which is a secret reaching the application through `packages/config` — a package
+      `packages/migration` may not import — and the phone normaliser from `@berelax/core`, which it may not
+      import either. Built without them it would have to stage the plaintext number, which is the one thing
+      0121 exists to prevent, or throw; H-MIG-02 recorded why an entry that cannot run is worse than no entry
+      in a list a person is supposed to be able to enumerate. `registry.ts` carries a paragraph saying so
+      where somebody reading the registry will see it, and the script prints the blank file, a `--plan` that
+      needs no database, a dry run and the live import.'
+    - 'NOTE: acceptance line 5 ("the consent capture step appears at an imported customer''s next booking and
+      stores the wording version and its hash, asserted end to end") is satisfied at the layers that exist,
+      and the part that is NOT this unit''s is stated rather than implied. The capture step is already built:
+      `apps/web/app/_book/booking-page.tsx` renders a fieldset for every send-gating purpose with a published
+      wording, carrying the version and the hash as hidden fields, and the handler records them — and it is
+      NOT conditional on the customer, so "appears at an imported customer''s next booking" is a property of
+      the WORDINGS rather than of the record. This unit asserts that in `customer-import.itest.ts`: the two
+      reads `readConsentOffers` composes both answer, an imported customer resolves to `unknown` before the
+      capture, `recordConsent` through the repository the handler calls stores the wording id and its hash,
+      and the GATE then allows a promotional send that it refused by name a moment earlier. The HTTP half —
+      the form rendering and the POST — is `apps/web`''s and is covered by its own `book-flow.itest.ts`; this
+      unit adds no route and no page and did not build the web application, which the dispatch forbids.'
+    - 'NOTE: a PRE-EXISTING failure was repaired as collateral, with baseline proof in the unit report, and
+      it is more serious than it looks. `public.imported_package_sale.package_sale_id` (H-MIG-03, 0119) is a
+      foreign key to `package_sale`, which carries a customer id, so C-CRM-10''s third probe enumerates it —
+      and nothing classified it in `packages/core/src/privacy/rights-policy.ts`. The engine REFUSES to run
+      while any probed column is unclassified, so on the baseline **C-CRM-10''s erasure was non-functional
+      for every subject**, with `rights.itest.ts` red on the one case that reports it. This unit cannot pass
+      otherwise: its own table is enumerated too (deliberately — see the `contact_hmac` note), and its
+      central decision is only demonstrable by RUNNING an erasure. One `rule({ key:
+      ''public.imported_package_sale.*'' })` entry was added, marked as H-MIG-03''s and classified by this
+      unit; nothing else about 0119, its registry entries or its suites was touched. All 26 cases of
+      `rights.itest.ts` pass with it.'
+    - 'NOTE: two defects found in this unit''s own work, and what caught each. (1) The integration suite
+      reported "expected +0 to be 1" about a query that had returned 1: `const [survivor] = await sql`
+      destructures the row, and the assertion then read `survivor[0]?.n`, which is `undefined`, which
+      `?? ''0''` turned into a confident zero — a reading that cannot be told from a real answer. The
+      fallback is now a non-numeric string, so the same mistake fails as `NaN` instead of as a plausible
+      figure. (2) The digit-run scan that proves no number reaches the ledger reported a leak that was a
+      COINCIDENCE: a four-digit run matches a window of a 64-character hex digest often enough to fail about
+      one file in twelve, and `9715` — the leading digits of every UAE number — found one on the seventh
+      generated case. The property test found it first and the integration suite reproduced it; the claim is
+      now decomposed rather than widened — the digest is held to being 64 hex characters, and the digit scan
+      covers everything else the payload holds. A third, in the fixture: the unreadable cells were FIXED
+      strings, so their digests were identical on every run and the framework''s idempotence skipped them —
+      four quarantines on the first run and zero afterwards. The suite''s second consecutive run found it,
+      which is what running it twice is for.'
+    - 'NOTE: `packages/migration` is still not in `vitest.config.ts`''s coverage `include` list, for the
+      reason H-MIG-01 recorded, and this unit added nothing to `pnpm verify` or to gate case 29''s array:
+      `scripts/migrate-contacts.mjs` is an operator command, like `scripts/migrate-import.mjs` and
+      `scripts/migrate-package-liability.mjs`, and is driven by hand rather than by a verify step. It did NOT
+      edit the next-free sentence in `packages/db/src/index.ts`''s allocation note — `allocation-note.test.ts`
+      refuses a second next-free claim in any wording, and a guess about whether a number another worktree
+      holds is still held is how two branches come to apply one number to different SQL. Two new open
+      questions are recorded: `Y8-contact-names` (may a name typed into somebody''s phone contacts become a
+      `display_name`? Not imported, and the file has no column for one — ADR 0020) and the narrowed remainder
+      of `Y9-import-ledger` (whether migration evidence containing personal data may be retained
+      indefinitely at all; the remedy is now a retention period rather than a redaction, because there is no
+      longer an identifier in a payload to redact).'
     files:
-    - packages/migration/src/importers/customers/import.ts
+    - packages/db/migrations/0121_customer_import.sql
+    - packages/db/src/schema/imported-contact.ts
+    - packages/db/src/services/import-contacts.ts
     - packages/core/src/identity/e164.ts
+    - packages/core/src/identity/e164.test.ts
+    - packages/migration/src/importers/customers/workbook.ts
     - packages/migration/src/importers/customers/dedup.ts
+    - packages/migration/src/importers/customers/import.ts
+    - packages/migration/src/importers/customers/index.ts
+    - packages/migration/src/importers/customers/import.test.ts
     - packages/migration/src/importers/customers/import.property.test.ts
+    - packages/fixtures/src/customer-import.ts
+    - packages/fixtures/src/customer-import.test.ts
+    - packages/fixtures/src/customer-import.itest.ts
+    - scripts/migrate-contacts.mjs
+    - docs/adr/0072-the-consent-floor-is-a-refusal-and-the-import-ledger-stages-a-digest.md
   - id: H-MIG-05
     order: 187
     title: Historic bookings and appointment history

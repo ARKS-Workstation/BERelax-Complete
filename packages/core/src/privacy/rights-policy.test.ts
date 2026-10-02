@@ -243,9 +243,10 @@ describe('the erasure rule registry', () => {
     expect(registrars).toContain('C-CRM-10')
     /*
       A ceiling on the NUMBER OF REGISTRARS used to stand here, and it moved from 6 to 10 when P-HR-11 became
-      the sixth, then tripped again on H-MIG-03's `imported_package_sale.package_sale_id` — twice failing for
-      the right reason and asking for the wrong fix, because another unit classifying a column it created is
-      the registry working. A constant on a dimension that grows honestly only ever buys a bumped number.
+      the sixth, then tripped again on H-MIG-03's `imported_package_sale.package_sale_id` and once more when
+      H-MIG-04 classified its own import ledger — three times failing for the right reason and asking for the
+      wrong fix, because another unit classifying a column it created is the registry working. A constant on a
+      dimension that grows honestly only ever buys a bumped number.
 
       So the constant moved to the dimension where growth IS the defect. A tenth unit owning one column each
       is legible; a second unit accumulating dozens of rules is a second engine, and that is what the case
@@ -323,6 +324,14 @@ describe('the erasure rule registry', () => {
       and P-HR-12's `wps_export.file_sha256` were both unclassified when they merged, which ADR 0034 turned
       into a refused erasure rather than a silently unclassified column — nine cases in `rights.itest.ts`
       failed with "the catalogue holds columns no erasure rule classifies" until each got a rule.
+
+      And a THIRD time, for H-MIG-03: `imported_package_sale.package_sale_id` was unclassified when 0119
+      merged, so the engine refused every erasure on that tree. H-MIG-04 wrote the rule — it cannot
+      demonstrate its own decision about the migration ledger without running one — and `registeredBy` still
+      names H-MIG-03, because this case's claim is about the unit that CREATED the table and a rule owned by
+      whoever happened to notice would make the field say something else. The prose in the rule says who
+      classified it. H-MIG-04's own entry is `imported_contact.contact_hmac`, a column named `_hmac` on
+      purpose so the credential probe reaches it.
     */
     expect([...units].sort()).toEqual([
       'C-AUTO-07',
@@ -330,6 +339,7 @@ describe('the erasure rule registry', () => {
       'G-REV-02',
       'G-REV-05',
       'H-MIG-03',
+      'H-MIG-04',
       'P-HR-11',
       'P-HR-12',
       'W-SITE-10',

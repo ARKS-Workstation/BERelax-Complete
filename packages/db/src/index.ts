@@ -1691,6 +1691,24 @@ export {
   TenderPostingDisagrees,
 } from './services/checkout-finalise.ts'
 export {
+  IMPORT_CONTACT_AUDIT_ACTIONS,
+  IMPORT_CONTACT_KEY_KINDS,
+  IMPORT_CONTACT_SQLSTATE,
+  IMPORTED_CONTACT_OUTCOMES,
+  type ImportContactKeyKind,
+  type ImportedContactCounts,
+  type ImportedContactInput,
+  type ImportedContactOutcome,
+  importContactError,
+  importContactHmac,
+  isImportIsNotAnOptInRefusal,
+  type ResolvedImportedCustomer,
+  readImportedContactCounts,
+  readImportedContactsForNumber,
+  recordImportedContact,
+  resolveOrCreateImportedCustomer,
+} from './services/import-contacts.ts'
+export {
   CustomerUnknown,
   IMPORT_PACKAGE_SQLSTATE,
   type ImportedPackageLiabilityRow,
@@ -4010,8 +4028,9 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // number this note records as allocated TWICE, to R-REP-04 and then to R-REP-05 — an integrator's error,
 // harmless only because both released it, and recorded because the gate walks what is on disk and would
 // never have seen it. 116 landed with A-FIRST-05, 117 with Y-PAY-03, 119 with H-MIG-03 and 122 with
-// R-REP-06, which is the newest on disk. 121 is HELD by H-MIG-04, in flight in another worktree, so it is
-// neither landed nor free. 123 is the first number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather
+// R-REP-06, which is the newest on disk, and 121 with H-MIG-04 — out of order, after 122, which is the
+// arrangement this note exists for: the number is a high-water mark and not a count. 123 is the first
+// number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather
 // than consecutive integers, which is what makes a non-contiguous allocation cost nothing; a held number
 // that turns out to need no migration becomes a permanent gap like 22, 41, 44, 47, 71, 74 and now 88, and is
 // NOT renumbered, because renumbering to close a gap is how two branches come to apply one number to
@@ -4119,6 +4138,65 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // `imported_package_liability` is the liability report and `customer_package_attestation` is the
 // honour-once-on-evidence flag on the customer record, a view rather than a column on `customer` for the
 // reason 0084's `customer_contraindication_flags` is one.
+//
+// 121 is 0121_customer_import.sql (H-MIG-04) — the consent floor as a refusal, and the record of what one
+// line of a reconstructed contact list became. One table, `imported_contact`, and three rules: ZY271,
+// ZY272, ZY273.
+//
+// **ZY271 is the file.** docs/11 §7 states the rule without exception — a customer list rebuilt from
+// WhatsApp history and phone contacts imports with no marketing consent, transactional messaging stays
+// permitted, and consent is captured at the next booking with the wording version shown — and nothing
+// enforced it. There is no `marketing_consent` column anywhere in this schema and this migration
+// deliberately does not add one: 0056 made consent an append-only LOG, so "no marketing consent" is the
+// ABSENCE of a row, not a `false` and specifically not a `withdrawn` row either, because nobody withdrew
+// anything and nobody was ever asked. The only enforceable statement of an absence is a refusal, so a
+// GRANTED consent row whose `capture_source` is `'import'` is refused for any purpose that gates a send.
+// What makes such a row false is not that an importer wrote it: `consent_wording` holds only the
+// statements this system published and SHOWED, 0056 requires a grant to name one, and a contact
+// reconstructed from a chat thread was shown none of them — so the row claims words were read that nobody
+// displayed, which is exactly the artefact TDRA asks a promotional sender to produce. The purposes come
+// from `consent_purpose.is_send_gating` rather than being listed again, so `clinical_processing` and
+// `photography` are untouched, and a WITHDRAWAL captured by an import is permitted because it only ever
+// restricts sending. The door it leaves is named in the file: a lawfully collected external opt-in list
+// (docs/11 §7's "one-time opt-in campaign only if your lawyer confirms a lawful basis") needs its wording
+// published and this trigger changed by a migration, which is the right barrier for a mass import of
+// marketing consent.
+//
+// **`imported_contact` answers Y9-import-ledger, which H-MIG-01 left for this unit.** The staging ledger
+// keeps `import_row.payload` for ever — append-only by ZY192, with no role holding DELETE anywhere in
+// `import_staging` — and `payload` is `jsonb`, which none of C-CRM-10's five catalogue probes can see
+// inside. A phone number staged there is not retained against an obligation, it is unreachable. For a
+// contact list the payload IS the identifier, so minimising the fields is not enough: the number does not
+// go in at all. What is staged is `HMAC-SHA256(json(number), SUPPRESSION_PEPPER)` — 0064's instrument,
+// under this unit's own key kinds so the two key spaces stay disjoint — and the plaintext lives in exactly
+// one place, `customer.phone_e164`, which an erasure pseudonymises. So an erasure is complete again: the
+// digest cannot be recomputed from anything left in the database, and the row stops resolving to a person
+// while staying what it was, the evidence that an import happened and what it did. The column is named
+// `contact_hmac` ON PURPOSE, because `CREDENTIAL_COLUMN_PATTERN` matches `_hmac` and the erasure engine
+// therefore REFUSES to run until `rights-policy.ts` classifies it; a column called `phone_digest` would
+// have been invisible to all five probes, which is the accident the open question is about. The cost,
+// stated and asserted rather than discovered: a pepper rotation changes every digest, so a re-import after
+// one applies every line again — landing as `matched`, because the unique index on `customer.phone_e164`
+// is the real dedup and the digest is only the forecast.
+//
+// The table holds a digest, a pepper label, an outcome and a reason, and nothing else. No copy of the
+// number, for the reason above; no copy of a quarantined cell, because a quarantine record is a REASON and
+// a REFERENCE and the cell is in the file the operator already has; and no customer id, which is 0119's
+// reason for `imported_package_sale` — a merge re-points the columns `merge-participants.ts` registers,
+// and a second copy of the holder here would be the copy the merge did not follow. One row per staged
+// line, always, which is also what makes a duplicate line and a quarantined line expressible at all:
+// `import_provenance_one_per_target` refuses a second claim on the customer the first line created, and
+// ZY196 refuses the COMMIT of an applied row that recorded nothing. ZY273 then holds the outcome equal to
+// what the import actually wrote, in both directions, by walking the record's own provenance to the staged
+// row — the distinct count every acceptance line in that unit is read off is `outcome = 'created'`, and a
+// record saying `created` with no customer behind it would report an import of people who are not in the
+// database while satisfying ZY196 perfectly well.
+//
+// SQLSTATEs ZY271-ZY273 of the allocated band ZY271-ZY280; ZY274 through ZY280 are left FREE and
+// deliberately UNREGISTERED, because an entry for a code no migration raises is what direction 3 of
+// `pnpm sqlstate` refuses. The allocated test port band `{ start: 16_100, width: 300 }` was NOT used and
+// is NOT declared: this unit starts no server, and a declared-but-unused band fails
+// `apps/web/src/test-ports.test.ts`.
 //
 //
 // 122 is 0122_cash_forecast_agent.sql (R-REP-06) — two rows and no schema: the `agent_definition` and
