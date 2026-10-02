@@ -9,6 +9,7 @@ import {
 import {
   type CashForecast,
   cashForecast,
+  EMPTY_KPI_INPUT,
   FORECAST_WEEKS,
   type ForecastCostOccurrence,
   forecastBytes,
@@ -196,6 +197,8 @@ const seasonalityInputFrom = (
 ): SeasonalityInput => ({
   days: period.days.map((day) => ({ ...day, businessDay: localDate(day.businessDay) })),
   kpiInput: {
+    // Five datasets R-REP-05 added and the forecast reads none of: empty, not absent.
+    ...EMPTY_KPI_INPUT,
     businessDays: period.days.map((day) => ({
       businessDay: localDate(day.businessDay),
       openMinutes: day.openMinutes,

@@ -47507,6 +47507,392 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 149a-149z. (R-REP-05) Cohorts, LTV, CAC and the package liability: every way an unobserved figure
+//            could become a published one, shown to be caught, and every refusal shown to be able to
+//            stop refusing.
+//
+//            The unit's acceptance line says retention is "realised, never forecast", and that is the
+//            whole subject. A lifetime value is by its name a figure about a future; a cohort this
+//            business has held for six weeks has six weeks of history; and the arithmetic that turns the
+//            second into the first is one line long. Whatever that line is — a retention curve, a decay,
+//            an annualisation — the number it produces goes on the screen an acquisition budget is set
+//            from, and NOTHING ABOUT THE NUMBER SAYS WHICH PART WAS OBSERVED (ADR 0071).
+//
+//            So the cases come in four groups and each fails in a way the other three cannot see:
+//
+//              * **the refusals that make an unobserved figure unreachable.** 149a to 149e blind the
+//                period-0 identity, the earlier-cohort collapse, the horizon refusal, the
+//                unattributable-contribution refusal and the window restriction on the contribution
+//                measure. Every one turns a refusal into a number.
+//              * **CAC, both halves of which are missing from this build.** 149f to 149i widen the
+//                paid-channel denominator to every new customer, widen the spend to the whole window,
+//                classify an acquisition label as paid, and blind the refusal of a marketing total no
+//                channel claims. The first and the third are the two ways a CAC gets a figure it has not
+//                earned; the fourth is the one that would divide the shopfront's signage by the people
+//                who walked past it.
+//              * **the liability's tie to 2050, which is exact or it is nothing.** 149j to 149l turn the
+//                per-session share into a rounded division, absorb a posting from outside the package
+//                path, and drop H-MIG-03's opening-balance source. 149j is worth reading: the
+//                hand-computed fixtures AGREE with the broken version, and the property test over 500
+//                generated balances is what notices — which is why that property test exists.
+//              * **the arch rule, which is the one check here that passes most convincingly when it has
+//                stopped working.** 149m to 149q blind the pattern match, stop the closure following its
+//                imports, stop the comment stripper, blind the empty-closure report, and PLANT a real
+//                forecast in a module on the real path. An empty closure, a blanked table and a renamed
+//                import each produce zero findings and a green tick.
+//
+//            149r and 149s drive the pairing suite, because the two claims they are about are only
+//            visible against a real database: the survivor grouping on a materialised view that has not
+//            been refreshed since the merge, and the measured absence of any channel-tagged cost.
+//            149t is a scan of its own, over this unit's query module, for the reason 148n gives.
+//
+//            149y and 149z are the controls: every case above is satisfied by something FAILING, so one
+//            has to be satisfied by the real tree passing.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const COHORTS = 'packages/core/src/reporting/cohorts.ts'
+  const CAC = 'packages/core/src/reporting/cac.ts'
+  const LIABILITY = 'packages/core/src/reporting/package-liability.ts'
+  const ARCH = 'packages/fixtures/src/ltv-arch.ts'
+  const COHORT_QUERIES = 'packages/db/src/reporting/cohort-queries.ts'
+  const PURE_SUITE = 'packages/core/src/reporting/cohorts.test.ts'
+  const ARCH_SUITE = 'packages/fixtures/src/ltv-arch.test.ts'
+  const PAIR_SUITE = 'packages/fixtures/src/cohorts.itest.ts'
+
+  const pureUnit = () => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', PURE_SUITE]
+  const archUnit = () => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ARCH_SUITE]
+  const cohortIntegration = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    PAIR_SUITE,
+  ]
+
+  /** Breaks one line of a shipped module and requires the test written for it back by name. */
+  const breakAndExpect = (name, file, find, into, rule, suite = pureUnit) => {
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        file,
+        (source) => replaceOnce(source, find, into),
+        () => runExpectingFailure('pnpm', suite()),
+      ),
+      rule,
+    )
+  }
+
+  // ---- the refusals that make an unobserved figure unreachable ---------------------------------
+
+  // 149a. Period 0's count is DERIVED from the activity and then held equal to the cohort size, rather
+  //       than being set to it. Blind the identity and an activity set missing the acquisition month
+  //       reads as churn in period 0 — and every later period is then measured against a base that is
+  //       too small, so the whole retention row is wrong in the direction that flatters it.
+  breakAndExpect(
+    'cohorts: a period 0 that disagrees with the cohort size, unrefused, fails by name',
+    COHORTS,
+    '      if (monthIndex === 0 && active.length !== cohortSize) {',
+    '      if (false) {',
+    'refuses a period 0 that disagrees with the cohort size, naming the customers',
+  )
+
+  // 149b. "A merged customer appears in exactly one cohort — the EARLIER one." Take the later month
+  //       instead and the person joins the cohort of the record that was merged away, which is the
+  //       newer one: their whole history then counts as a retention of a cohort they predate.
+  breakAndExpect(
+    'cohorts: a merged customer collapsed onto the LATER cohort month fails by name',
+    COHORTS,
+    '    if (cohortMonth < held.cohortMonth) {',
+    '    if (cohortMonth > held.cohortMonth) {',
+    'puts a merged customer in exactly one cohort — the earlier one',
+  )
+
+  // 149c. The horizon refusal is the whole of "realised, never forecast": it is what makes a figure over
+  //       a month that has not finished unreachable rather than discouraged. Blind it and a three-week
+  //       old cohort gets a twelve-month value, computed over eleven months of nothing.
+  breakAndExpect(
+    'cohorts: a value at a horizon the cohort has not lived fails by name',
+    COHORTS,
+    '  if (args.horizonMonths > realised) {',
+    '  if (false) {',
+    'refuses a value at a horizon the cohort has not lived',
+  )
+
+  // 149d. ADR 0070 reaching this unit. A delivery whose cost nothing can attribute must not contribute
+  //       its NET PRICE to a cohort value: that reports the highest possible lifetime value, on the
+  //       figure an acquisition budget is set from. Blind the refusal and the margin's own
+  //       `not_attributable` state is summed as though the costs were nil.
+  breakAndExpect(
+    'cohorts: an unattributable cost summed into a cohort value fails by name',
+    COHORTS,
+    '  if (missing.size > 0) {\n    throw new CohortContributionNotAttributable(',
+    '  if (false) {\n    throw new CohortContributionNotAttributable(',
+    'refuses a delivery whose cost nothing can attribute, naming the open questions',
+  )
+
+  // 149e. `cohortMonths` IS the realised window, and the contribution measure restricts itself to it.
+  //       Remove the restriction and a contribution row for a month past the horizon enters the figure —
+  //       which is a forecast arriving as data rather than as arithmetic, and the one route into this
+  //       module that no refusal upstream can close.
+  breakAndExpect(
+    'cohorts: a contribution past the horizon counted into the realised value fails by name',
+    COHORTS,
+    '      if (!keys.has(`${row.cohortMonth}#${row.monthIndex}`)) continue',
+    '      if (false) continue',
+    'drops a contribution for a month past the window rather than extending the horizon',
+  )
+
+  // ---- CAC, both halves of which are missing from this build -----------------------------------
+
+  // 149f. The acceptance line's word is "only": the denominator counts new customers whose first touch
+  //       was PAID. Widen it to every new customer and the paid spend is divided by people who arrived
+  //       by referral, reporting a CAC a fraction of the real one — the most flattering possible error
+  //       on a figure a marketing budget is set from.
+  breakAndExpect(
+    'cac: a denominator counting every new customer rather than the paid ones fails by name',
+    CAC,
+    'cohortMemberCount(input.cohortMembers, cohortWindowCohorts(input.cohortMonths), PAID)',
+    'cohortMemberCount(input.cohortMembers, cohortWindowCohorts(input.cohortMonths), null)',
+    'counts only the new customers whose first touch was paid',
+  )
+
+  // 149g. A cohort's cost is what was spent to WIN it, which is the acquisition month only. Sum the
+  //       whole window and the figure rises the longer the cohort is observed — a CAC that gets worse
+  //       with age, for a reason that has nothing to do with acquisition.
+  breakAndExpect(
+    'cac: spend summed over the whole window rather than the acquisition month fails by name',
+    CAC,
+    '      if (!cohorts.has(row.cohortMonth)) continue\n      total += row.netFils',
+    '      total += row.netFils',
+    'counts only the spend of the ACQUISITION month, not the whole window',
+  )
+
+  // 149h. No label in `customer_acquisition_source` records whether a touch was bought — a `web`
+  //       booking may be organic search, a link in a reminder or an advertisement click. Classify one as
+  //       paid and the CAC acquires a denominator it has not earned, which is brief rule 15 applied to a
+  //       classification rather than to a number.
+  breakAndExpect(
+    'cac: an acquisition label classified as a PAID touch fails by name',
+    CAC,
+    "  web: {\n    state: 'not_recorded',",
+    "  web: {\n    state: 'paid',",
+    'covers every acquisition label with a stated reason, and records none of them as paid',
+  )
+
+  // 149i. The refusal that keeps the whole marketing movement out of a CAC. No cost table in this schema
+  //       carries a channel, so `6070` mixes paid acquisition with signage, print and the shopfront.
+  //       Blind the refusal and that total becomes a numerator — a figure indistinguishable from a CAC
+  //       and wrong by every dirham of it.
+  breakAndExpect(
+    'cac: a marketing total no channel claims, admitted as acquisition spend, fails by name',
+    CAC,
+    "  if (statement.state === 'not_channel_attributed') {",
+    '  if (false) {',
+    'refuses a marketing total that no channel claims',
+  )
+
+  // ---- the liability's tie to 2050 -------------------------------------------------------------
+
+  // 149j. **The case worth reading.** 0078 allocates a sale's gross across the version's lines by
+  //       largest remainder and 0083 releases a line's share as `ceil(value x redeemed / total)`, so a
+  //       price that does not divide by its session count has no single per-session figure. The broken
+  //       version here — `remaining x floor(value / total)` — AGREES with both hand-computed fixtures
+  //       (10,000 over 3 sessions gives 6,666 and 3,333 either way). What notices is the property test
+  //       over 500 generated balances, which is exactly why a hand fixture is not enough for this one:
+  //       5 fils over 3 sessions with 1 taken is 3 by the identity and 2 by the division.
+  breakAndExpect(
+    "liability: a rounded per-session price instead of the release formula's complement fails by name",
+    LIABILITY,
+    '  return (valueFils * BigInt(sessionsRemaining)) / BigInt(sessionsTotal)',
+    '  return BigInt(sessionsRemaining) * (valueFils / BigInt(sessionsTotal))',
+    'equals value − released for every balance the release formula wrote',
+  )
+
+  // 149k. `2050` is a real account and nothing stops an adjustment landing on it. Zero the census line
+  //       and such a posting is absorbed into a reconciliation that then balances while describing a
+  //       different liability — ADR 0064's census argument, where "an account posted to that no line
+  //       claims leaves the sheet balancing and is invisible to every identity".
+  breakAndExpect(
+    'liability: a posting to 2050 from outside the package path, absorbed, fails by name',
+    LIABILITY,
+    '      differenceFils: -args.ledger.otherFils,',
+    '      differenceFils: 0n,',
+    'reports a posting to 2050 from outside the package path as a named variance',
+  )
+
+  // 149l. H-MIG-03 posts a reconstructed package's liability with `source = 'opening_balance'` and
+  //       writes the `package_sale` and `package_balance` rows the schedule reads. Drop that source and
+  //       a schedule compared against the till's two sources alone is out by exactly the import — with
+  //       a message naming a liability and nothing about the migration.
+  breakAndExpect(
+    'liability: the opening-balance source dropped from the package scope fails by name',
+    LIABILITY,
+    '  movement.packageSaleFils + movement.packageRedemptionFils + movement.openingBalanceFils',
+    '  movement.packageSaleFils + movement.packageRedemptionFils',
+    'names the opening-balance source rather than dropping it',
+  )
+
+  // ---- the arch rule, which is green and dead the moment it stops matching ----------------------
+
+  // 149m. The pattern match itself. Pin it to "nothing found" and every module on the path reports
+  //       clean — which is what a forecasting construct anywhere in the closure would then look like.
+  breakAndExpect(
+    'ltv-arch: a pattern match pinned to nothing found fails by name',
+    ARCH,
+    '      const match = construct.re.exec(code)',
+    '      const match = null',
+    'fires on a planted forecast, by the name of the rule',
+    archUnit,
+  )
+
+  // 149n. The closure. Stop following imports and the scan is about the two entry modules, so a forecast
+  //       one import away is invisible — and the result is still zero findings and a green tick.
+  breakAndExpect(
+    'ltv-arch: a closure that stops following its imports fails by name',
+    ARCH,
+    '    for (const specifier of relativeImportsOf(codeOnly(source))) {',
+    '    for (const specifier of []) {',
+    'reaches the modules the figure is actually computed through',
+    archUnit,
+  )
+
+  // 149o. The comment stripper, broken the other way: leave block comments in and the modules' own
+  //       prose explaining why they do not forecast becomes a violation of the rule it explains. That is
+  //       the failure `stripNonCode`'s header records — the colour gate's first run flagged the Tailwind
+  //       class names in the sentence forbidding them — and a rule that fires on its own documentation
+  //       gets turned off.
+  breakAndExpect(
+    'ltv-arch: a stripper that leaves comments in flags the prose explaining the rule, and fails by name',
+    ARCH,
+    "    if (source.startsWith('/*', at)) {",
+    '    if (false) {',
+    'does not fire on prose that explains why there is no forecast',
+    archUnit,
+  )
+
+  // 149p. The report of an EMPTY closure, which is the one finding that makes the others non-vacuous.
+  //       Blind it and a renamed or moved entry module produces a clean scan over nothing.
+  breakAndExpect(
+    'ltv-arch: an empty closure passing silently fails by name',
+    ARCH,
+    '  if (closure.length === 0 || unreached.length > 0) {',
+    '  if (false) {',
+    'reports an empty closure rather than passing over it',
+    archUnit,
+  )
+
+  // 149q. And the direction every case above is the control for: a real forecasting construct PLANTED
+  //       in a real module on the real path. This is the defect the rule exists for, and it has to be
+  //       seen to fire against the tree rather than against a synthetic module.
+  breakAndExpect(
+    'ltv-arch: a forecast planted in a module on the real path fails by name',
+    COHORTS,
+    '// --- the cohort grid ---',
+    'export const decayCurve = (months: number): number => months\n\n// --- the cohort grid ---',
+    'holds no forecasting construct in the real tree',
+    archUnit,
+  )
+
+  // ---- the two claims only a real database can show --------------------------------------------
+
+  // 149r. The survivor grouping. `merge_record` keeps the merged-away record as a TOMBSTONE and
+  //       `booking.customer_id` is re-pointed, so after a refresh `dim_customer` holds the survivor with
+  //       the earlier first visit and the tombstone with none — but a materialised view is only as
+  //       current as its last refresh, and between the merge and the next pass it holds BOTH. Group on
+  //       the raw id and one person is two cohort members in two different months, which is exactly what
+  //       somebody looking at the screen straight after a merge would see.
+  breakAndExpect(
+    'cohort-queries: a member query grouped on the raw customer id fails by name',
+    COHORT_QUERIES,
+    '         group by merge_survivor_of(c.customer_id)',
+    '         group by c.customer_id',
+    'keys a cohort on the first DELIVERED visit, and puts a merged customer in the earlier one',
+    cohortIntegration,
+  )
+
+  // 149s. The channel-tagged count is a MEASURED zero and not a comment: no cost table in this schema
+  //       carries a marketing channel, and the caller's branch reads the count rather than a sentence.
+  //       Report one and the measurement becomes a claim — and a CAC becomes computable out of nothing.
+  breakAndExpect(
+    'cohort-queries: a channel-tagged spend count reported where none exists fails by name',
+    COHORT_QUERIES,
+    '    channelTaggedRows: 0,',
+    '    channelTaggedRows: 1,',
+    'finds no acquisition spend at all, and no channel tag to attribute one by',
+    cohortIntegration,
+  )
+
+  // 149t. No account code may be written in this unit's query module, for 148n's reason: the chart lives
+  //       in `packages/core`, which `packages/db` may not import, so a literal `'2050'` here would be a
+  //       second statement of a code whose first statement is somewhere unreachable — and the two would
+  //       drift with nothing comparing them. Every query that needs one takes it as an ARGUMENT, and the
+  //       pairing suite passes `ACCOUNTS.packageDeferredRevenue` and `ACCOUNTS.marketing`.
+  {
+    const accountCodeLiterals = (source) => {
+      // Strings only, and four digits exactly: `${asAt}::date` is not an account code and a bare 2415
+      // in a comment is a trading year.
+      const matches = source.match(/'[0-9]{4}'/g) ?? []
+      return [...new Set(matches)]
+    }
+    const clean = accountCodeLiterals(readFileSync(COHORT_QUERIES, 'utf8'))
+    check(
+      'cohort-queries: the cohort query module states no account code of its own',
+      clean.length === 0,
+      `${COHORT_QUERIES} contains the four-digit string literal(s) ${clean.join(', ')}. The chart ` +
+        'lives in packages/core, which this package may not import, so an account code here is a ' +
+        'second statement of it — take it as an argument instead.',
+    )
+    // And the known-bad fixture, because a scan that has never been seen to fire is not a scan
+    // (ADR 0003). The control is the same scan over a file that DOES contain one.
+    const planted = withEditedFile(
+      COHORT_QUERIES,
+      (source) =>
+        replaceOnce(
+          source,
+          'const ISO_DATE = ',
+          "const GATE_FIXTURE_ACCOUNT = '2050'\n\nconst ISO_DATE = ",
+        ),
+      () => accountCodeLiterals(readFileSync(COHORT_QUERIES, 'utf8')),
+    )
+    check(
+      'cohort-queries: the account-code scan sees a planted account code',
+      planted.includes("'2050'"),
+      `the scan found ${planted.length} literal(s) in a file that had one planted in it, so it would ` +
+        'pass over the defect it exists to refuse',
+    )
+  }
+
+  // ---- the controls ----------------------------------------------------------------------------
+
+  // 149y. Every case above is satisfied by something failing, so this one is satisfied by the real tree
+  //       passing: the cohort grid, the horizon, CAC, the liability schedule and the six KPIs.
+  {
+    const pure = run('pnpm', pureUnit())
+    check(
+      'cohorts: the grid, the horizon, CAC and the liability pass over the real tree',
+      !pure.failed,
+      pure.output,
+    )
+  }
+
+  // 149z. And the arch suite plus the pairing suite — the first because the whole "never forecast" claim
+  //       rests on it, the second because the two things a pure test cannot reach are proved there: a
+  //       merged customer in one cohort against a view that has not been refreshed since the merge, and
+  //       the liability tied to `2050` to the fils as a delta across this suite's own writes.
+  {
+    const arch = run('pnpm', archUnit())
+    check('cohorts: the LTV arch rule passes over the real tree', !arch.failed, arch.output)
+    const pair = run('pnpm', cohortIntegration())
+    check(
+      'cohorts: the cohort reads and the liability tie pass against the real database',
+      !pair.failed,
+      pair.output,
+    )
+  }
+}
+
 // 151a-151z. (R-REP-06) The 13-week cash forecast and the seasonality model: every way a PROJECTION
 //            could come to read as a measurement, shown to be caught, and every refusal shown to be
 //            able to stop refusing.

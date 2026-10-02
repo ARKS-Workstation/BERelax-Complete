@@ -2,6 +2,8 @@ import { AppError } from '@berelax/shared'
 import type { AccountCode } from '../ledger/account.ts'
 import type { ChartOfAccounts } from '../ledger/chart-of-accounts.ts'
 import { STANDARD_SPA_CHART } from '../ledger/chart-of-accounts.ts'
+import { CAC_KPIS, CAC_MEASURES } from './cac.ts'
+import { COHORT_KPIS, COHORT_MEASURES } from './cohorts.ts'
 import type {
   KpiExpr,
   KpiInput,
@@ -21,6 +23,7 @@ import {
   renderExpr,
   unitOfExpr,
 } from './kpi-expression.ts'
+import { PACKAGE_LIABILITY_KPIS, PACKAGE_LIABILITY_MEASURES } from './package-liability.ts'
 import { REVPAR_KPIS, REVPAR_MEASURES, REVPARH_REVENUE_PARTITION } from './revpar.ts'
 import { UTILISATION_KPIS, UTILISATION_MEASURES } from './utilisation.ts'
 
@@ -144,14 +147,31 @@ export function buildKpiRegistry(
   }
 }
 
-/** Every measure, from the two modules that declare them. */
+/**
+ * Every measure, from the five modules that declare them.
+ *
+ * R-REP-05's three modules register here rather than building a registry of their own, which is the
+ * thing `reporting.materialised_view` exists to prevent one subject along (ADR 0060): a second answer to
+ * "which KPIs exist" is a view the nightly pass walks straight past. The order is publication order —
+ * capacity, then revenue per unit of it, then the cohort a customer belongs to, then what they cost and
+ * what they are worth, then what is still owed to them.
+ */
 export const KPI_MEASURES: readonly Measure[] = Object.freeze([
   ...UTILISATION_MEASURES,
   ...REVPAR_MEASURES,
+  ...COHORT_MEASURES,
+  ...CAC_MEASURES,
+  ...PACKAGE_LIABILITY_MEASURES,
 ])
 
 /** Every KPI specification, in publication order. */
-export const KPI_SPECS: readonly KpiSpec[] = Object.freeze([...UTILISATION_KPIS, ...REVPAR_KPIS])
+export const KPI_SPECS: readonly KpiSpec[] = Object.freeze([
+  ...UTILISATION_KPIS,
+  ...REVPAR_KPIS,
+  ...COHORT_KPIS,
+  ...CAC_KPIS,
+  ...PACKAGE_LIABILITY_KPIS,
+])
 
 /** The shipped registry. */
 export const KPI_REGISTRY: KpiRegistry = buildKpiRegistry(KPI_SPECS, KPI_MEASURES)

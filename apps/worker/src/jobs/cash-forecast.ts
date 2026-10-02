@@ -8,6 +8,7 @@ import {
   type CashForecast,
   type CashForecastInput,
   cashForecast,
+  EMPTY_KPI_INPUT,
   FORECAST_WEEKS,
   forecastFindings,
   localDate,
@@ -180,6 +181,11 @@ export async function buildCashForecastReport(sql: Sql, asOf: string): Promise<C
   const seasonalityInput: SeasonalityInput = {
     days: period.days.map((day) => ({ ...day, businessDay: localDate(day.businessDay) })),
     kpiInput: {
+      // R-REP-05 widened `KpiInput` with five cohort and acquisition datasets its own measures
+      // read. The forecast reads none of them, and an empty dataset is the honest value rather than a
+      // cast: `measure-reads-exactly-the-fields-it-declares` judges every measure in the shared
+      // registry, so a missing field and an empty one are not the same claim.
+      ...EMPTY_KPI_INPUT,
       businessDays: period.days.map((day) => ({
         businessDay: localDate(day.businessDay),
         openMinutes: day.openMinutes,
