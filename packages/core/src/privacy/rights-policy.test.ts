@@ -332,6 +332,12 @@ describe('the erasure rule registry', () => {
       whoever happened to notice would make the field say something else. The prose in the rule says who
       classified it. H-MIG-04's own entry is `imported_contact.contact_hmac`, a column named `_hmac` on
       purpose so the credential probe reaches it.
+
+      H-MIG-05 is the FOURTH time, and the first that was expected: `imported_appointment.contact_hmac` is
+      named `_hmac` for exactly the reason H-MIG-04's is, so the credential probe reached it the moment
+      0130 applied and `rights.itest.ts` refused every erasure until the rule existed. That is the
+      mechanism working rather than a defect being found — which is why the rule is `registeredBy:
+      'H-MIG-05'` and not collateral: this unit created the table.
     */
     expect([...units].sort()).toEqual([
       'C-AUTO-07',
@@ -340,6 +346,7 @@ describe('the erasure rule registry', () => {
       'G-REV-05',
       'H-MIG-03',
       'H-MIG-04',
+      'H-MIG-05',
       'P-HR-11',
       'P-HR-12',
       'W-SITE-10',

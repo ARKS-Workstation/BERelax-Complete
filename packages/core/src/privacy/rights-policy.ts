@@ -1716,6 +1716,36 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
       'imported without any marketing consent.',
     registeredBy: 'H-MIG-04',
   }),
+  rule({
+    key: 'public.imported_appointment.contact_hmac',
+    dataClass: 'operational',
+    action: 'retain_append_only',
+    why:
+      'The record of what one line of a reconstructed VISIT HISTORY became (0130, H-MIG-05), found by ' +
+      'the CREDENTIAL probe on the `_hmac` column-name family. Everything `imported_contact.contact_hmac` ' +
+      'one entry up says applies unchanged, and it applies because this column is the same digest: ' +
+      'H-MIG-05 keys the customer cell with the SAME pepper and the SAME two key kinds H-MIG-04 used, so ' +
+      'a person’s visit record and their contact record join on this value. The name is deliberate for ' +
+      'the same reason — a column called `customer_digest` would have been invisible to all five probes, ' +
+      'which is the accident Y9-import-ledger is about. ' +
+      '`retain_append_only` and not `retain_for_subject`: `imported_appointment` refuses UPDATE and ' +
+      'DELETE for every role including the owner (ZY364) and the application role holds neither ' +
+      'privilege, so neither a redaction nor a deletion of this column is a statement an erasure could ' +
+      'make — and nothing is kept here in the subject’s interest. It is kept because it is the ' +
+      'evidence that a visit was reconstructed and what could not be resolved about it. ' +
+      'The erasure is still COMPLETE in the sense that matters, and for exactly H-MIG-04’s reason: ' +
+      'the plaintext lives only in `customer.phone_e164`, which is pseudonymised, so after an erasure the ' +
+      'digest cannot be recomputed from anything in this database and the row stops resolving to a ' +
+      'person. The visit itself is in `appointment`, whose link to the person runs through ' +
+      '`booking.customer_id` and is reached by probe 3.',
+    subjectReason:
+      'We keep a one-way cryptographic fingerprint of the number that appeared beside each visit in the ' +
+      'records your history was reconstructed from, together with what we were able to resolve about ' +
+      'that line. It cannot be reversed into your number, and once your record is erased there is ' +
+      'nothing left in our systems it can be matched against. We keep it so that we can always show ' +
+      'where a past appointment in your history came from.',
+    registeredBy: 'H-MIG-05',
+  }),
   /*
     H-MIG-03's column, classified here as COLLATERAL and not as this unit's work.
 
