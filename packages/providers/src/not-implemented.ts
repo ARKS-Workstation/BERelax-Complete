@@ -61,7 +61,12 @@ export const PENDING: Readonly<Record<string, PendingIntegration>> = {
  * simply does not exist yet. An operator reading this needs to know which is which.
  */
 export function notImplemented(provider: string): never {
-  const pending = PENDING[provider]
+  // `Object.hasOwn` and not a plain lookup. `PENDING` is an object literal, so `PENDING['toString']` is a
+  // function off the prototype rather than `undefined` — a provider key spelled `constructor` or
+  // `toString` would take the branch that names a unit and then name `undefined` as the unit and
+  // `undefined` as the prerequisite, which is the one thing this message exists to avoid. The key comes
+  // from a `*_PROVIDER` the operator sets, so it is outside input.
+  const pending = Object.hasOwn(PENDING, provider) ? PENDING[provider] : undefined
   const detail =
     pending === undefined
       ? 'No real adapter has been built for it.'

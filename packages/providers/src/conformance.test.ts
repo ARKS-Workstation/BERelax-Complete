@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { FAILURE_MODES, type FailureMode, failureModeOf } from './failure.ts'
 import { PLACES_AGGREGATE_FIELD_MASK, PLACES_FIXTURE_PLACE_ID } from './google/fake-places.ts'
 import { DEEPSEEK, MINIMAX } from './llm/named-fakes.ts'
+import { notImplemented } from './not-implemented.ts'
 import { BUILT_LLM_PROVIDERS, createProviders, type Providers } from './registry.ts'
 
 /**
@@ -310,6 +311,35 @@ describe('rule 3 — provider selection is configuration, not code', () => {
         now: () => CLOCK,
       }),
     ).toThrow(/real smsala adapter is not implemented/i)
+  })
+
+  it('refuses a prototype key without naming undefined as the unit that builds it', () => {
+    // `PENDING` is an object literal, so `PENDING['toString']` is a function off the prototype and not
+    // `undefined`. A plain lookup therefore took the branch that names a unit and a prerequisite, and
+    // named `undefined` as both — the one failure this message exists to prevent, in the message itself.
+    // The key is the value of a `*_PROVIDER` variable an operator sets, so it is outside input.
+    for (const key of ['toString', 'constructor', 'hasOwnProperty', '__proto__']) {
+      try {
+        notImplemented(key)
+        expect.unreachable('expected a refusal')
+      } catch (error) {
+        expect(isAppError(error)).toBe(true)
+        if (isAppError(error)) {
+          expect(error.kind).toBe('provider_unavailable')
+          expect(error.message).toContain('No real adapter has been built for it.')
+          expect(error.message, key).not.toContain('undefined')
+          expect(error.details['unit'], key).toBeUndefined()
+        }
+      }
+    }
+    // The control: a key that IS in the table still names its unit, so the guard did not swallow the
+    // branch it protects.
+    try {
+      notImplemented('smsala')
+      expect.unreachable('expected a refusal')
+    } catch (error) {
+      if (isAppError(error)) expect(String(error.details['unit'])).toBe('B-MSG')
+    }
   })
 
   it('names the unit and the prerequisite in the refusal, so the message is actionable', () => {
