@@ -198,6 +198,21 @@ const schema = z
         ['EMAIL_PROVIDER', cfg.EMAIL_PROVIDER],
         ['GOOGLE_PROVIDER', cfg.GOOGLE_PROVIDER],
         ['PAYMENT_PROVIDER', cfg.PAYMENT_PROVIDER],
+        /*
+         * `LLM_PROVIDER` was MISSING from this list until G-SEO-05, although it has been in the schema
+         * since the registry was built — so `LLM_PROVIDER=real` outside production parsed cleanly, and
+         * `notImplemented('llm')` threw at boot instead of the configuration being refused by name.
+         * That is the wrong failure in the right direction, which is why nobody found it: the system did
+         * not start, and the message named a pending integration rather than a misconfiguration.
+         *
+         * It belongs here for ADR 0005's own reason rather than by symmetry. A real model outside
+         * production spends real money on a real key with no cap this build can see, and the SEO agent's
+         * prompts carry fetched competitor HTML and Search Console query strings — a staging run pointed
+         * at a live provider sends somebody else's page content to a vendor under this business's
+         * account. G-SEO-05's acceptance line is "a test asserts it cannot be selected unless
+         * APP_ENV=production", and `env.test.ts` now asserts it alongside the other five.
+         */
+        ['LLM_PROVIDER', cfg.LLM_PROVIDER],
         ['MEDIA_STORAGE', cfg.MEDIA_STORAGE],
       ] as const
     ).filter(([, mode]) => mode === 'real')

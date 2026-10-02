@@ -20488,7 +20488,7 @@ units:
       agent does not cry wolf, an internal-link and orphan audit against the real sitemap, and structured-data
       validation that refuses the types the licence does not permit.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - G-SEO-01
@@ -20532,7 +20532,7 @@ units:
       and drafting only, under per-run token and cost caps. The red-team injection corpus is a gate here:
       a weakened policy must make it fail.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - G-AGT-01
@@ -20558,12 +20558,47 @@ units:
       the deterministic fake, three runs over identical findings produce byte-identical drafts
     - Per-run token and cost caps recorded as integer fils and enforced mid-run through G-AGT-01; a run
       exceeding the cap aborts, persists partial cost, and does not set last_success_at
+    - 'NOTE: the migration number is 0133, not 0047. 0047 does not exist on disk and was never this
+      unit''s - the file list above is the only place that said otherwise, and the number allocated to
+      G-SEO-05 is 133. See the ledger paragraph in packages/db/src/index.ts.'
+    - 'NOTE: the screen is route.ts + handler.ts + render.ts + view.ts rather than page.tsx, for the
+      reason every admin surface in this build records: apps/web/src/routes/registry.ts requires every
+      DOCUMENT to be served in both locales, so a page.tsx here would need an Arabic admin document that
+      W-SYS-01 has not built, and it would join a screenshot matrix whose RTL half has to be a real Arabic
+      route. The three HR screens, the two settings screens, the diary, the pipeline board, the quick-book
+      screen and the review paste form all give this reason.'
+    - 'NOTE: applying lives in packages/google/src/suggestions/apply.ts and NOT beside the drafting pass,
+      because .dependency-cruiser.cjs''s seo-agent-must-not-reach-a-publish-path forbids every module
+      under packages/google/src/seo/ from holding a reference to a publish path. The directory boundary IS
+      the cage; putting the apply beside the pass would have needed that rule to grow an exemption.'
+    - 'NOTE: the escalation security event is an audit_event with operation = ''denied'' (0005''s own
+      vocabulary for a refused attempt, indexed on action) rather than a security_event table. There is no
+      such table in this build and one only this unit wrote to would be a second audit trail.'
+    - 'NOTE: the linter version is on seo_suggestion.lint_version, one hop from the publication_record
+      through applied_record_id, rather than copied onto the record. publication_lint_pass carries the
+      regulatory_profile version and not a rule-set version, and adding a column to another unit''s
+      append-only evidence table from this migration would be wider than this unit needs. A copy on both
+      would be two answers to compare the day a rule was edited.'
+    - 'NOTE: repaired a pre-existing defect this unit''s acceptance line could not pass around.
+      LLM_PROVIDER was absent from packages/config/src/env.ts''s real-provider refusal list although it
+      has been in the schema since the registry was built, so LLM_PROVIDER=real outside production parsed
+      cleanly and notImplemented(''llm'') threw at boot instead. packages/config/src/env.test.ts now
+      asserts the refusal and the fake default, and gate case 164m is the known-bad fixture.'
+    - 'NOTE: widened RunBody in packages/db/src/repositories/agents.ts to pass the runId to the job body.
+      Source-compatible - a body that ignores the parameter is unchanged, which is every body written
+      before this one - and needed because seo_suggestion.run_id is a foreign key to the row withAgentRun
+      had been returning only after the body finished.'
     files:
-    - packages/db/migrations/0047_seo_suggestion.sql
+    - packages/db/migrations/0133_seo_suggestion.sql
+    - packages/core/src/seo/suggestion.ts
+    - packages/db/src/repositories/seo-suggestion.ts
     - packages/google/src/seo/draft-suggestions.ts
-    - apps/web/app/(admin)/agents/seo/suggestions/page.tsx
+    - packages/google/src/suggestions/apply.ts
+    - apps/web/app/(admin)/agents/seo/suggestions/route.ts
     - packages/google/src/seo/redteam.test.ts
     - packages/google/src/seo/redteam.corpus/
+    - packages/google/src/seo/suggestion-store.itest.ts
+    - apps/web/src/seo-suggestions-screen.itest.ts
   - id: G-SEO-06
     order: 173
     title: GBP-versus-website consistency check, degrading to a manual snapshot

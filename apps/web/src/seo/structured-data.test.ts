@@ -24,6 +24,32 @@ const HANDWRITTEN_RULE = 'handwritten-jsonld-block'
 /** The one file that may spell the attribute value, and the one constant that holds it. */
 const BLOCK_BUILDER = join('apps', 'web', 'src', 'seo', 'structured-data.tsx')
 
+/**
+ * Files that may spell the attribute value although they do not render the application's block.
+ *
+ * ONE entry, added by G-SEO-04, and it is on the list rather than being folded into the comment exemption
+ * because it is not a comment: `structured-data.fixtures/index.ts` BUILDS deliberately-broken pages for
+ * the site-side validator to refuse, each derived from the specimen graph with one declared mutation. A
+ * page with no script block could not exercise a validator whose first rule is that a page has one.
+ *
+ * It is not a hand-written SCHEMA BLOCK, which is what this rule is about: nothing here is served, nothing
+ * is read by a route, and the fixtures module is not exported from the package barrel precisely so that a
+ * caller cannot treat a deliberately broken document as a specimen.
+ *
+ * Each entry is asserted to STILL CONTAIN the spelling, below. An exemption nothing checks is a hole that
+ * widens, and the day this file stops emitting a block the exemption is deleted deliberately rather than
+ * inherited for ever.
+ */
+const EXEMPT_FILES: readonly { readonly path: string; readonly why: string }[] = [
+  {
+    path: join('packages', 'core', 'src', 'seo', 'structured-data.fixtures', 'index.ts'),
+    why:
+      "G-SEO-04's three known-bad pages, each the specimen graph with one declared mutation. A page " +
+      'with no script block cannot exercise a validator whose first rule is that a page has one.',
+  },
+]
+const exemptPaths = new Set(EXEMPT_FILES.map((entry) => entry.path.split(sep).join('/')))
+
 const SCANNED_ROOTS = [join('apps', 'web'), join('packages', 'ui'), join('packages', 'core')]
 const SCANNED_EXTENSIONS = ['.ts', '.tsx']
 const SKIPPED_DIRS = new Set(['node_modules', '.next', 'dist', 'artifacts', '.turbo'])
@@ -74,6 +100,7 @@ function handwrittenBlocks(
     const relativePath = relative('.', file).split(sep).join('/')
     if (isTestFile(relativePath)) continue
     if (allow && relativePath === builder) continue
+    if (allow && exemptPaths.has(relativePath)) continue
     readFileSync(file, 'utf8')
       .split('\n')
       .forEach((line, index) => {
@@ -87,6 +114,17 @@ function handwrittenBlocks(
 
 describe('every JSON-LD block comes out of one builder', () => {
   const files = sourceFiles()
+
+  it('names only exemptions that still need one', () => {
+    // The same discipline the exemption list itself argues for: a permission nobody can see a reason for
+    // any more is a hole. If a file stops spelling the value, this fails and the entry is removed.
+    for (const entry of EXEMPT_FILES) {
+      expect(
+        readFileSync(entry.path, 'utf8').includes('application/ld+json'),
+        `${entry.path} is exempt for "${entry.why}" and no longer spells the attribute value.`,
+      ).toBe(true)
+    }
+  })
 
   it('scans a non-empty set of files', () => {
     expect(files.length).toBeGreaterThan(60)

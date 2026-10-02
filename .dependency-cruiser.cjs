@@ -580,6 +580,39 @@ module.exports = {
       },
       to: { path: '^packages/core/src/seo/untrusted-envelope\\.ts$' },
     },
+    {
+      name: 'seo-site-analysis-must-take-the-untrusted-envelope',
+      comment:
+        'The two G-SEO-04 analyses handed FETCHED BYTES — internal-link-audit.ts, which reads sitemap.xml, ' +
+        'and structured-data-validate.ts, which reads a rendered page — must import ' +
+        'packages/core/src/seo/untrusted-envelope.ts, because their acceptance criterion is that the bytes ' +
+        'arrive ALREADY WRAPPED: the argument is a SeoUntrustedEnvelope, so the wrapping is visible at every ' +
+        'call site rather than being a convention the next caller has not read. ' +
+        'WHY THESE TWO AND NOT EVERY MODULE IN THE DIRECTORY. The third analysis, coverage-anomaly.ts, is ' +
+        'handed NUMBERS — a Search Console series, a PageSpeed score, a CrUX record — and wrapping a count ' +
+        'in a prompt-safety envelope would be theatre: there is no region for an instruction to escape from, ' +
+        'and a rule that demanded the import would be satisfied by a dead one. A rule satisfied by a dead ' +
+        'import is worse than no rule, because it reads as proof. The G-SEO-01/03 modules beside them ' +
+        '(gsc-window, query-rows, ctr-outliers, content-gaps, cannibalisation, rare-query-gap) are the same ' +
+        'case for the same reason. So the module set is named, exactly as ' +
+        'seo-prompt-must-use-the-untrusted-envelope names its own by a path convention. ' +
+        'WHAT IT CATCHES. The change this is really against is a later maintainer widening one of the two ' +
+        'to take a `string` for convenience — in a test, then in a caller that copied the test — at which ' +
+        'point fetched HTML enters packages/core with no stripping and no cap, and the scanners in both ' +
+        'modules can be handed a NUL that truncates the document or a bidi run that makes the extracted ' +
+        'JSON read in a different order than it parses. ' +
+        'Like its companion it is satisfiable only from INSIDE packages/core/src/seo — @berelax/core exports ' +
+        'its barrel and nothing else — which is where both modules live, for the reason link-graph.ts does: ' +
+        'a rule that can only run against a live server is a rule whose failure nobody has seen. The ' +
+        'known-bad fixture is gate case 163, and there is a control fixture that keeps the import and must ' +
+        'pass (ADR 0003).',
+      severity: 'error',
+      module: {
+        path: '^packages/core/src/seo/(internal-link-audit|structured-data-validate)\\.ts$',
+        pathNot: '\\.(test|itest)\\.ts$',
+      },
+      to: { path: '^packages/core/src/seo/untrusted-envelope\\.ts$' },
+    },
   ],
   options: {
     doNotFollow: { path: 'node_modules' },

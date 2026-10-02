@@ -54001,6 +54001,647 @@ export function chargebackNetEffectFils(`,
   )
 }
 
+// 163a-163z. (G-SEO-04) The site-side deterministic analyses: every condition of the cry-wolf threshold
+// shown to be able to stop discriminating, the absence shown to be able to become a zero, and the two
+// scans shown to be able to examine nothing.
+//
+// The subject of this block is a THRESHOLD, which is the hardest kind of rule to keep alive: every one of
+// its three conditions can be deleted and the analysis still answers, still returns findings, and still
+// passes any test that only asks whether it found something. Two of them have already been wrong in this
+// unit's own history — the dispersion condition was implemented as a median absolute deviation whose value
+// is identically zero on a two-valued series, so `drop >= dispersion x multiple` was `drop >= 0`, and the
+// test that was supposed to prove it discriminates passed because its run sat above a median pinned to the
+// series' lower value and the absolute floor refused it first. Neither was visible in a green suite.
+//
+// So each condition gets a case that removes it and names the claim that must then fail, and the two
+// structural scans — the dependency rule that keeps fetched bytes inside the untrusted envelope, and the
+// NAP literal scan — get both halves: a planted violation they must report, and the committed tree they
+// must pass. ADR 0085 is the decision record; ADR 0002 and ADR 0003 are why this block exists at all.
+{
+  const ANOMALY = 'packages/core/src/seo/coverage-anomaly.ts'
+  const ANOMALY_SUITE = 'packages/core/src/seo/coverage-anomaly.test.ts'
+  const AUDIT = 'packages/core/src/seo/internal-link-audit.ts'
+  const AUDIT_SUITE = 'packages/core/src/seo/internal-link-audit.test.ts'
+  const VALIDATE = 'packages/core/src/seo/structured-data-validate.ts'
+  const VALIDATE_SUITE = 'packages/core/src/seo/structured-data-validate.test.ts'
+  const FIXTURES = 'packages/core/src/seo/structured-data.fixtures/index.ts'
+  const SPECIMEN = 'packages/core/src/seo/jsonld/specimen.ts'
+  const NAP_SUITE = 'packages/fixtures/src/seo-nap-literals.test.ts'
+  const runUnit = (file) => run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file])
+  const cruise = () =>
+    run('pnpm', ['exec', 'depcruise', '--config', '.dependency-cruiser.cjs', 'packages'])
+
+  // 163a. The consecutive-days condition. Without it one bad day is a finding, which is the first half of
+  // the acceptance criterion and the whole reason the analysis is not six lines of subtraction.
+  withEditedFile(
+    ANOMALY,
+    (source) => replaceOnce(source, 'if (days < config.minConsecutiveDays) {', 'if (days < 1) {'),
+    () =>
+      checkRejectedBy(
+        'coverage anomalies: a single-day dip reported as a finding is caught',
+        runUnit(ANOMALY_SUITE),
+        'produces ZERO findings for a single-day impression dip',
+      ),
+  )
+
+  // 163b. The dispersion condition, which is what makes the threshold statistical rather than a second
+  // magic number. This is the condition that was already dead once; see the block header.
+  withEditedFile(
+    ANOMALY,
+    (source) =>
+      replaceOnce(
+        source,
+        'return drop * 1_000 >= dispersion * config.minDispersionMultipleMilli',
+        'return true',
+      ),
+    () =>
+      checkRejectedBy(
+        'coverage anomalies: a drop inside the series own noise reported as a finding is caught',
+        runUnit(ANOMALY_SUITE),
+        'refuses a drop that is relatively large and smaller than the series own noise',
+      ),
+  )
+
+  // 163c. The absolute floor. Both other conditions are RATIOS, and a ratio over small numbers means
+  // nothing: five impressions falling to two is a 50% drop past any dispersion such a series can have.
+  // It points at the TINY-COUNTS case and not at the PageSpeed one, which this case is why: the PageSpeed
+  // series was two-valued, so its median sat on its own lower value, the drop was never positive, and the
+  // floor could be deleted with nothing failing. Both the series and this anchor were fixed together.
+  withEditedFile(
+    ANOMALY,
+    (source) => replaceOnce(source, '  if (drop < config.minAbsoluteDrop) return false\n', ''),
+    () =>
+      checkRejectedBy(
+        'coverage anomalies: a large relative drop on tiny counts reported as a finding is caught',
+        runUnit(ANOMALY_SUITE),
+        'refuses a large relative drop on a series of counts too small to mean anything',
+      ),
+  )
+
+  // 163d. One finding per RUN. Resuming one day into a run re-detects the same collapse against a baseline
+  // that is now partly the collapse — seven findings for one event, and a weaker test of it each time.
+  withEditedFile(
+    ANOMALY,
+    (source) =>
+      replaceOnce(
+        source,
+        '    at = end\n  }\n  return findings',
+        '    at += 1\n  }\n  return findings',
+      ),
+    () =>
+      checkRejectedBy(
+        'coverage anomalies: one sustained drop reported as several findings is caught',
+        runUnit(ANOMALY_SUITE),
+        'produces EXACTLY one finding for a sustained 40% impression drop over seven consecutive days',
+      ),
+  )
+
+  // 163e. A gap is not a zero. A day Search Console has not finished processing, read as a day with no
+  // impressions, manufactures the exact collapse `gsc-window.ts`' lag exists to avoid.
+  withEditedFile(
+    ANOMALY,
+    (source) =>
+      replaceOnce(
+        source,
+        '  if (value === null) return false',
+        '  if (value === null) return true',
+      ),
+    () =>
+      checkRejectedBy(
+        'coverage anomalies: a missing day read as a qualifying day is caught',
+        runUnit(ANOMALY_SUITE),
+        'breaks a run on a day the source had no row for',
+      ),
+  )
+
+  // 163f. The no-field-data finding carrying a number. ADR 0070 structurally: the assertion is over the
+  // payload's own values, so a field a screen could render as the worst possible LCP fails here.
+  withEditedFile(
+    ANOMALY,
+    (source) =>
+      replaceOnce(
+        source,
+        "      rule: 'crux_no_field_data',\n      subject: observation.subject,",
+        "      rule: 'crux_no_field_data',\n      lcpMs: 0,\n      subject: observation.subject,",
+      ),
+    () =>
+      checkRejectedBy(
+        'coverage anomalies: an absent field-data answer carrying a zero is caught',
+        runUnit(ANOMALY_SUITE),
+        'no field data',
+      ),
+  )
+
+  // 163g. The therapist refusal, which is the rule that is really an absence (ADR 0020). Without it the
+  // report opens with nineteen findings about pages that are missing on purpose.
+  withEditedFile(
+    AUDIT,
+    (source) => replaceOnce(source, '    if (refusals.length > 0) {', '    if (false) {'),
+    () =>
+      checkRejectedBy(
+        'internal-link audit: a therapist absent for a recorded reason reported as an orphan is caught',
+        runUnit(AUDIT_SUITE),
+        'is EXCUSED and not an orphan when the therapist has no display name',
+      ),
+  )
+
+  // 163h. A link from a `noindex` page is not an internal signal, because a crawler never sees it.
+  // Counting it excuses exactly the orphan a preview surface happens to mention.
+  withEditedFile(
+    AUDIT,
+    (source) =>
+      replaceOnce(
+        source,
+        '    if (!node.indexable) continue\n    const from = normaliseLinkPath(node.path)',
+        '    const from = normaliseLinkPath(node.path)',
+      ),
+    () =>
+      checkRejectedBy(
+        'internal-link audit: a link from a non-indexable page counted as a signal is caught',
+        runUnit(AUDIT_SUITE),
+        'does not count a link from a non-indexable page as an internal signal',
+      ),
+  )
+
+  // 163i. The evidence comparison. This is THE rule of the structured-data analysis: a rating built from
+  // the site's own testimonials is valid markup with a well-formed count, so nothing about the bytes
+  // refuses it and only the evidenced count can.
+  withEditedFile(
+    VALIDATE,
+    (source) =>
+      replaceOnce(
+        source,
+        'if (claim.claimed <= input.evidencedReviewCount) continue',
+        'if (true) continue',
+      ),
+    () =>
+      checkRejectedBy(
+        'structured data: a self-serving aggregateRating accepted is caught',
+        runUnit(VALIDATE_SUITE),
+        'aggregate_rating_not_evidenced',
+      ),
+  )
+
+  // 163j. And the other direction, which a refusal cannot state: the rule must not also report the case
+  // the graph validator already reports, or an owner fixes one property twice.
+  withEditedFile(
+    VALIDATE,
+    (source) =>
+      replaceOnce(
+        replaceOnce(source, '      if (claim.claimed === null) continue\n', ''),
+        'if (claim.claimed <= input.evidencedReviewCount) continue',
+        'if (claim.claimed !== null && claim.claimed <= input.evidencedReviewCount) continue',
+      ),
+    () =>
+      checkRejectedBy(
+        'structured data: a rating with no usable count reported twice is caught',
+        runUnit(VALIDATE_SUITE),
+        'leaves a rating with no usable count to the graph validator',
+      ),
+  )
+
+  // 163k. The known-bad fixture is load-bearing. A mutation that stopped mutating would leave three cases
+  // reporting PASS about the specimen graph — `reply-linter.fixtures`' defect, one subject along.
+  withEditedFile(
+    FIXTURES,
+    (source) => replaceOnce(source, '    reviewCount: 14,', '    reviewCount: 0,'),
+    () =>
+      checkRejectedBy(
+        'structured data: a known-bad fixture that no longer trips its rule is caught',
+        runUnit(VALIDATE_SUITE),
+        'aggregate_rating_from_own_testimonials',
+      ),
+  )
+
+  // 163l. The dependency rule that keeps fetched bytes inside the untrusted envelope. It can only ever
+  // fire on a fixture, because the committed tree satisfies it — so this case is the only evidence it is
+  // alive (ADR 0003), exactly as its companion `seo-prompt-must-use-the-untrusted-envelope` records.
+  withEditedFile(
+    VALIDATE,
+    (source) =>
+      replaceOnce(
+        replaceOnce(
+          source,
+          "import { type SeoUntrustedEnvelope } from './untrusted-envelope.ts'\n",
+          '',
+        ),
+        '  readonly html: SeoUntrustedEnvelope',
+        '  readonly html: { readonly fenced: string }',
+      ),
+    () =>
+      checkRejectedBy(
+        'boundaries: a site analysis taking fetched bytes outside the untrusted envelope is caught',
+        cruise(),
+        'seo-site-analysis-must-take-the-untrusted-envelope',
+      ),
+  )
+
+  // 163m. And its control. Without it 163l is satisfied by a rule that refuses the module however it is
+  // written, which would be a rule nobody could ever make pass.
+  {
+    const clean = cruise()
+    check(
+      'boundaries: the committed site analyses satisfy the untrusted-envelope rule',
+      !clean.failed && clean.output.includes('no dependency violations found'),
+      clean.output,
+    )
+  }
+
+  // 163n. The NAP scan, walked. A planted telephone number in a module the exemption list does not cover
+  // must be reported: the premises row (0003) is the only authority for the name, address, phone and
+  // hours, and a module holding its own copy answers "consistent" about itself.
+  withEditedFile(
+    ANOMALY,
+    (source) => `${source}\nconst __gatePhone = '+971501234567'\nvoid __gatePhone\n`,
+    () =>
+      checkRejectedBy(
+        'NAP scan: a telephone literal in an SEO analysis is caught',
+        runUnit(NAP_SUITE),
+        'holds no literal of a telephone number',
+      ),
+  )
+
+  // 163o. The same walk, a different pattern, because three patterns share one file walk and only one of
+  // them being exercised is how the other two quietly stop matching anything.
+  withEditedFile(
+    AUDIT,
+    (source) => `${source}\nconst __gateOpens = '11:00'\nvoid __gateOpens\n`,
+    () =>
+      checkRejectedBy(
+        'NAP scan: an opening-hour literal in an SEO analysis is caught',
+        runUnit(NAP_SUITE),
+        'holds no literal of an opening-hour time',
+      ),
+  )
+
+  // 163p. A stale exemption. The two exempt files are exempt for a stated literal, and an exemption that
+  // has outlived its reason is a permission nobody can see the justification for any more.
+  withEditedFile(
+    SPECIMEN,
+    (source) => replaceOnce(source, "e164: '+97120000000'", "e164: '+97140000000'"),
+    () =>
+      checkRejectedBy(
+        'NAP scan: an exemption whose justifying literal has gone is caught',
+        runUnit(NAP_SUITE),
+        'names only exemptions that still need one',
+      ),
+  )
+
+  // 163y. Every case above is satisfied by something failing, so this one is satisfied by the real tree:
+  // the four suites pass as committed. Without it the fifteen cases above are consistent with suites that
+  // were already red.
+  {
+    const real = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.config.ts',
+      ANOMALY_SUITE,
+      AUDIT_SUITE,
+      VALIDATE_SUITE,
+      NAP_SUITE,
+    ])
+    check(
+      'the committed site-side analyses, audit, structured-data validator and NAP scan all pass',
+      !real.failed,
+      real.output,
+    )
+  }
+}
+
+// 164a-164z. (G-SEO-05) The suggestion store: the cage shown to be load-bearing, every gate on a draft
+// shown to be able to stop firing, and the rollback shown to be a database fact rather than a call order.
+//
+// The acceptance criterion names this block itself: *"The red-team test is a gate: scripts/test-gates.mjs
+// grants the seo_agent principal publish in a fixture and asserts the red-team test FAILS, then reverts
+// (ADR 0003)."* That is case 164a, and the reason it is the first one is that it is the only case here
+// that proves the whole unit is about something. Every other assertion in `redteam.test.ts` passes
+// against a permission matrix that refuses EVERYBODY — which is a broken product with a green security
+// test, and is exactly what `seo-agent.policy.test.ts`'s third claim exists to refuse one layer down.
+//
+// The rest of the block is the drafting and applying gates, each removed in turn. Two of them have a
+// specific history worth the line: the escalation screen reads the model's whole ANSWER rather than the
+// copy extracted from it, because the sentence in which a succumbed model announces that it is now an
+// administrator is not in the copy; and the rollback target is found by walking the publication ledger and
+// held to the stored before-hash, because `publication_record.supersedes_id` is NULL on the ordinary
+// revision path — 0093's ZZ003 reserves it for a published row following a published row, and the first
+// version of the apply passed it and was refused by the database.
+{
+  const SEO_AGENT = 'packages/core/src/access/principals/seo-agent.ts'
+  const SUGGESTION = 'packages/core/src/seo/suggestion.ts'
+  const SUGGESTION_SUITE = 'packages/core/src/seo/suggestion.test.ts'
+  const REDTEAM_SUITE = 'packages/google/src/seo/redteam.test.ts'
+  const REPOSITORY = 'packages/db/src/repositories/seo-suggestion.ts'
+  const APPLY = 'packages/google/src/suggestions/apply.ts'
+  const PASS = 'packages/google/src/seo/draft-suggestions.ts'
+  const HANDLER = 'apps/web/app/(admin)/agents/seo/suggestions/handler.ts'
+  const ENV = 'packages/config/src/env.ts'
+  const ENV_SUITE = 'packages/config/src/env.test.ts'
+  const STORE_ITEST = 'packages/google/src/seo/suggestion-store.itest.ts'
+  const SCREEN_ITEST = 'apps/web/src/seo-suggestions-screen.itest.ts'
+  const runUnit = (...files) =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const runItest = (...files) =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', ...files])
+
+  // 164a. THE case the acceptance criterion names. Granting the agent `content:publish` must make the
+  // red-team suite fail: every payload's refusal is a statement about a grant that is absent, and a suite
+  // that could not tell the difference would be measuring nothing.
+  withEditedFile(
+    SEO_AGENT,
+    (source) =>
+      replaceOnce(
+        source,
+        "export const SEO_AGENT_GRANTS: readonly Permission[] = Object.freeze([\n  'catalogue:read',",
+        "export const SEO_AGENT_GRANTS: readonly Permission[] = Object.freeze([\n  'content:publish',\n  'catalogue:read',",
+      ),
+    () =>
+      checkRejectedBy(
+        'red team: the seo_agent principal granted publish is caught',
+        runUnit(REDTEAM_SUITE),
+        'denies the seo_agent principal every publication action',
+      ),
+  )
+
+  // 164b. And the other half of the same grant: the policy suite G-SEO-02 wrote must also fail, so the
+  // cage is not held shut by this unit's suite alone.
+  withEditedFile(
+    SEO_AGENT,
+    (source) =>
+      replaceOnce(
+        source,
+        "export const SEO_AGENT_GRANTS: readonly Permission[] = Object.freeze([\n  'catalogue:read',",
+        "export const SEO_AGENT_GRANTS: readonly Permission[] = Object.freeze([\n  'content:publish',\n  'catalogue:read',",
+      ),
+    () =>
+      checkRejectedBy(
+        'red team: the grant is refused by G-SEO-02 policy suite as well as by this unit',
+        runUnit('packages/core/src/access/seo-agent.policy.test.ts'),
+        'content:publish',
+      ),
+  )
+
+  // 164c. The escalation screen, removed from the judge. Every payload then produces a PROPOSED
+  // suggestion with clean copy, which is a queue entry a human would reasonably approve.
+  withEditedFile(
+    SUGGESTION,
+    (source) =>
+      replaceOnce(
+        source,
+        '  for (const escalation of escalations) {\n    if (!rules.includes(escalation.rule)) rules.push(escalation.rule)\n  }',
+        '  for (const escalation of escalations) {\n    void escalation\n  }',
+      ),
+    () =>
+      checkRejectedBy(
+        'suggestions: an escalation attempt that no longer refuses the draft is caught',
+        runUnit(REDTEAM_SUITE),
+        'claims_an_elevated_role',
+      ),
+  )
+
+  // 164d. The publication copy lint, removed. This is G-REV-04's defect in a new place: `treatment` is on
+  // `regulatory_profile.banned_claim_terms`, and 32 of 296 review renderings were refused by this same
+  // lint. An unlinted SEO draft reproduces it where nobody is watching.
+  withEditedFile(
+    SUGGESTION,
+    (source) =>
+      replaceOnce(
+        source,
+        '  for (const finding of copyFindings) {\n    if (!rules.includes(finding.rule)) rules.push(finding.rule)\n  }',
+        '  for (const finding of copyFindings) {\n    void finding\n  }',
+      ),
+    () =>
+      checkRejectedBy(
+        'suggestions: a banned claim term in the drafted copy is caught',
+        runUnit(SUGGESTION_SUITE),
+        'banned_claim_term',
+      ),
+  )
+
+  // 164e. The target allowlist, removed. G-SEO-01 decided what the agent may have an opinion about, and a
+  // judge that stopped asking would admit `robots_txt` as a suggestion kind.
+  withEditedFile(
+    SUGGESTION,
+    (source) =>
+      replaceOnce(
+        source,
+        '  if (targetRefusal !== null) rules.push(targetRefusal.rule)',
+        '  void targetRefusal',
+      ),
+    () =>
+      checkRejectedBy(
+        'suggestions: a target off the allowlist accepted is caught',
+        runUnit(SUGGESTION_SUITE),
+        'target_kind_not_allowlisted',
+      ),
+  )
+
+  // 164f. The screen reading the extracted COPY instead of the whole answer. The copy is clean in every
+  // red-team payload on purpose, so this is the edit that makes the screen examine the half an attacker
+  // does not need to use — and every assertion about a clean draft still passes.
+  withEditedFile(
+    SUGGESTION,
+    (source) =>
+      replaceOnce(
+        source,
+        '  const escalations = screenSeoDraft({\n    answer: input.answer,',
+        '  const escalations = screenSeoDraft({\n    answer: input.afterRegions.map((r) => r.text).join(" "),',
+      ),
+    () =>
+      checkRejectedBy(
+        'suggestions: screening the extracted copy rather than the answer is caught',
+        runUnit(SUGGESTION_SUITE),
+        'screens the whole ANSWER and not only the copy extracted from it',
+      ),
+  )
+
+  // 164g. The empty-after-copy guard. A lint over no copy passes, and the row records that it was linted
+  // (ADR 0002). 0133's CHECK sees the empty ARRAY and cannot see blank TEXT, which is why this is here.
+  withEditedFile(
+    SUGGESTION,
+    (source) =>
+      replaceOnce(
+        source,
+        "  if (input.afterRegions.every((region) => region.text.trim() === '')) {",
+        '  if (false) {',
+      ),
+    () =>
+      checkRejectedBy(
+        'suggestions: a draft with no copy in it stored as linted is caught',
+        runUnit(SUGGESTION_SUITE),
+        'throws rather than storing a suggestion whose after-copy is empty',
+      ),
+  )
+
+  // 164h. The rollback descriptor DERIVED rather than accepted. A descriptor is the one field whose being
+  // wrong is invisible until somebody needs a rollback, and ZY401 is what catches it.
+  withEditedFile(
+    REPOSITORY,
+    (source) =>
+      replaceOnce(
+        source,
+        '  const descriptor = { method: SEO_ROLLBACK_METHOD, surface: input.surface }',
+        '  const descriptor = {}',
+      ),
+    () =>
+      checkRejectedBy(
+        'suggestions: a rollback descriptor that names no restorable before-state is caught',
+        runItest(STORE_ITEST),
+        'ZY401',
+      ),
+  )
+
+  // 164i. The before-state-is-live refusal, removed from the apply. Applying over an edited page
+  // overwrites an edit nobody asked to lose, and the rollback afterwards restores a document that was
+  // never live — which is the failure the whole before/after primitive exists against.
+  withEditedFile(
+    APPLY,
+    (source) =>
+      replaceOnce(
+        source,
+        "        position.state !== 'published' ||\n        position.currentRecordId === null ||\n        position.currentContentSha256 !== suggestion.beforeContentSha256",
+        "        position.state !== 'published' ||\n        position.currentRecordId === null",
+      ),
+    () =>
+      checkRejectedBy(
+        'suggestions: applying over content that is not the stored before-state is caught',
+        runItest(STORE_ITEST),
+        'suggestion_before_state_is_not_live',
+      ),
+  )
+
+  // 164j. The re-lint at apply time, removed. The stored stamp says which rules judged the copy when it
+  // was drafted; this says whether it may be published TODAY, and the profile is a live row.
+  withEditedFile(
+    APPLY,
+    (source) =>
+      replaceOnce(
+        source,
+        "      if (verdict.kind === 'refused') {\n        refuse(\n          'suggestion_fails_the_lint',",
+        "      if (false) {\n        refuse(\n          'suggestion_fails_the_lint',",
+      ),
+    () =>
+      checkRejectedBy(
+        'suggestions: applying copy the lint refuses is caught',
+        runItest(STORE_ITEST),
+        'suggestion_fails_the_lint',
+      ),
+  )
+
+  // 164k. The rollback target taken from the WRONG END of the ledger. `published[0]` is the oldest
+  // version the surface ever had, and on a surface with two earlier versions that is not the one the
+  // suggestion replaced — so the rollback would restore a document this suggestion never touched. The
+  // hash post-condition refuses it by name, and ZY403 refuses the state move as well.
+  //
+  // This case is also what found a vacuous clause in the first implementation: the hash was a condition
+  // INSIDE the filter, where it could never change which record was chosen, and removing it left every
+  // test passing. The clause is now an assertion and this case is what proves it fires.
+  withEditedFile(
+    APPLY,
+    (source) =>
+      replaceOnce(
+        source,
+        '      const target = published[published.length - 1]',
+        '      const target = published[0]',
+      ),
+    () =>
+      checkRejectedBy(
+        'suggestions: a rollback target taken from the wrong end of the ledger is caught',
+        runItest(STORE_ITEST),
+        'restores the version that WAS live',
+      ),
+  )
+
+  // 164l. The mid-run charge, removed. The cap then cannot abort anything: the run reports success, the
+  // heartbeat records `last_success_at`, and a runaway pass is indistinguishable from a good one.
+  withEditedFile(
+    PASS,
+    (source) => replaceOnce(source, '        charge(answer.costFils)', '        void charge'),
+    () =>
+      checkRejectedBy(
+        'suggestions: a per-run cost cap that no longer aborts the run is caught',
+        runItest(STORE_ITEST),
+        'budget_exceeded',
+      ),
+  )
+
+  // 164m. `LLM_PROVIDER` removed from the real-provider refusal — which is the state the committed tree
+  // was in before this unit. A real model outside production spends real money on a real key, and the
+  // prompts carry fetched competitor HTML and Search Console query strings.
+  withEditedFile(
+    ENV,
+    (source) => replaceOnce(source, "        ['LLM_PROVIDER', cfg.LLM_PROVIDER],\n", ''),
+    () =>
+      checkRejectedBy(
+        'config: a real LLM provider selectable outside production is caught',
+        runUnit(ENV_SUITE),
+        'LLM_PROVIDER=real is refused',
+      ),
+  )
+
+  // 164n. The screen's POST permission check, removed. `performPublication` would still refuse a
+  // receptionist's principal, so this is the case that proves the SCREEN refuses rather than relying on a
+  // 500 from the policy layer — a refusal an operator cannot read is a refusal they raise a ticket about.
+  withEditedFile(
+    HANDLER,
+    (source) =>
+      replaceOnce(
+        source,
+        '  if (!can(request.principal.role, SEO_SUGGESTIONS_PERMISSION)) {',
+        '  if (false) {',
+      ),
+    () =>
+      checkRejectedBy(
+        'suggestions screen: a POST from a role without content:publish is caught',
+        runItest(SCREEN_ITEST),
+        'refuses the POST from that role, by name',
+      ),
+  )
+
+  // 164o. And the screen's own half: the buttons are greyed from the SAME predicate the POST refuses on.
+  // A screen offering a button the POST refuses is the defect `mayPerformPublication` exists to avoid.
+  withEditedFile(
+    HANDLER,
+    (source) =>
+      replaceOnce(
+        source,
+        '      return permitted ? card : { ...card, actions: [] }',
+        '      return card',
+      ),
+    () =>
+      checkRejectedBy(
+        'suggestions screen: an action offered to a role that may not take it is caught',
+        runItest(SCREEN_ITEST),
+        'offers no action to a role that does not hold content:publish',
+      ),
+  )
+
+  // 164y. Every case above is satisfied by something failing, so this one is satisfied by the real tree:
+  // the four unit suites and the two database suites pass as committed.
+  {
+    const units = runUnit(SUGGESTION_SUITE, REDTEAM_SUITE, ENV_SUITE)
+    check(
+      'the committed suggestion judge, red-team corpus and provider configuration all pass',
+      !units.failed,
+      units.output,
+    )
+  }
+
+  // 164z. And the two database suites, which are where the six claims a pure test cannot reach are
+  // proved: the NOT NULL refusal, the exact rollback through ZY403, the publication chain with its named
+  // approver, the refusal that can never be approved, the audit delta over the whole corpus, and the cap
+  // that leaves `last_success_at` alone.
+  {
+    const pair = runItest(STORE_ITEST, SCREEN_ITEST)
+    check(
+      'suggestions: the constraint, the exact rollback, the publication chain and the cap pass against the real database',
+      !pair.failed,
+      pair.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

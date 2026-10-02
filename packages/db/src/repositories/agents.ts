@@ -125,7 +125,16 @@ export interface RunOptions {
   readonly tradingDate?: string
 }
 
-export type RunBody = (charge: (fils: number) => void) => Promise<void>
+/**
+ * A job body: charge the run, and know which run it is.
+ *
+ * `runId` was added by G-SEO-05, which writes rows that carry `agent_run.run_id` as a foreign key. Before
+ * it, the id existed only in `withAgentRun`'s own scope and was returned AFTER the body had finished — so
+ * a body that needed it had to insert the run itself, which is the one thing this wrapper exists to stop
+ * anybody doing. Widening the signature is source-compatible: a body that ignores the parameter is
+ * unchanged, which is every body written before this one.
+ */
+export type RunBody = (charge: (fils: number) => void, runId: string) => Promise<void>
 
 /**
  * Runs a job body as an agent run, recording the attempt and the heartbeat whatever the outcome.
@@ -171,7 +180,7 @@ export async function withAgentRun(
   const budget = budgetFactory(definition.budgetFilsPerRun)
 
   try {
-    await body((fils) => budget.charge(fils))
+    await body((fils) => budget.charge(fils), runId)
   } catch (error) {
     // A budget abort is not the same as a bug, and the console needs to tell them apart: one means the
     // agent needs a larger cap or a smaller task, the other means somebody should read a stack trace.

@@ -4,7 +4,9 @@ import {
   date,
   index,
   integer,
+  jsonb,
   pgTable,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -171,4 +173,72 @@ export const seoSuggestionCandidate = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
   },
   (t) => [index('seo_suggestion_candidate_site_created_idx').on(t.siteUrl, t.createdAt)],
+)
+
+/**
+ * Drizzle mirror of 0133_seo_suggestion.sql — the suggestion store (G-SEO-05).
+ *
+ * Five things the mirror cannot say, and each will bite somebody who assembles a write from these
+ * definitions rather than calling `packages/db/src/repositories/seo-suggestion.ts`:
+ *
+ *   - **No row may be DELETEd and no evidence column may be UPDATEd.** `ZY402`, a BEFORE trigger, for
+ *     every role. `db.delete(seoSuggestion)` typechecks and raises at run time, which is correct: the row
+ *     is the evidence that the content published was the content linted. A suite therefore asserts a
+ *     DELTA on this table and never a total (ADR 0008, ADR 0050).
+ *   - **`state` is a sequence, not a value.** The permitted moves are `proposed` to `approved` or
+ *     `refused`, `approved` to `applied`, and `applied` to `rolled_back`. `ZY402` refuses anything else,
+ *     and in particular `refused` to `approved`: what refused a suggestion was a lint version and a
+ *     profile version, so a row promoted past its own refusal would carry a lint stamp for a decision the
+ *     lint did not make.
+ *   - **`rollbackDescriptor` is a claim, not a blob.** `ZY401` requires an object whose `method` is
+ *     `publication_revert` and whose `surface` is this row's. NOT NULL is the acceptance line's
+ *     constraint; `'{}'::jsonb` is not null, and a descriptor that says nothing is a rollback nobody can
+ *     perform, discovered at the moment somebody needs it.
+ *   - **The publication named must carry the hash the row claims.** `ZY403`: an `applied` row's
+ *     `publication_record` must carry `afterContentSha256`, a `rolled_back` row's must carry
+ *     `beforeContentSha256`. This is what makes "rollback is exact" a database fact rather than a property
+ *     of the order two functions happened to be called in.
+ *   - **`costFils` is the `fils_nonneg` DOMAIN** (`int8`), the same one `agentRun.costFils` uses, so the
+ *     per-suggestion figure and the per-run total it sums into cannot disagree about what a fils is.
+ *     Declared here as `bigint` in `bigint` mode for `agentRun.costFils`' reason: the drift check compares
+ *     names and presence, and a number-mode column would silently lose precision past 2^53.
+ */
+export const seoSuggestion = pgTable(
+  'seo_suggestion',
+  {
+    id: uuid('id').primaryKey().default(sql`uuid_generate_v7()`),
+    /** `agent_run.run_id`, not a copied label: the cost, the outcome and the trading date live there. */
+    runId: uuid('run_id').notNull(),
+    /** A locator, never copy. The same shape `publication_lint_pass.surface` uses. */
+    surface: text('surface').notNull(),
+    /** `proposed` | `refused` | `approved` | `applied` | `rolled_back`. A sequence; see the header. */
+    state: text('state').notNull(),
+    /** The before-state, STORED. `{region, text}` objects in document order. */
+    beforeRegions: jsonb('before_regions').notNull(),
+    beforeContentSha256: text('before_content_sha256').notNull(),
+    afterRegions: jsonb('after_regions').notNull(),
+    afterContentSha256: text('after_content_sha256').notNull(),
+    /** HOW the before-state goes back. See the header on `ZY401`. */
+    rollbackDescriptor: jsonb('rollback_descriptor').notNull(),
+    /** Which rule set judged the drafted copy. Never a boolean — see ADR 0063 on `reply_lint_version`. */
+    lintVersion: text('lint_version').notNull(),
+    /** How many banned terms the lint compared against. `> 0` by CHECK (ADR 0002 in the schema). */
+    lintTermsChecked: smallint('lint_terms_checked').notNull(),
+    /** The rule names that refused it. Non-empty exactly when `state` is `refused`, by CHECK. */
+    refusedRules: text('refused_rules').array().notNull(),
+    llmProvider: text('llm_provider').notNull(),
+    inputTokens: integer('input_tokens').notNull(),
+    outputTokens: integer('output_tokens').notNull(),
+    costFils: bigint('cost_fils', { mode: 'bigint' }).notNull(),
+    appliedRecordId: uuid('applied_record_id'),
+    rolledBackRecordId: uuid('rolled_back_record_id'),
+    /** The caller's clock, NOT defaulted: every ordering assertion here is made under a frozen one. */
+    proposedAt: timestamp('proposed_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index('seo_suggestion_surface_idx').on(t.surface, t.proposedAt),
+    index('seo_suggestion_run_idx').on(t.runId),
+    index('seo_suggestion_open_idx').on(t.proposedAt),
+  ],
 )

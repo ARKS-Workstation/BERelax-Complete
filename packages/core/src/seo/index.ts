@@ -23,6 +23,21 @@
   expectation the tests beside it assert against, and exporting it from the package barrel would invite a
   caller to read its figures as measurements.
 
+  G-SEO-04 adds the other half of the deterministic pipeline, and it is the half that reads the LIVE SITE
+  rather than a Search Console mirror: `coverage-anomaly.ts` judges a series with a statistical threshold
+  rather than a delta (the cry-wolf problem, which is the whole reason it is not six lines of subtraction),
+  `internal-link-audit.ts` reconciles the fetched sitemap against the crawled link graph, and
+  `structured-data-validate.ts` extracts the JSON-LD a page actually serves and hands it to `jsonld/
+  validate.ts` — the SAME rule set the CI gate uses, reused whole rather than restated, plus the three
+  rules that are properties of a page rather than of a graph. Two of the three take their fetched bytes
+  inside G-SEO-02's untrusted envelope, which `.dependency-cruiser.cjs`'s
+  `seo-site-analysis-must-take-the-untrusted-envelope` is what keeps true.
+
+  `structured-data.fixtures/` is deliberately NOT exported, for `analyses.worked-examples.fixture.ts`'
+  reason: the three known-bad pages are derived from the specimen graph with one declared mutation each,
+  and a caller reaching them through the package barrel would be a caller treating a deliberately broken
+  document as a specimen.
+
   `link-graph.ts` (W-SITE-07) is a third subject under the same heading: the hub-and-spoke invariant over
   the internal links of the built site. It crosses to neither of the others — it judges a graph a crawler
   describes, and knows nothing about JSON-LD or about Search Console — and it is here rather than in
@@ -33,12 +48,16 @@
 export * from './candidate-screen.ts'
 export * from './cannibalisation.ts'
 export * from './content-gaps.ts'
+export * from './coverage-anomaly.ts'
 export * from './ctr-outliers.ts'
 export * from './gsc-window.ts'
+export * from './internal-link-audit.ts'
 export * from './jsonld/index.ts'
 export * from './link-graph.ts'
 export * from './query-rows.ts'
 export * from './rare-query-gap.ts'
+export * from './structured-data-validate.ts'
+export * from './suggestion.ts'
 export * from './target-allowlist.ts'
 export * from './untrusted-envelope.ts'
 export * from './url-inspection-cap.ts'
