@@ -49321,6 +49321,437 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 159a-159z. (C-AUTO-09) Misrouting made IMPOSSIBLE: every one of the six wrong edges shown to become
+//            expressible the moment the type that forbids it is weakened, and every offer, every named
+//            refusal and both coverage floors shown to be able to stop firing.
+//
+//            The acceptance line is "with misrouting made impossible", which is a claim about a TYPE
+//            (ADR 0081). So the first six cases are unlike anything else in this file: the known-bad
+//            fixture is a weakened TYPE, and the gate that fires is the TYPECHECKER. Each one re-points
+//            one construct in `packages/core/src/automation/dsl.ts` and requires
+//            `TS2578: Unused '@ts-expect-error' directive` back by name — because
+//            `journey.test.ts`'s six directives are the statement that the six wrong edges do not
+//            compile, and a directive that stops erroring is a build failure rather than a comment that
+//            has quietly become false.
+//
+//            That is the only shape that can check this claim. A runtime test cannot: the thing being
+//            asserted is that certain code does not EXIST in a form anyone can write, and there is no
+//            value to inspect. A review cannot either, which is the whole of ADR 0003.
+//
+//            The rest come in four groups, and each fails in a way the others cannot see:
+//
+//              * **an offer can start offering too much.** 159g to 159i break `freeOutletsOf`,
+//                `inletsOf` and `removeJourneyNode` — the three functions the interactive half's
+//                guarantee rests on — and require the named case back. These are what stop the HTTP
+//                edge from being able to NAME a misrouting once the type is out of reach.
+//              * **the picker can stop being the binding.** 159j and 159k make `templateChoicesFor`
+//                and `templateRefFor` ignore the class, which is the acceptance line's second half:
+//                the list the screen renders and the set of bindings the type permits are one value,
+//                and a filter that stopped filtering would offer the pair the type refuses.
+//              * **a named refusal can be renamed, and a judgement can stop being consulted.** 159l to
+//                159t break the ordering rule, a step's own branch set, the property generator, the
+//                control on it, the save control's two inputs, the connect resolution and the
+//                per-kind refusal name and the permission split.
+//              * **the wiring.** 159u to 159w: the two routes shown to be inside the registry's
+//                bijection, the port band shown to be claimed, and the ADR shown to be indexed.
+//
+//            159y and 159z are the controls: every case above is satisfied by something FAILING, so two
+//            have to be satisfied by the real tree. 159y runs the three unedited suites; 159z proves the
+//            six directives are in the file AND that the typechecker is clean over them — because a file
+//            with no directives in it would make all six type cases pass by making none of them
+//            reachable.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const DSL = 'packages/core/src/automation/dsl.ts'
+  const PALETTE = 'apps/web/app/(admin)/crm/flows/[id]/builder/nodes/palette.ts'
+  const BUILDER = 'apps/web/app/(admin)/crm/flows/[id]/builder/handler.ts'
+  const API = 'apps/web/app/(admin)/crm/flows/api/handler.ts'
+  const REGISTRY = 'apps/web/src/routes/registry.ts'
+  const PORTS = 'packages/harness/src/ports.ts'
+  const ADR_INDEX = 'docs/adr/README.md'
+
+  const JOURNEY_TEST = 'packages/core/src/automation/journey.test.ts'
+  const EDITS_TEST = 'packages/core/src/automation/journey-edits.property.test.ts'
+  const HANDLER_TEST = 'apps/web/app/(admin)/crm/flows/[id]/builder/handler.test.ts'
+
+  const UNUSED_DIRECTIVE = "TS2578: Unused '@ts-expect-error' directive"
+
+  const unit = (...files) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files]
+  const typecheck = () => ['exec', 'tsc', '-p', 'tsconfig.json']
+
+  /** Weakens one construct in the DSL and runs the typechecker over the directives that forbid it. */
+  const weakenedType = (find, into) =>
+    withEditedFile(
+      DSL,
+      (source) => replaceOnce(source, find, into),
+      () => runExpectingFailure('pnpm', typecheck()),
+    )
+
+  /** Breaks one shipped file and requires a named unit case back. */
+  const brokenUnit = (file, find, into, ...suites) =>
+    withEditedFile(
+      file,
+      (source) => replaceOnce(source, find, into),
+      () => runExpectingFailure('pnpm', unit(...suites)),
+    )
+
+  // ---- the six wrong edges, each shown to become expressible -----------------------------------
+
+  // 159a. An exit that is not terminal. `JourneyStep<never>` is what makes `${id}:${never}` collapse to
+  //       `never`, so an exit contributes no outlet key and an edge leaving one is an excess property.
+  checkRejectedBy(
+    'journey: an exit given a branch makes an edge OUT of an exit expressible',
+    weakenedType('}): JourneyStep<never> {', '}): JourneyStep<typeof FLOW_DEFAULT_BRANCH> {'),
+    UNUSED_DIRECTIVE,
+  )
+
+  // 159b. The edge map's value type widened. `keyof N & string` is the step record's keys, and the
+  //       trigger is NOT a step — which is the only reason no edge can land back on it.
+  checkRejectedBy(
+    'journey: an edge map whose targets are any string makes an edge INTO the trigger expressible',
+    weakenedType(
+      '  readonly [K in JourneyOutletKey<T, N>]: keyof N & string\n}',
+      '  readonly [K in JourneyOutletKey<T, N>]: string\n}',
+    ),
+    UNUSED_DIRECTIVE,
+  )
+
+  // 159c. A step's branch labels erased to `string`. The outlet keys are then a pattern rather than a
+  //       closed set, so a branch the kind does not declare becomes a key — and so does a missing one.
+  checkRejectedBy(
+    'journey: branch labels erased to string make an UNDECLARED branch expressible',
+    weakenedType(
+      'type BranchesOf<S> = S extends JourneyStep<infer B> ? B : never',
+      'type BranchesOf<S> = S extends JourneyStep<infer _B> ? string : never',
+    ),
+    UNUSED_DIRECTIVE,
+  )
+
+  // 159d. The edge map made partial. Every outlet key being REQUIRED is what turns a condition with one
+  //       answer, a split with an unrouted share and a dead end into missing properties.
+  checkRejectedBy(
+    'journey: a partial edge map makes an UNROUTED branch expressible',
+    weakenedType(
+      '  readonly [K in JourneyOutletKey<T, N>]: keyof N & string',
+      '  readonly [K in JourneyOutletKey<T, N>]?: keyof N & string',
+    ),
+    UNUSED_DIRECTIVE,
+  )
+
+  /*
+    159e. `NoInfer` removed, so `C` is inferred from the declared class AND from the template.
+
+    TypeScript then unions the two candidates and `{ messageClass: 'promotional', template: <a
+    transactional ref> }` typechecks against `C = 'transactional' | 'promotional'` — a generic that
+    accepts everything, which is the exact failure a type-level claim has to be able to SHOW cannot
+    happen. Widening the template to `TemplateRef<MessageClass>` flips it too; this is the sharper
+    weakening, because it is the one a reviewer makes while simplifying a generic that looks redundant.
+
+    This case earned its keep before it ever passed. It first reported "exited zero; nothing was
+    rejected", and the conclusion drawn — that `NoInfer` was belt and braces — was WRONG. The two
+    directives in `journey.test.ts` were erroring for a different reason: `PROMOTIONAL[0]` is
+    `TemplateRef<'promotional'> | undefined`, module-scope narrowing does not reach inside a nested
+    function, and what they suppressed was `Type 'undefined' is not assignable`. So the acceptance
+    line's own type-level claim was satisfied for the wrong reason and would have stayed satisfied with
+    the class tie cut entirely. `mustHold` in that file is the fix. Re-measured against it, both
+    weakenings report TS2578 twice. ADR 0003 is about precisely this, and no review had caught it.
+  */
+  checkRejectedBy(
+    'journey: without NoInfer the class and the template are inferred together and never disagree',
+    weakenedType('readonly template: TemplateRef<NoInfer<C>>', 'readonly template: TemplateRef<C>'),
+    UNUSED_DIRECTIVE,
+  )
+
+  // 159f. The registry witness removed from `TemplateRef`. Without it, `{ templateKey:
+  //       'booking.confirmed', messageClass: 'promotional' }` is an assignable promotional reference —
+  //       so the type would say only "somebody typed a class next to a key", which is the thing that
+  //       goes wrong.
+  checkRejectedBy(
+    'journey: without the registry witness a template reference can be MINTED by its holder',
+    weakenedType(
+      '  readonly [TEMPLATE_CLASS_READ_FROM_REGISTRY]: C\n}',
+      '  readonly minted?: never\n}',
+    ),
+    UNUSED_DIRECTIVE,
+  )
+
+  // ---- an offer can start offering too much ----------------------------------------------------
+
+  // 159g. An outlet that already has an edge, offered again. The interactive half's version of
+  //       "two edges on one branch", which the type refuses in the composer and the OFFER refuses here.
+  checkRejectedBy(
+    'journey: an outlet that already has an edge, offered again, is caught',
+    brokenUnit(
+      DSL,
+      '      if (taken.has(journeyOutletKey(node.id, branch))) continue',
+      '      if (false) continue',
+      JOURNEY_TEST,
+    ),
+    'resolves nothing for the four edges a misrouting would need',
+  )
+
+  // 159h. The trigger offered as an inlet. An edge back into it lets an enrolment re-enter the flow it
+  //       is already on, which is the loop no execution cap can explain afterwards.
+  checkRejectedBy(
+    'journey: the trigger offered as an inlet is caught',
+    brokenUnit(
+      DSL,
+      "    if (node.kind === 'trigger') continue\n    out.push({ to: node.id",
+      "    if (node.kind === 'trigger' && false) continue\n    out.push({ to: node.id",
+      JOURNEY_TEST,
+    ),
+    'offers no outlet on an exit, no inlet on the trigger',
+  )
+
+  // 159i. A delete that leaves the edges behind. The draft then holds an edge to a node that is not
+  //       there, which is `flow-dsl-dangling-edge` — a refusal about the builder's own bookkeeping
+  //       rather than about anything the operator did.
+  checkRejectedBy(
+    'journey: a node delete that leaves its edges behind is caught',
+    brokenUnit(
+      DSL,
+      '    edges: draft.edges.filter((edge) => edge.from !== id && edge.to !== id),',
+      '    edges: draft.edges,',
+      JOURNEY_TEST,
+    ),
+    'takes every edge with the node, so deleting one cannot leave a dangling edge',
+  )
+
+  // ---- the picker can stop being the binding ---------------------------------------------------
+
+  // 159j. The picker stops filtering by class. This is the acceptance line's "the template picker lists
+  //       only templates whose message_class matches the node's declared class", and it is one function
+  //       rather than a filter in a view precisely so that this fixture is the only way to break it.
+  checkRejectedBy(
+    'journey: a template picker that ignores the class is caught',
+    brokenUnit(
+      DSL,
+      '    .filter((fact) => fact.messageClass === messageClass)',
+      '    .filter(() => true)',
+      JOURNEY_TEST,
+    ),
+    'offers exactly the registry rows of the class asked for',
+  )
+
+  // 159k. A stored key resolved back to a reference under the WRONG class. That is how a template
+  //       reclassified after publication would be silently re-bound instead of reported.
+  checkRejectedBy(
+    'journey: a stored key resolved under the wrong class is caught',
+    brokenUnit(
+      DSL,
+      '    templateChoicesFor(templates, messageClass).find((ref) => ref.templateKey === templateKey) ??',
+      "    templateChoicesFor(templates, messageClass === 'promotional' ? 'transactional' : 'promotional').find((ref) => ref.templateKey === templateKey) ??",
+      JOURNEY_TEST,
+    ),
+    'resolves a stored key back to a ref only under the class the registry holds for it',
+  )
+
+  // ---- a named refusal can be renamed, and a judgement can stop being consulted ----------------
+
+  // 159l. The ordering rule made an identity. A journey DRAWN in one order and the identical journey
+  //       written as a literal would then serialise to different bytes — and the canonical form is what
+  //       "the pinned version is byte-identical to what was published" is asserted against.
+  checkRejectedBy(
+    'journey: an ordering rule that does not order is caught',
+    brokenUnit(
+      DSL,
+      "  const steps = document.nodes.filter((node) => node.kind !== 'trigger').sort(byId)",
+      "  const steps = document.nodes.filter((node) => node.kind !== 'trigger')",
+      JOURNEY_TEST,
+    ),
+    'serialises a journey drawn in reverse to the same bytes as the composed one',
+  )
+
+  // 159m. A step constructor disagreeing with the analyser about its own branches. An outlet offered for
+  //       a branch the analyser will refuse is a builder that invites the mistake it exists to prevent.
+  checkRejectedBy(
+    'journey: a step whose branch set disagrees with the analyser is caught',
+    brokenUnit(
+      DSL,
+      '    branches: [...FLOW_CONDITION_BRANCHES],',
+      '    branches: [FLOW_CONDITION_BRANCHES[0]],',
+      JOURNEY_TEST,
+    ),
+    'states the same branch set the static analyser reads off the node it builds',
+  )
+
+  // 159n. The generator stops producing conditions. The property would still hold — over 200 linear
+  //       chains, which exercise none of the branching the acceptance line is about. This is brief rule
+  //       22's measured floor shown to be load-bearing rather than decorative.
+  checkRejectedBy(
+    'journey: a generator that stops producing conditions fails its own measured floor',
+    brokenUnit(
+      EDITS_TEST,
+      '  { arbitrary: conditionArb, weight: 4 },',
+      '  { arbitrary: conditionArb, weight: 0 },',
+      EDITS_TEST,
+    ),
+    'journeys containing a condition',
+  )
+
+  // 159o. The control on the property made vacuous. Without a disconnect that disconnects, "removing one
+  //       edge flips the verdict" would be satisfied by a validator that accepted everything.
+  checkRejectedBy(
+    'journey: a disconnect that disconnects nothing makes the property control vacuous',
+    brokenUnit(
+      DSL,
+      '    edges: draft.edges.filter((edge) => !(edge.from === from && edge.branch === branch)),',
+      '    edges: draft.edges,',
+      EDITS_TEST,
+    ),
+    'flips to a NAMED refusal when one edge is taken back out of each of the 200',
+  )
+
+  // 159p. The save control stops reading the verdict. The acceptance line is "an invalid intermediate
+  //       state leaves save disabled in the UI and is refused by the API with a named error", and both
+  //       halves read ONE verdict — so this is the fixture that proves they are not two rules that
+  //       happen to agree.
+  checkRejectedBy(
+    'journey: a save control that ignores the verdict is caught',
+    brokenUnit(
+      BUILDER,
+      "    canPublish: verdict.ok && can(input.principal.role satisfies Role, 'campaign:send'),",
+      "    canPublish: can(input.principal.role satisfies Role, 'campaign:send'),",
+      HANDLER_TEST,
+    ),
+    'disables save while the graph is invalid and enables it when it is not',
+  )
+
+  // 159q. The save control stops reading the role. A graph being publishable and the reader being
+  //       allowed to publish it are two facts, and folding them loses the second.
+  checkRejectedBy(
+    'journey: a save control that ignores the role is caught',
+    brokenUnit(
+      BUILDER,
+      "    mayPublishByRole: can(input.principal.role satisfies Role, 'campaign:send'),",
+      '    mayPublishByRole: true,',
+      HANDLER_TEST,
+    ),
+    'disables save for a role that may open the builder and may not publish',
+  )
+
+  // 159r. The connect edit falls back to an offer of its own choosing when resolution fails. That single
+  //       line is the whole of "an untyped HTTP body can PICK an offer and cannot CONSTRUCT one".
+  checkRejectedBy(
+    'journey: a connect that falls back instead of refusing an unoffered edge is caught',
+    brokenUnit(
+      BUILDER,
+      "  if (outlet === null || inlet === null) return { draft, refusal: 'edge_not_offered', selected }\n  return { draft: connectJourneyDraft(draft, outlet, inlet), refusal: null, selected: outlet.from }",
+      "  const fallback = outlet ?? freeOutletsOf(draft)[0] ?? null\n  const target = inlet ?? inletsOf(draft)[0] ?? null\n  if (fallback === null || target === null) return { draft, refusal: 'edge_not_offered', selected }\n  return {\n    draft: connectJourneyDraft(draft, fallback, target),\n    refusal: null,\n    selected: fallback.from,\n  }",
+      HANDLER_TEST,
+    ),
+    'refuses an edge the draft never offered, in all four shapes',
+  )
+
+  // 159s. The per-kind refusal renamed. A screen that says "that is not a step this builder can add"
+  //       about a template of the wrong class sends the operator to look at the wrong control.
+  checkRejectedBy(
+    'journey: the class refusal renamed to something else is caught by name',
+    brokenUnit(
+      PALETTE,
+      "  if (template === null) return 'template_not_offered'",
+      "  if (template === null) return 'unknown_kind'",
+      HANDLER_TEST,
+    ),
+    'binds a message step only to a template of the class the step declares',
+  )
+
+  // 159t. The publish permission weakened to the read permission. The split is this unit's decision
+  //       (ADR 0081) and the matrix is what gives it meaning, so the case asserts both sides of it.
+  checkRejectedBy(
+    'journey: a publish permission equal to the read permission is caught',
+    brokenUnit(
+      API,
+      "export const FLOW_PUBLISH_PERMISSION: Permission = 'campaign:send'",
+      "export const FLOW_PUBLISH_PERMISSION: Permission = 'campaign:read'",
+      HANDLER_TEST,
+    ),
+    'splits the two permissions the way the F07 matrix already does',
+  )
+
+  // ---- the wiring ------------------------------------------------------------------------------
+
+  // 159u. The builder route removed from the registry. A route the registry does not know about is
+  //       absent from the sitemap, carries no `hreflang` and is never screenshotted, and none of those
+  //       three is a build error on its own — which is what the bijection is for.
+  checkRejectedBy(
+    'journey: the builder route missing from the route registry is caught',
+    brokenUnit(
+      REGISTRY,
+      "    id: 'flow-builder',\n    path: '/crm/flows/[id]/builder',",
+      "    id: 'flow-builder',\n    path: '/crm/flows/[id]/builder-not-served',",
+      'apps/web/src/routes/registry.test.ts',
+    ),
+    'route-without-registry-entry',
+  )
+
+  // 159v. The port band withdrawn. A band a suite uses and does not declare is the half of brief rule 18
+  //       that ends with two suites answering from each other's `next start`.
+  checkRejectedBy(
+    'journey: the builder suite’s port band withdrawn from the registry is caught',
+    brokenUnit(
+      PORTS,
+      "  'flow-builder': { start: 19_100, width: 300 },",
+      '',
+      'apps/web/src/test-ports.test.ts',
+    ),
+    'no band is declared for these',
+  )
+
+  // 159w. The ADR unlinked from the index. `pnpm adr` runs both ways, and a record nothing links is a
+  //       decision nobody will find when they come to re-make it.
+  checkRejectedBy(
+    'journey: ADR 0081 unlinked from the index is caught',
+    withEditedFile(
+      ADR_INDEX,
+      (source) =>
+        replaceOnce(
+          source,
+          '(0081-misrouting-is-made-impossible-by-a-type-and-refused-again-at-the-api.md)',
+          '(0081-not-linked-by-the-index.md)',
+        ),
+      () => runExpectingFailure('pnpm', ['adr']),
+    ),
+    'does not link 0081-misrouting-is-made-impossible-by-a-type-and-refused-again-at-the-api.md',
+  )
+
+  // ---- the controls ----------------------------------------------------------------------------
+
+  // 159y. Every case above is satisfied by something FAILING, so this one is satisfied by the real tree:
+  //       the three suites, unedited, over the code as committed.
+  {
+    const clean = run('pnpm', unit(JOURNEY_TEST, EDITS_TEST, HANDLER_TEST))
+    check(
+      'journey: the three suites pass over the tree as committed',
+      !clean.failed,
+      `the unedited suites failed, so every fixture above is being compared against a broken ` +
+        `baseline:\n${clean.output}`,
+    )
+  }
+
+  // 159z. The other control, and it is the one that makes the six type cases mean anything. Each of them
+  //       is satisfied by `TS2578` appearing — and a file with NO directives in it would make all six
+  //       pass by making none of them reachable. So: the directives are counted in the source, and the
+  //       typechecker is shown to be clean over them.
+  {
+    const source = readFileSync(JOURNEY_TEST, 'utf8')
+    const directives = source.split('\n').filter((line) => line.includes('@ts-expect-error')).length
+    check(
+      'journey: the six type-level directives are present in the source',
+      directives >= 6,
+      `only ${directives} @ts-expect-error directive(s) are in ${JOURNEY_TEST}, so the six cases above ` +
+        'could be satisfied by a file that no longer states the claim',
+    )
+    const clean = run('pnpm', typecheck())
+    check(
+      'journey: and the typechecker is clean over them, so each one really is erroring',
+      !clean.failed,
+      `the tree does not typecheck, so TS2578 above could be arriving from somewhere else:\n${clean.output}`,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
