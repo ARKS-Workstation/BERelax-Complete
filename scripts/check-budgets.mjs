@@ -327,13 +327,47 @@ function sharedScope(build, budget) {
   return { chunks: build.sharedChunks, violations }
 }
 
-/** `scope: "modules"` — the chunks that define the named modules. The narrow per-island number. */
+/** Whether one page is the route a budget named, or true when a budget named no route. */
+function onDeclaredRoute(page, entry) {
+  if (entry === undefined) return true
+  return Object.keys(page.manifest.entryJSFiles ?? {}).some((key) => key.endsWith(entry))
+}
+
+/**
+ * `scope: "modules"` — the chunks that define the named modules. The narrow per-island number.
+ *
+ * ## `entry`, which narrows it to ONE route (A-FIRST-06)
+ *
+ * Without it this sums the defining chunk of every route that ships the module, and that sum is not a
+ * quantity anybody downloads. It was invisible while every `modules` budget covered a module one route
+ * renders: A-FIRST-06's collector is on four (`/book` and the fixture route, in both locales), and its
+ * defining chunk on `/book` is shared with the booking flow's two islands — so the measurement came back
+ * as 5,928 bytes, of which 4,127 was the slot picker and the details step. A budget that moves when a
+ * module becomes more POPULAR rather than when it grows is a budget that gets raised.
+ *
+ * So a `modules` budget may name the route to measure on, and the right route is one that ships the module
+ * and little else — which is what A-FIRST-06's fixture route exists to be. The vacuity guards still hold in
+ * both directions: `[missing-route-entry]` when the named route is gone, and `[missing-client-module]` when
+ * the route no longer ships the module.
+ *
+ * Omitting `entry` is unchanged, so the three budgets that predate this measure exactly what they did.
+ */
 function moduleScope(build, budget) {
   const wanted = new Set(budget.modules)
   const found = new Set()
   const defining = new Set()
   const violations = []
-  for (const { manifest } of build.pages) {
+  const pages = build.pages.filter((page) => onDeclaredRoute(page, budget.entry))
+  if (pages.length === 0) {
+    return {
+      chunks: [],
+      violations: [
+        `[missing-route-entry] ${budget.id}: no route in the build has the entry ${budget.entry}; this ` +
+          'budget is measuring a page that no longer exists.',
+      ],
+    }
+  }
+  for (const { manifest } of pages) {
     for (const [module, info] of Object.entries(manifest.clientModules)) {
       const path = firstPartyPath(module)
       if (path === null || !wanted.has(path)) continue
@@ -356,9 +390,7 @@ function moduleScope(build, budget) {
 
 /** `scope: "route"` — everything one route loads beyond the shared layout. */
 function routeScope(build, budget) {
-  const page = build.pages.find(({ manifest }) =>
-    Object.keys(manifest.entryJSFiles ?? {}).some((entry) => entry.endsWith(budget.entry)),
-  )
+  const page = build.pages.find((candidate) => onDeclaredRoute(candidate, budget.entry))
   if (page === undefined) {
     return {
       chunks: [],

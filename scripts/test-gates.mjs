@@ -49321,6 +49321,557 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 156a-156z. (A-FIRST-06) The browser collector: the attribute scan shown to read the taxonomy rather
+//            than a copy of it, the double-fire window shown to be able to stop firing, and the collector's
+//            own weight shown to be a measurement.
+//
+//            Every case breaks one thing and requires the named check to fire. The six worth reading first
+//            are 156a to 156f, because each one is the shape of mistake the declarative design exists to
+//            make impossible: an event name the taxonomy does not hold, a payload attribute left off, a
+//            value outside the catalogue's own vocabulary, an attribute that is no field of anything, a
+//            payload attribute on an element that declares no event, and an attribute composed from an
+//            expression. Every one of them renders perfectly, works perfectly, and collects nothing — the
+//            symptom arrives weeks later as a funnel stage that has been empty long enough to look like a
+//            figure.
+//
+//            156g to 156j are about the SCANNER rather than about the tree, and they are here because each
+//            of them has been wrong in a sibling gate in this repository: an exemption pointed at a file
+//            that no longer exists, a derivation that quietly stopped deriving, a declared list that had
+//            been emptied, and a scan whose roots no longer reach any markup. All four pass silently.
+//
+//            Nothing here starts a server. The claims that need one — one event per real click, a real
+//            `dblclick`, a browser taken offline, request interception, and no request before the `load`
+//            event — are `apps/web/e2e/collector.itest.ts`'s, which `pnpm verify` runs after building the
+//            application. What is left for this block is what the files SAY and what the build WEIGHS,
+//            which is what a deleted comparison and a lowered budget both are.
+{
+  const ATTRIBUTES = 'packages/ui/src/analytics/attributes.ts'
+  const COLLECTOR = 'packages/ui/src/analytics/collector.ts'
+  const USE_TRACK = 'packages/ui/src/analytics/use-track.ts'
+  const CHECKER = 'scripts/check-event-attributes.mjs'
+  const PORTS = 'packages/harness/src/ports.ts'
+  const BUDGETS_JSON = 'build/budgets.json'
+
+  const ATTR_SUITE = 'packages/ui/src/analytics/attributes.test.ts'
+  const COLLECTOR_SUITE = 'packages/ui/src/analytics/collector.test.ts'
+  const TRACK_SUITE = 'packages/ui/src/analytics/use-track.test.ts'
+  const PORT_SUITE = 'apps/web/src/test-ports.test.ts'
+
+  // A fixture page in a directory the scanner really reads. `apps/web/src` rather than `app/`, so a leftover
+  // file cannot be mistaken for a route by the registry bijection in `registry.test.ts`.
+  const FIXTURE = 'apps/web/src/__gate_fixture__collector.tsx'
+
+  // Named for this block: `unit`, `mutate` and `fail` are declared in several others, and the slicer
+  // concatenates whichever blocks it was asked for into ONE file, so two blocks sharing a helper name is a
+  // `SyntaxError` in any run that names both — and the failure points at neither of them.
+  const af6Attributes = ['event-attributes']
+  const af6Scan = () => runExpectingFailure('pnpm', af6Attributes)
+  const af6CleanScan = () => run('pnpm', af6Attributes)
+
+  const af6Args = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const af6Fail = (file) => runExpectingFailure('pnpm', af6Args(file))
+  const af6Pass = (file) => run('pnpm', af6Args(file))
+
+  /** Break one file one way and run one unit suite against the result. */
+  const af6Mutate = (path, find, into, suite) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, find, into),
+      () => af6Fail(suite),
+    )
+
+  /** Break one file one way and run the attribute scanner against the result. */
+  const af6MutateScan = (path, find, into) =>
+    withEditedFile(path, (text) => replaceOnce(text, find, into), af6Scan)
+
+  /** A declaring element in a committed-looking component, with whatever attributes a case needs. */
+  const af6Page = (attributes) =>
+    `export const Probe = () => <button type="button" ${attributes} />`
+
+  const af6EditBudget = (id, change) => (text) => {
+    const config = JSON.parse(text)
+    const budget = config.budgets.find((entry) => entry.id === id)
+    if (budget === undefined) throw new Error(`no budget with id ${id} in ${BUDGETS_JSON}`)
+    change(budget)
+    return `${JSON.stringify(config, null, 2)}\n`
+  }
+  const af6Budgets = ['exec', 'tsx', 'scripts/check-budgets.mjs']
+  const af6Built = existsSync('apps/web/.next/server/app')
+
+  // --- the six rules the build-time scan is -------------------------------------------------------
+  //
+  // 156a. The acceptance line's own fixture: an event name the taxonomy does not hold. `cta_clicked` and
+  //       not `nonsense`, because the real mistake is a near miss — a name that reads correctly to a
+  //       reviewer and is refused by `/api/collect` as `unknown_event`.
+  checkRejectedBy(
+    'event attributes: a declared event outside the taxonomy is caught',
+    withFixture(
+      FIXTURE,
+      af6Page('data-berelax-event="cta_clicked" data-berelax-target="call"'),
+      af6Scan,
+    ),
+    'event-attribute-names-an-unknown-event',
+  )
+
+  // 156b. A payload attribute left off. The element declares a real event and carries nothing, so the
+  //       server refuses the payload — a tag that looks deployed and produces 400s.
+  checkRejectedBy(
+    'event attributes: a declared event missing a payload attribute is caught',
+    withFixture(FIXTURE, af6Page('data-berelax-event="cta_click"'), af6Scan),
+    'event-attribute-missing-a-payload-attribute',
+  )
+
+  // 156c. A value outside the field's own vocabulary. `sms` is a fourth call-to-action channel somebody
+  //       will write the day a fourth channel exists, and `CTA_TARGETS` is closed at three.
+  checkRejectedBy(
+    'event attributes: a payload value the schema refuses is caught',
+    withFixture(
+      FIXTURE,
+      af6Page('data-berelax-event="cta_click" data-berelax-target="sms"'),
+      af6Scan,
+    ),
+    'event-attribute-payload-value-outside-the-schema',
+  )
+
+  // 156d. A payload attribute on an element that declares no event. Dead markup: the likeliest way a call
+  //       to action comes to be half-tracked, because it looks instrumented in a diff.
+  checkRejectedBy(
+    'event attributes: a payload attribute with no event is caught',
+    withFixture(FIXTURE, af6Page('data-berelax-target="call"'), af6Scan),
+    'event-payload-attribute-without-an-event',
+  )
+
+  // 156e. A misspelled payload attribute. The event is right, the value is right, and the field is one
+  //       nothing reads — so the server gets a payload missing a field and carrying an unknown one.
+  checkRejectedBy(
+    'event attributes: an attribute that is no payload field is caught',
+    withFixture(
+      FIXTURE,
+      af6Page('data-berelax-event="cta_click" data-berelax-target="call" data-berelax-tgt="call"'),
+      af6Scan,
+    ),
+    'event-payload-attribute-is-not-a-payload-field',
+  )
+
+  // 156f. The event name behind an expression. This is the one that would switch the whole gate off for the
+  //       element it is on, which is why it is a refusal rather than something to be clever about: a text
+  //       scan cannot read a value a bundler computes, and the alternative to refusing is a declaration
+  //       that silently stops being checked.
+  checkRejectedBy(
+    'event attributes: an event name composed from an expression is caught',
+    withFixture(
+      FIXTURE,
+      [
+        "const name = 'cta_click'",
+        'export const Probe = () => <button type="button" data-berelax-event={name} data-berelax-target="call" />',
+      ].join('\n'),
+      af6Scan,
+    ),
+    'event-attribute-is-not-a-literal',
+  )
+
+  // 156g. A payload VALUE behind an expression, which the rule above also has to cover: the name is a
+  //       literal, the element is declared, and the thing nothing can read is what it declares about it.
+  checkRejectedBy(
+    'event attributes: a payload value composed from an expression is caught',
+    withFixture(
+      FIXTURE,
+      [
+        "const target = 'call'",
+        'export const Probe = () => <button type="button" data-berelax-event="cta_click" data-berelax-target={target} />',
+      ].join('\n'),
+      af6Scan,
+    ),
+    'event-attribute-is-not-a-literal',
+  )
+
+  // 156g2. An event whose payload schema cannot accept the field the collector adds. Every payload schema
+  //        is a `strictObject`, the collector puts `path` on every declared interaction, and
+  //        `whatsapp_ref_shown` holds `refCode` and nothing else — so declaring it on an element produces
+  //        an event `/api/collect` refuses whole as `invalid_event_payload`. It renders, it works, and it
+  //        produces a 400 nobody is watching. This unit shipped exactly that mistake; the browser suite
+  //        found it by parsing the batch through the server's own envelope, and this is the rule that makes
+  //        it a build failure instead.
+  checkRejectedBy(
+    'event attributes: an event whose payload cannot carry the pages own field is caught',
+    withFixture(
+      FIXTURE,
+      af6Page('data-berelax-event="whatsapp_ref_shown" data-berelax-ref-code="K7M3"'),
+      af6Scan,
+    ),
+    'event-attribute-declares-an-event-with-no-page-field',
+  )
+
+  // --- the scanner's own controls, which pass silently when they break ----------------------------
+  //
+  // 156h. An exemption pointed at a file that does not exist. Five files are exempt because the attribute
+  //       names are their SUBJECT, and a renamed or deleted one leaves the allowance covering nothing —
+  //       which is how an allowance outlives the thing it was written for (`check-egress-guard.mjs` carries
+  //       the same control for the same reason).
+  checkRejectedBy(
+    'event attributes: an exemption pointed at a missing file is caught',
+    af6MutateScan(
+      CHECKER,
+      "    'packages/ui/src/analytics/attributes.ts',",
+      "    'packages/ui/src/analytics/attributes-renamed.ts',",
+    ),
+    'is exempt from this scan and does not exist',
+  )
+
+  // 156i. The attribute derivation neutered, so `refCode` would be looked for as `data-berelax-refcode`.
+  //       The attribute the markup carries and the attribute the collector reads become two different
+  //       strings, and nothing in the browser would say so — the event would simply arrive with a field
+  //       missing. The scanner checks its own derivation for exactly this.
+  checkRejectedBy(
+    'event attributes: a derivation that stops kebab-casing a camelCase field is caught',
+    af6MutateScan(
+      ATTRIBUTES,
+      '  field.replace(/[A-Z]/g, (upper) => `-${upper.toLowerCase()}`)',
+      '  field',
+    ),
+    'no longer kebab-cases a camelCase field',
+  )
+
+  // 156j. The collector-supplied list emptied. `path` and `entry` are the two fields no element declares
+  //       because the page supplies them; with the list empty the checker would require every declaration
+  //       in the tree to carry `data-berelax-path`, which the collector then overwrites.
+  //
+  //       The asserted message is the SCANNER'S OWN control rather than a violation, and that is the
+  //       correct answer rather than a weaker one: the first version of this case expected
+  //       `event-attribute-missing-a-payload-attribute`, which is what the emptied list produces one step
+  //       LATER, and the control now refuses the tree before any file is read. Caught by this case's own
+  //       first run.
+  checkRejectedBy(
+    'event attributes: an emptied collector-supplied field list is caught',
+    af6MutateScan(
+      ATTRIBUTES,
+      "export const COLLECTOR_SUPPLIED_PAYLOAD_FIELDS: readonly string[] = ['path', 'entry']",
+      'export const COLLECTOR_SUPPLIED_PAYLOAD_FIELDS: readonly string[] = []',
+    ),
+    'is not in the collector-supplied list',
+  )
+
+  // 156j2. The derivation's own filter removed, so the collector-supplied fields are required of an element
+  //        as well. The list above is intact, so that control cannot see this — and the scanner's OTHER
+  //        control does, naming the attribute: `data-berelax-path` would be demanded of every declaration
+  //        in the tree and then overwritten by the collector.
+  //
+  //        Asserted against the control rather than against a violation, and that is the right answer
+  //        rather than a weaker one: the scanner refuses the tree before reading a file, so the violation
+  //        rule is unreachable through this mutation. The violation rule itself is proved by 156b, on a
+  //        fixture. Both orderings were tried, and both wrong expectations were caught by this case's own
+  //        runs rather than by review.
+  checkRejectedBy(
+    'event attributes: a derivation that requires the collectors own fields of an element is caught',
+    af6MutateScan(
+      ATTRIBUTES,
+      '    .filter((field) => !COLLECTOR_SUPPLIED_PAYLOAD_FIELDS.includes(field))',
+      '    .filter(() => true)',
+    ),
+    'is required of an element and is supplied by the collector',
+  )
+
+  // 156k. The scan's roots narrowed so it reads no markup at all. It then examines nothing and exits zero,
+  //       which is ADR 0002 exactly — a passing check that has never been seen to do anything.
+  checkRejectedBy(
+    'event attributes: a scan that reaches no markup is caught',
+    af6MutateScan(CHECKER, "const ROOTS = ['apps', 'packages']", "const ROOTS = ['scripts']"),
+    'not one declared event was found',
+  )
+
+  // --- the double-fire window ---------------------------------------------------------------------
+  //
+  // 156l. The window set to zero. Every `dblclick` is then two `cta_click` events, which does not look like
+  //       a defect in any report: it looks like a page whose readers click a lot.
+  checkRejectedBy(
+    'collector: a double-fire window of zero is caught',
+    af6Mutate(
+      ATTRIBUTES,
+      'export const INTERACTION_DEDUPE_MS = 300',
+      'export const INTERACTION_DEDUPE_MS = 0',
+      COLLECTOR_SUITE,
+    ),
+    'takes one event for a second fire inside the window and two for one outside it',
+  )
+
+  // 156m. The dedupe keyed on the payload alone. Two calls to action with the same target is the ordinary
+  //       case — a header button and a sticky bar — and a reader who uses one and then the other has done
+  //       two things. Keying on the payload drops the second silently.
+  checkRejectedBy(
+    'collector: a dedupe that ignores which control was used is caught',
+    af6Mutate(COLLECTOR, '      lastInteraction.source === source &&\n', '', COLLECTOR_SUITE),
+    'treats two controls carrying the same payload as two interactions',
+  )
+
+  // 156n. The dedupe keyed on the control alone, which is the mirror image: one button that can be clicked
+  //       with two different payloads reports only the first.
+  checkRejectedBy(
+    'collector: a dedupe that ignores what was declared is caught',
+    af6Mutate(COLLECTOR, '      lastInteraction.key === key &&\n', '', COLLECTOR_SUITE),
+    'treats a different payload on the same control as a second interaction',
+  )
+
+  // --- the offline queue, and the idempotency the acceptance line rests on ------------------------
+  //
+  // 156o. The online check removed. `navigator.sendBeacon` answers TRUE while offline — it has accepted the
+  //       payload into its own queue, which is not delivery — so the queue would be cleared and every event
+  //       produced during an outage lost. The symptom is a funnel that is quietly short on bad-network days.
+  checkRejectedBy(
+    'collector: a flush that does not ask whether there is a network is caught',
+    af6Mutate(COLLECTOR, '      if (!host.online()) break\n', '', COLLECTOR_SUITE),
+    'sends nothing while offline, keeps the queue, and flushes it once with no duplication',
+  )
+
+  // 156p. The queue cleared on the ATTEMPT rather than on the acceptance. Every refused send then loses its
+  //       whole batch, and nothing anywhere records that it happened.
+  checkRejectedBy(
+    'collector: a queue cleared on a refused send is caught',
+    af6Mutate(
+      COLLECTOR,
+      '      if (!host.send(COLLECT_PATH, slice.body)) break',
+      '      host.send(COLLECT_PATH, slice.body)',
+      COLLECTOR_SUITE,
+    ),
+    'keeps the same client event ids across a refused send, so a retry cannot duplicate',
+  )
+
+  // 156q. The client event id re-minted at flush instead of kept from enqueue. `/api/collect` holds a
+  //       unique index on it, so a stable id is what makes a retry idempotent; a fresh one makes every
+  //       retry a new event and inflates every funnel figure by however many retries happened.
+  checkRejectedBy(
+    'collector: an idempotency key re-minted on every flush is caught',
+    af6Mutate(
+      COLLECTOR,
+      '        clientEventId: event.clientEventId,',
+      '        clientEventId: host.newEventId(),',
+      COLLECTOR_SUITE,
+    ),
+    'keeps the same client event ids across a refused send, so a retry cannot duplicate',
+  )
+
+  // --- the caps, which are the server's ------------------------------------------------------------
+  //
+  // 156r. The queue as a ring buffer. The oldest event in any queue is the `page_view` carrying
+  //       `entry: true` — the `landing` stage, the denominator every conversion rate divides by — so
+  //       evicting it turns an over-active page into a page with conversions and no landings. That reads
+  //       as a rate above 100%, or, after a chart clamps it, as a very good day.
+  checkRejectedBy(
+    'collector: a full queue that evicts the oldest event is caught',
+    af6Mutate(
+      COLLECTOR,
+      [
+        '      return {',
+        '        accepted: false,',
+        "        refusal: 'queue_full',",
+        '        detail: `${COLLECTOR_MAX_QUEUED_EVENTS} events are already waiting to be sent`,',
+        '      }',
+      ].join('\n'),
+      '      queue.shift()',
+      COLLECTOR_SUITE,
+    ),
+    'refuses the newest event when the queue is full, and keeps the landing at the front',
+  )
+
+  // 156s. The queue ceiling chosen rather than derived. A ceiling above the server's batch cap is a backlog
+  //       with no reader: anything the route will not read in one request is not a queue.
+  checkRejectedBy(
+    'collector: a queue ceiling that is not the servers batch cap is caught',
+    af6Mutate(
+      COLLECTOR,
+      'export const COLLECTOR_MAX_QUEUED_EVENTS = COLLECT_MAX_BATCH_EVENTS',
+      'export const COLLECTOR_MAX_QUEUED_EVENTS = 500',
+      COLLECTOR_SUITE,
+    ),
+    'derives the queue ceiling from the servers batch cap rather than choosing one',
+  )
+
+  // 156t. The byte split removed. The count cap alone is not enough and the arithmetic says so: the largest
+  //       validated event is about 2.2KB, so fifty of them are roughly 115KB against a 64KB body cap — and
+  //       a body over the cap is refused WHOLE, which loses every event in it.
+  checkRejectedBy(
+    'collector: a batch split only by count is caught',
+    af6Mutate(
+      COLLECTOR,
+      '      if (byteLength(body) <= COLLECT_MAX_BODY_BYTES) return { count, body }',
+      '      return { count, body }',
+      COLLECTOR_SUITE,
+    ),
+    'splits a batch the server would refuse for its SIZE into requests it will read',
+  )
+
+  // 156u. The inter-event gaps lost. They are computed at ENQUEUE precisely so that however the queue is
+  //       later sliced cannot drop one, and a batch with no gaps is a page that reads to A-FIRST-04's
+  //       heuristic as a page with no interactions.
+  checkRejectedBy(
+    'collector: a batch that carries no inter-event gaps is caught',
+    af6Mutate(
+      COLLECTOR,
+      '      gapMs:\n        previousEventAt === null ? null : Math.min(Math.max(at - previousEventAt, 0), MAX_GAP_MS),',
+      '      gapMs: null,',
+      COLLECTOR_SUITE,
+    ),
+    'posts a batch the servers own envelope accepts',
+  )
+
+  // --- the delegated listener ----------------------------------------------------------------------
+  //
+  // 156v. The declaring element found by identity instead of by `closest`. What a reader clicks is usually
+  //       the `<span>` or the `<svg>` inside the anchor, so this tracks nothing on any control with an icon
+  //       in it — and the symptom is an event that fires sometimes.
+  checkRejectedBy(
+    'collector: a listener that only tracks the clicked element itself is caught',
+    af6Mutate(
+      USE_TRACK,
+      '  return candidate.closest(TRACK_SELECTOR)',
+      "  return typeof candidate.getAttribute === 'function' &&\n    candidate.getAttribute(TRACK_EVENT_ATTRIBUTE) !== null\n    ? (candidate as TrackableElement)\n    : null",
+      TRACK_SUITE,
+    ),
+    'finds the declaring ancestor of whatever was actually clicked',
+  )
+
+  // 156w. The listener moved to the bubble phase. A `tel:` or `wa.me` anchor is about to navigate away, and
+  //       anything on the page that stops the event propagating makes a tracked element silently stop being
+  //       tracked with no change to its own markup.
+  checkRejectedBy(
+    'collector: a listener attached in the bubble phase is caught',
+    af6Mutate(
+      USE_TRACK,
+      "  root.addEventListener('click', listener, { capture: true })",
+      "  root.addEventListener('click', listener, { capture: false })",
+      TRACK_SUITE,
+    ),
+    'installs one capture-phase listener and removes it on detach',
+  )
+
+  // 156x. The page's path made overridable by an attribute. A component reused on two pages would then
+  //       report whichever page its author was looking at when they wrote the attribute.
+  checkRejectedBy(
+    'collector: an element able to override the pages path is caught',
+    af6Mutate(
+      USE_TRACK,
+      '  return { name, payload: { ...payload, path: page.path } }',
+      '  return { name, payload: { path: page.path, ...payload } }',
+      TRACK_SUITE,
+    ),
+    'does not let an element override the path the page supplied',
+  )
+
+  // 156y. The entry flag hard-coded. One landing per session is what makes the funnel's first bucket a
+  //       count of SESSIONS; a landing per page view multiplies the denominator by pages-per-visit and
+  //       every conversion rate on the analytics page falls by the same factor.
+  checkRejectedBy(
+    'collector: a page view that is always an entry is caught',
+    af6Mutate(
+      USE_TRACK,
+      "  return { name: 'page_view', payload: { path: page.path, entry } }",
+      "  return { name: 'page_view', payload: { path: page.path, entry: true } }",
+      TRACK_SUITE,
+    ),
+    'builds the event through the taxonomys own validator',
+  )
+
+  // --- the port band and the weight ----------------------------------------------------------------
+  //
+  // 156z. The band removed from the registry. A server-starting suite drawing a port nothing declares is
+  //       how two suites come to share one, at which point the second `next start` cannot bind and the
+  //       suite answers from the FIRST one's server — green means nothing and red means nothing.
+  checkRejectedBy(
+    'collector: a suite drawing a port from no declared band is caught',
+    af6Mutate(PORTS, '  collector: { start: 18_200, width: 300 },\n', '', PORT_SUITE),
+    'no band is declared for these',
+  )
+
+  // 156aa. The collector's weight is a real, non-zero number. A budget lowered under it must fail WITH the
+  //        measured byte count — which is also how this case proves the chunk attribution found something,
+  //        because a measurement of zero would satisfy any budget above it forever. This is the case that
+  //        caught the defect the unit shipped with: importing a cap from `@berelax/shared` put `zod` and
+  //        every schema in the package into the client bundle, 98,927 bytes against a 3,072-byte budget,
+  //        and nothing else in the build noticed.
+  if (af6Built) {
+    const lowered = withEditedFile(
+      BUDGETS_JSON,
+      af6EditBudget('collector-client-js', (budget) => {
+        budget.maxBytes = 256
+      }),
+      () => run('pnpm', af6Budgets),
+    )
+    checkRejectedBy(
+      'collector: an oversized collector is caught by the byte budget',
+      lowered,
+      '[over-budget] collector-client-js',
+    )
+    check(
+      'collector: the budget reports the measured collector bytes',
+      /\[over-budget] collector-client-js: measured \d{3,} bytes against a budget of 256 bytes/.test(
+        lowered.output,
+      ),
+      lowered.output,
+    )
+  }
+
+  // 156ab. The vacuity guard in the other direction: a budget over a module the build does not contain
+  //        measures zero bytes and passes for ever, which is exactly how a check stops being one.
+  if (af6Built) {
+    checkRejectedBy(
+      'collector: a budget over a module the build does not contain is caught',
+      withEditedFile(
+        BUDGETS_JSON,
+        af6EditBudget('collector-client-js', (budget) => {
+          budget.modules = ['packages/ui/src/analytics/nothing-renders-this.tsx']
+        }),
+        () => run('pnpm', af6Budgets),
+      ),
+      '[missing-client-module] packages/ui/src/analytics/nothing-renders-this.tsx',
+    )
+  }
+
+  // --- the controls, and they are not a formality -------------------------------------------------
+  //
+  // 156ac. Every file edited above, UNEDITED, passes. Without this, twenty mutants are satisfied by a tree
+  //        that does not pass its own suites, and every rejection above would be reported for the wrong
+  //        reason.
+  for (const suite of [ATTR_SUITE, COLLECTOR_SUITE, TRACK_SUITE, PORT_SUITE]) {
+    const clean = af6Pass(suite)
+    check(`collector: ${suite} passes unedited`, !clean.failed, clean.output)
+  }
+
+  // 156ad2. The page-field list is not empty, which is what the rule above rests on: with it empty every
+  //         event becomes declarable again and 156g2 can never fire.
+  checkRejectedBy(
+    'event attributes: an empty page-field list is caught',
+    af6MutateScan(
+      ATTRIBUTES,
+      "export const DECLARED_EVENT_PAGE_FIELDS: readonly string[] = ['path']",
+      'export const DECLARED_EVENT_PAGE_FIELDS: readonly string[] = []',
+    ),
+    'the page-field rule can never fire',
+  )
+
+  // 156ad. And the scan passes on the tree as it stands, over a NON-EMPTY set of declarations — which is
+  //        the half that matters: `pnpm event-attributes` exiting zero over nothing is the failure every
+  //        case from 156a to 156g would also satisfy.
+  {
+    const clean = af6CleanScan()
+    check('collector: the attribute scan passes on this tree', !clean.failed, clean.output)
+    check(
+      'collector: and the attribute scan read a non-zero number of declarations',
+      /Every declared event attribute is in the taxonomy: [1-9]\d* declaration\(s\)/.test(
+        clean.output,
+      ),
+      clean.output,
+    )
+  }
+
+  // 156ae. The proof that every fixture above was cleaned up. `withFixture` removes the file in a `finally`,
+  //        and a leftover one fails every later gate in this file with a violation that has nothing to do
+  //        with the case being tested — which has happened.
+  check(
+    'collector: no gate fixture page was left behind',
+    !existsSync(FIXTURE),
+    `${FIXTURE} survived the cases above, so the next gate to read apps/web will fail about it`,
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -50175,6 +50726,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     // makes dropping it from CI a failing build rather than the silent loss of the one check that says
     // nothing but an opaque category code leaves the building.
     'pnpm egress',
+    'pnpm event-attributes',
     // And the SAQ-A scan beside it, for the same reason in the other direction: it is the one check that
     // says no card number can reach anything this build renders, logs or stores, and its whole value is
     // that it runs on a commit nobody thought was about payments.

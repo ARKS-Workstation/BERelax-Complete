@@ -489,6 +489,17 @@ describe('acceptance — the route carries exactly the booking flows client boun
    * really for is unchanged: a THIRD boundary, or a component that quietly became one, fails here.
    */
   const ISLANDS = [
+    /*
+     * The collector, added by A-FIRST-06 — the one edit this unit made to B-UI-02's file, and it was
+     * required rather than tidying: this assertion is an EXACT equality over the route's first-party
+     * client modules, so instrumenting `/book` at all fails it. It is listed rather than excused because
+     * that is what the assertion is for: a third boundary has to be a deliberate diff.
+     *
+     * It is not a heavy island and it is not a second one in docs/09 §3's sense. It renders `null`, ships
+     * under 3KB gzipped (`collector-client-js` in `build/budgets.json` measures it off the fixture route,
+     * which carries nothing else) and touches no network until the `load` event.
+     */
+    'packages/ui/src/analytics/collector.island.tsx',
     'apps/web/app/_book/details.client.tsx',
     'apps/web/app/_book/slot-picker.client.tsx',
   ]

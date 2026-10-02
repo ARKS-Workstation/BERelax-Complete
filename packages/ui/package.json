@@ -5,6 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./analytics": "./src/analytics/index.ts",
+    "./analytics/collector-island": "./src/analytics/collector.island.tsx",
     "./arabic.css": "./src/theme/arabic.css",
     "./direction": "./src/primitives/direction.tsx",
     "./font-fallbacks.css": "./src/theme/font-fallbacks.generated.css",

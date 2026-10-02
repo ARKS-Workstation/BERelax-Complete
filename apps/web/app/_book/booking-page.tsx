@@ -49,6 +49,7 @@
 
 import { formatAmount, grossMoneyFromFils } from '@berelax/core'
 import { OTP_CODE_DIGITS } from '@berelax/db'
+import CollectorIsland from '@berelax/ui/analytics/collector-island'
 import { DesignSystemStyles, Grid, GridCell, Measure, Section } from '@berelax/ui/layout'
 import { type BookCopy, RESEND_SECONDS_TOKEN } from '../../src/book/copy.ts'
 import { type BookingPageData, stepIsPermitted, type TherapistLabel } from '../../src/book/read.ts'
@@ -336,7 +337,22 @@ function DeskPhone({ data, copy }: { readonly data: BookingPageData; readonly co
   if (phone === null) return null
   return (
     <p className="be-actions">
-      <a className="be-action be-action--quiet" href={`tel:${phone.e164}`}>
+      {/*
+        The one declared interaction on this route (A-FIRST-06).
+
+        `cta_click` with `target: 'call'` — the attribute names the event and the second attribute carries
+        the only payload field the element has to supply; `path` is the collector's, from
+        `location.pathname`, because a component reused on more than one page cannot state it.
+        `scripts/check-event-attributes.mjs` reads both literals and fails the build on a name the taxonomy
+        does not hold, which is why they are written out here rather than composed: a computed attribute
+        value is an event name no static check can read.
+      */}
+      <a
+        className="be-action be-action--quiet"
+        href={`tel:${phone.e164}`}
+        data-berelax-event="cta_click"
+        data-berelax-target="call"
+      >
         {copy.chosen.callInstead(phone.display)}
       </a>
     </p>
@@ -1191,6 +1207,17 @@ export function BookingPageBody(props: BookingPageProps) {
           </GridCell>
         </Grid>
       </Section>
+
+      {/*
+        The collector, last and rendering nothing (A-FIRST-06).
+
+        On this route and not in the document shell, which is the deliberate shape:
+        `build/budgets.json`'s `shared-layout-client-js` is an allow-list of two client modules plus 4KB,
+        so a collector in the shell would be a collector every page in the application pays for whether or
+        not it declares a single tracked element. `/book` declares one — the desk telephone above — and is
+        the route docs/03 §6's funnel is about, so it opts in.
+      */}
+      <CollectorIsland path={localisedPath(BOOK_PATH, locale)} />
     </main>
   )
 }
