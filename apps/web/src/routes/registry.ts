@@ -172,6 +172,27 @@ export const ROUTES = [
       'on it is an aggregate.',
   },
   {
+    id: 'collect',
+    path: '/api/collect',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'A-FIRST-05s first-party measurement ingest: the only write path the browser collector has, and the ' +
+      'only place in the build that puts a row into the analytics schema. Under /api and NOT under /api/v1 ' +
+      'because it is not a versioned public API - it is the other half of a client this repository ships ' +
+      '(A-FIRST-06), and the path is held once in COLLECT_PATH so the two cannot drift. Exempt from the ' +
+      'proxy for the reason every endpoint above records: a 301 on a mistyped trailing slash would ' +
+      'downgrade this POST to a GET with the batch dropped. Locale-neutral, because a measurement has no ' +
+      'language. Dynamic by necessity: it reads cookies on every request and answers 204, 400 or 429 from ' +
+      'them. Not indexable, and nothing to index - it answers no GET at all. Nothing is read from the ' +
+      'query string, not a visitor and not a consent state, because a ?visitor= would put a first-party ' +
+      'identifier in every access log, every Referer and every forwarded link.',
+  },
+  {
     id: 'facts',
     path: '/api/facts',
     kind: 'handler',

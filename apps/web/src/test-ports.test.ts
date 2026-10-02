@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { TEST_PORT_BANDS, type TestSuiteName } from '@berelax/harness/ports'
 import { describe, expect, it } from 'vitest'
 
@@ -18,7 +18,21 @@ import { describe, expect, it } from 'vitest'
  * nothing else is listening.
  */
 
-const WEB_SRC = new URL('.', import.meta.url).pathname
+/**
+ * The whole application, not just `src/`.
+ *
+ * It was `src/` until A-FIRST-05, and that was a blind spot rather than a scope: `apps/web/app` holds route
+ * handlers, and `app/api/v1/bookings/handler.test.ts` was already precedent for a test file living beside
+ * the thing it drives. A server-starting suite there would have been invisible to every assertion below —
+ * including the one that says a band nothing claims is a defect, which would then have reported the band
+ * that suite was using as declared-and-unused. This check's own history is the argument: the last time its
+ * scan was widened it "found a twelfth suite one directory down the moment it was written".
+ *
+ * `.next` and `node_modules` are skipped because they are build output rather than source, and walking a
+ * gigabyte of generated chunks to look for `.itest.ts` would make this test slow for nothing.
+ */
+const WEB_ROOT = new URL('..', import.meta.url).pathname
+const SKIP_DIRECTORIES = new Set(['node_modules', '.next'])
 
 /** An integer port added to a random offset — the shape every suite used before the registry existed. */
 const INLINE_PORT = /\b\d{4}\s*\+\s*Math\.floor\(\s*Math\.random\(\)/
@@ -68,7 +82,7 @@ const PRIVATE_NEXT_SPAWN = /\bspawn(?:Sync)?\(\s*'pnpm'[\s\S]{0,120}?'next'[\s\S
 function itestFiles(dir: string): readonly string[] {
   const found: string[] = []
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === 'node_modules') continue
+    if (SKIP_DIRECTORIES.has(entry.name)) continue
     const path = join(dir, entry.name)
     if (entry.isDirectory()) found.push(...itestFiles(path))
     else if (entry.name.endsWith('.itest.ts')) found.push(path)
@@ -76,8 +90,18 @@ function itestFiles(dir: string): readonly string[] {
   return found.sort()
 }
 
-const FILES = itestFiles(WEB_SRC).map((path) => ({
-  path: path.slice(WEB_SRC.length),
+const FILES = itestFiles(WEB_ROOT).map((path) => ({
+  /** Relative to the scan root, for a readable failure message. */
+  path: path.slice(WEB_ROOT.length),
+  /**
+   * The absolute path, kept for the one assertion that is about the scan's REACH.
+   *
+   * A relative path cannot make that claim, and the first version of this file's control tried: it filtered
+   * for a path not starting with `src/`, which is true of every file once the root IS `src/` — so narrowing
+   * the root back would have left the control green, which is exactly the vacuity it was added to refuse.
+   * Gate case 144bf is what found it.
+   */
+  absolutePath: path,
   text: readFileSync(path, 'utf8'),
 }))
 
@@ -87,6 +111,22 @@ const EXPECTED_MINIMUM_FILES = 12
 describe('integration suite ports', () => {
   it('finds the suites to scan', () => {
     expect(FILES.length).toBeGreaterThanOrEqual(EXPECTED_MINIMUM_FILES)
+  })
+
+  it('reaches suites outside src/, which the scan could not see until A-FIRST-05', () => {
+    // The control for the widening. Without it, "every band has a claimant" would go on being satisfied by
+    // a scan that simply could not see the file claiming one — and the direction that failure takes is the
+    // expensive one: the suite runs, binds a port from a band the registry reports as free, and the next
+    // unit to need a band takes it.
+    const outsideSrc = FILES.filter(
+      (file) => !file.absolutePath.includes(`${sep}apps${sep}web${sep}src${sep}`),
+    ).map((file) => file.path)
+    expect(
+      outsideSrc.length,
+      'no suite lives outside apps/web/src, so the widened scan is proving nothing. If that is genuinely ' +
+        'the case again, narrow the root back and delete this case rather than leaving it green over ' +
+        'nothing',
+    ).toBeGreaterThan(0)
   })
 
   it('never computes a port inline', () => {

@@ -185,6 +185,19 @@ export const TEST_PORT_BANDS = {
   // that table below the ephemeral floor is 6697, and Chromium's own list has nothing between 10080 and the
   // floor — so `usableWidth` is the full 300.
   checkout: { start: 16_700, width: 300 },
+  // A-FIRST-05's `/api/collect`, which needs a real server for every claim it makes, because all of them
+  // are about a RESPONSE rather than a return value: the `Set-Cookie` a first consented batch emits and
+  // its exact attributes, the ABSENCE of one before consent, the 400 with a named reason for each of the
+  // four caps, the 429 and its `Retry-After` under a burst, and the rendered public HTML a grep test reads
+  // for third-party analytics origins — which can only be the bytes the application actually serves.
+  //
+  // 16_400 is the band this unit was allocated. It is the next start above `documents` [15_500, 15_800)
+  // with 300 clear ports and does not reach into [15_800, 16_400), which is held by units in flight in
+  // other worktrees; a band chosen from what one worktree can see is exactly how `template-editor` and
+  // `book-flow` came to share one. [16_400, 16_700) contains none of RESTRICTED_PORTS — the highest entry
+  // in that table below the ephemeral floor is 6697, and Chromium's own list has nothing between 10080 and
+  // the floor — so `usableWidth` is the full 300.
+  collect: { start: 16_400, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

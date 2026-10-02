@@ -9,6 +9,7 @@ import {
   integer,
   jsonb,
   pgSchema,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -124,10 +125,30 @@ export const session = analyticsSchema.table(
     bot: boolean('bot').notNull(),
     /** The classifier's verdict (A-FIRST-04), null exactly when `bot` is false. Never the user agent. */
     botKind: text('bot_kind'),
+    /**
+     * Why `tradingDate` is that date (migration 0116, A-FIRST-05).
+     *
+     * `trading` when `startedAt` fell inside that business day's open window, and otherwise one of
+     * `resolveTradingDate`'s three named reasons for an instant that belonged to no trading date at all —
+     * filed under the next date the calendar opens. The words come from `TRADING_DATE_BASES` in
+     * `@berelax/shared`, which `packages/core/src/analytics/ingest.ts` holds equal to the resolver's own
+     * union by a compile-time assertion; this CHECK is the third statement and gate case 144 holds all
+     * three equal.
+     *
+     * A seventh thing the mirror cannot say: `analytics.assert_session_trading_basis` is an AFTER INSERT
+     * OR UPDATE trigger that raises `ZY222` when this column disagrees with `public.business_day`'s own
+     * `opens_at`/`closes_at`. So `trading` on a session that began at 09:00 is refused by the server even
+     * though it typechecks perfectly here.
+     */
+    tradingDateBasis: text('trading_date_basis').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
   },
   (t) => [
     check('session_last_event_not_before_start', sql`${t.lastEventAt} >= ${t.startedAt}`),
+    check(
+      'session_trading_date_basis_known',
+      sql`${t.tradingDateBasis} in ('trading', 'before_opening', 'after_closing', 'premises_closed')`,
+    ),
     check(
       'session_device_kind_known',
       sql`${t.deviceKind} in ('mobile', 'tablet', 'desktop', 'unknown')`,
@@ -340,5 +361,55 @@ export const retentionPolicy = analyticsSchema.table(
       sql`(${t.policy} = 'raw_row_purge') = (${t.purgeOrder} is not null)`,
     ),
     check('retention_policy_reason_not_blank', sql`btrim(${t.reason}) <> ''`),
+  ],
+)
+
+/**
+ * The identifier-free pre-consent landing counter (migration 0116, A-FIRST-05, ADR 0066).
+ *
+ * The internal store is treated as consent-gated while `Y5-analytics-basis` is open, so `visitor` and
+ * `session` are created AT consent and never before it. A visitor who arrives, reads and leaves without
+ * answering the banner has still LANDED, and `landing` is the funnel's denominator — so the visit is
+ * reduced at the boundary to `+1` against a bucket carrying a business day and a route, and nothing else
+ * is written: no visitor, no session, no event row and no `Set-Cookie`.
+ *
+ * Three things the mirror cannot say, and that a caller writing from these definitions would get wrong:
+ *
+ *   1. **The reduction is irreversible, deliberately.** There is no key to promote a staged landing by,
+ *      because a key before consent is the identifier the position withholds. So nothing here is ever
+ *      turned into a session, and consent never arriving needs no purge.
+ *   2. **It is monotonic, not append-only.** The increment is the write that has to keep working;
+ *      `analytics.refuse_pre_consent_landing_loss` raises `ZY221` for a DELETE, for an UPDATE that lowers
+ *      `landings`, and for one that moves a count onto another key. A delete built from these definitions
+ *      typechecks perfectly and is refused by the server.
+ *   3. **`bucketDate` carries NO foreign key to `public.business_day`,** which is the one place this table
+ *      differs from the three rollups. An instant in the daytime gap belongs to no trading date, and the
+ *      whole point of this row is that such a visit is counted rather than refused — so the basis says
+ *      which kind of date it is instead, and it is IN THE KEY, so the two kinds can never be summed.
+ *
+ * There is no `createdAt` and no `computedAt`, and their absence is the claim: an instant on a row whose
+ * count is 1 is a timestamp of one person's visit, which would make "identifier-free" false. The coarsest
+ * thing here is a date, and it is also the finest.
+ */
+export const preConsentLanding = analyticsSchema.table(
+  'pre_consent_landing',
+  {
+    bucketDate: date('bucket_date').notNull(),
+    bucketBasis: text('bucket_basis').notNull(),
+    path: text('path').notNull(),
+    /** `bigint({ mode: 'bigint' })`: a denominator kept indefinitely must not lose precision. */
+    landings: bigint('landings', { mode: 'bigint' }).notNull(),
+  },
+  (t) => [
+    primaryKey({
+      name: 'pre_consent_landing_pkey',
+      columns: [t.bucketDate, t.bucketBasis, t.path],
+    }),
+    check(
+      'pre_consent_landing_basis_known',
+      sql`${t.bucketBasis} in ('trading', 'before_opening', 'after_closing', 'premises_closed')`,
+    ),
+    check('pre_consent_landing_path_is_a_path', sql`${t.path} like '/%'`),
+    check('pre_consent_landing_counted_at_least_one', sql`${t.landings} >= 1`),
   ],
 )

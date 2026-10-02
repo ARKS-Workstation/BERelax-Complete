@@ -1595,6 +1595,20 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
     registeredBy: 'C-CRM-10',
   }),
   rule({
+    key: 'public.google_reviews.reply_lint_content_sha256',
+    dataClass: 'not_customer_data',
+    action: 'not_customer_data',
+    why:
+      'The sha256 of the REPLY text a lint pass examined before that reply was delivered (0113, G-REV-05), ' +
+      'found by probe 4 on the `_sha256` column-name family. The reply is this business’s own public words, ' +
+      'not the reviewer’s: G-REV-05’s linter carries a quote-back rule precisely so that a reply cannot ' +
+      'repeat what the customer wrote, and `reviewer_display_name` above records why nothing on this table ' +
+      'is joinable to a customer record in the first place. The digest exists so that the stamp can be ' +
+      'reproduced over the stored text — a reply whose hash no longer matches is a reply somebody edited ' +
+      'after it was linted, which is the only thing this column is for.',
+    registeredBy: 'G-REV-05',
+  }),
+  rule({
     key: 'public.review_intake_email.raw_body_sha256',
     dataClass: 'not_customer_data',
     action: 'not_customer_data',

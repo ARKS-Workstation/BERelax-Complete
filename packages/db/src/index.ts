@@ -356,6 +356,23 @@ export {
   withAgentRun,
 } from './repositories/agents.ts'
 export {
+  ANALYTICS_INGEST_REFUSALS,
+  ANALYTICS_SQLSTATE,
+  type AnalyticsIngestRefusal,
+  analyticsIngestRefusal,
+  type CollectIngestInput,
+  type CollectIngestResult,
+  countPreConsentLanding,
+  fileUnderTradingDate,
+  ingestCollectBatch,
+  type NewestSession,
+  newestSessionForUpdate,
+  readPreConsentLandings,
+  type SessionOrigination,
+  type SessionStitchDecision,
+  type TradingDateFiling,
+} from './repositories/analytics.ts'
+export {
   type DecidedTransition,
   TRANSITION_REFUSALS,
   type TransitionActor,
@@ -3826,39 +3843,52 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // answer (ADR 0043, 0061): the answer to all four of these is the same sentence — lint the reply and
 // deliver it through the send path.
 //
-// 117 is 0117_card_shape_refusal.sql — no column a checkout writes may hold text shaped like a card number
-// (Y-PAY-03). One function, `is_card_shaped()`, and one rule, `ZY231`, on `payment_intent.reference`,
-// `payment_intent.idempotency_key`, `payment_intent.gateway_intent_id` and
-// `payment_intent_transaction.gateway_event_id`. No table, no column and no index, so the Drizzle mirror is
-// unchanged and `pnpm db:drift` has nothing new to compare — the file is a refusal and nothing else.
+// 116 is 0116_collect_ingest.sql — pre-consent staging, and the reason a session's trading date is the
+// date it says (A-FIRST-05, ADR 0066).
 //
-// Two decisions in it are worth finding here rather than in the file, because both are the kind that gets
-// "simplified" by a later reader.
+// One table and one column, and each answers a question the ingest route could not avoid.
 //
-// **It is a TRIGGER and not a CHECK constraint, and that is the point of the migration.** A CHECK is the
-// obvious spelling and it is the wrong one: PostgreSQL appends `DETAIL: Failing row contains (…)` to a CHECK
-// violation, so the constraint that kept the card number out of the column would have written it into the
-// server log and from there into wherever logs ship. The guard would have created the disclosure it exists to
-// prevent, on the path everybody agrees is the safe one. A trigger raises a message we write, which names the
-// TABLE and the COLUMN and never the value — and that is also why the refusal needs a private SQLSTATE at
-// all: the prose is deliberately uninformative, so a caller has to be able to branch on the code.
+// `analytics.pre_consent_landing` is the identifier-free half. The internal store is treated as
+// consent-gated while `Y5-analytics-basis` is open, so `analytics.visitor` and `analytics.session` are
+// created AT consent and never before it — which leaves the funnel's first stage, `landing`, with no way to
+// count a visitor who arrived, read, and left without answering a banner. Dropping the event loses the
+// denominator every conversion rate divides by; keeping it loses the position. The obvious third answer is
+// to STAGE the event until a decision arrives, and that answer is not available: a holding pen needs a key
+// to promote a row by, and a key before consent is the identifier the position withholds. So the
+// pre-consent path is an irreversible PROJECTION — one `+1` against a bucket of (business day, gap basis,
+// route) and nothing else — which is what makes two claims properties of the table rather than promises
+// about code. Consent never arriving needs no purge, because nothing identifying was written; and a subject
+// access request finds nothing because the row holds no column any of C-CRM-10's five erasure probes can
+// reach and no instant finer than a date. That last absence is deliberate: there is no `created_at` and no
+// `computed_at`, because a timestamp on a row whose count is 1 is a timestamp of one person's visit.
+// Retention keeps it indefinitely, beside the three rollups; ZY221 refuses a DELETE, a lowered count and a
+// count moved onto another key, because it is the only surviving record that the visit happened.
 //
-// **It is deliberately NOT on `audit_event` or `outbox_event`**, which is the version of this rule somebody
-// will propose. `is_card_shaped` reports a 13-to-19-digit Luhn-valid run, and about one arbitrary run in ten
-// of that length is Luhn-valid; those two payloads carry the whole build's data, including a fifteen-digit
-// TRN, an IBAN whose BBAN can be sixteen digits or more (P-HR-12's WPS file) and E.164 numbers up to fifteen.
-// A trigger there would refuse legitimate writes, and an audit write that can be refused is an audit trail
-// with a hole in it — a worse failure than the one being prevented. Those tables get the other mechanism
-// instead: `redactCardData` before every sink, `pnpm saq-a` refusing a payments write that skips it, and a
-// full-text sweep in `apps/web/src/checkout.itest.ts`. Structural where a refusal is safe, scanned where it
-// is not. ADR 0067 records the division.
+// `analytics.session.trading_date_basis` is the other half, and it exists because 0096 made
+// `trading_date` NOT NULL with a real key to `public.business_day`. Trading runs 11:00-02:00, so between
+// 02:00 and 11:00 an instant belongs to NO trading date while web traffic carries on — A-FIRST-02 refused
+// to invent an answer and recorded `Y5-funnel-gap-bucket`, but a row still has to name a date. It names the
+// next date the calendar opens and says WHY, which is 0096's own argument for `attribution.basis` one table
+// over. ZY222 is what makes that structural: `analytics.assert_session_trading_basis` compares `started_at`
+// against that business day's OWN `opens_at` and `closes_at` — not against a re-derived 11:00-02:00, which
+// would disagree with the calendar on exactly the dates somebody overrode the hours for — and refuses the
+// disagreement in BOTH directions, because a writer stamping every row with a gap reason loses the same
+// information as one stamping every row `trading`. The column has NO default, deliberately: `trading` is
+// exactly the value a caller who has not thought about the gap would get, and it would be wrong nine hours
+// out of every twenty-four.
 //
-// `luhn_check()` and `is_card_shaped()` are a second statement of `cardShapedRuns()` in
-// `packages/payments/src/redaction.ts`, because SQL cannot read TypeScript, so the check that holds them
-// equal ships in the same commit: `packages/fixtures/src/card-shape-agreement.itest.ts` drives
-// `CARD_SHAPE_PROBES` — stated once, in that module — through both and requires identical verdicts. The
-// direction the drift would take is the dangerous one: a database still accepting what the request boundary
-// had started refusing, so a test asserting the refusal would be satisfied by the wrong layer.
+// Two figures are second statements and each arrives with the check that holds it equal to the first. The
+// visitor cookie's `Max-Age` is `analytics.raw_retention_days()` in seconds, asserted against the function
+// itself by `apps/web/app/api/collect/collect.itest.ts` — a cookie outliving its own row would present an
+// id naming nothing. And the four words of `trading_date_basis` are also `TRADING_DATE_BASES` in
+// `@berelax/shared`, which `packages/core/src/analytics/ingest.ts` holds equal to `OutsideTradingReason` by
+// a two-way TYPE assertion, so a reason added to the resolver and not to the tuple fails `pnpm typecheck`.
+//
+// No CHECK on `event_name` and none on `bot_kind`: 0096 and A-FIRST-04 each recorded why a list in SQL
+// beside a union in TypeScript is two lists. No customer or booking reference, which is A-FIRST-08's to add
+// with its erasure classification on the same commit. And no `fbp`/`fbc` columns — those cookies exist only
+// once a Meta pixel has run, and the pixel cannot run before consent (A-MEAS-02), so the unit that makes
+// them reachable is the unit that owns them.
 //
 // Every number allocated through 99 has now landed: the run on disk is 1..99 less the permanent gaps above,
 // less 88, which M-TILL-13 released as a permanent gap because every table its screens touch already
@@ -3895,4 +3925,39 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // the last thing before SCHEMA_VERSION, and a merge that wants to add another edits this one instead:
 // `allocation-note.test.ts` is what refuses a second copy, and a second next-free claim in any wording, now
 // that saying so here has failed five times.
+//
+// 117 is 0117_card_shape_refusal.sql — no column a checkout writes may hold text shaped like a card number
+// (Y-PAY-03). One function, `is_card_shaped()`, and one rule, `ZY231`, on `payment_intent.reference`,
+// `payment_intent.idempotency_key`, `payment_intent.gateway_intent_id` and
+// `payment_intent_transaction.gateway_event_id`. No table, no column and no index, so the Drizzle mirror is
+// unchanged and `pnpm db:drift` has nothing new to compare — the file is a refusal and nothing else.
+//
+// Two decisions in it are worth finding here rather than in the file, because both are the kind that gets
+// "simplified" by a later reader.
+//
+// **It is a TRIGGER and not a CHECK constraint, and that is the point of the migration.** A CHECK is the
+// obvious spelling and it is the wrong one: PostgreSQL appends `DETAIL: Failing row contains (…)` to a CHECK
+// violation, so the constraint that kept the card number out of the column would have written it into the
+// server log and from there into wherever logs ship. The guard would have created the disclosure it exists to
+// prevent, on the path everybody agrees is the safe one. A trigger raises a message we write, which names the
+// TABLE and the COLUMN and never the value — and that is also why the refusal needs a private SQLSTATE at
+// all: the prose is deliberately uninformative, so a caller has to be able to branch on the code.
+//
+// **It is deliberately NOT on `audit_event` or `outbox_event`**, which is the version of this rule somebody
+// will propose. `is_card_shaped` reports a 13-to-19-digit Luhn-valid run, and about one arbitrary run in ten
+// of that length is Luhn-valid; those two payloads carry the whole build's data, including a fifteen-digit
+// TRN, an IBAN whose BBAN can be sixteen digits or more (P-HR-12's WPS file) and E.164 numbers up to fifteen.
+// A trigger there would refuse legitimate writes, and an audit write that can be refused is an audit trail
+// with a hole in it — a worse failure than the one being prevented. Those tables get the other mechanism
+// instead: `redactCardData` before every sink, `pnpm saq-a` refusing a payments write that skips it, and a
+// full-text sweep in `apps/web/src/checkout.itest.ts`. Structural where a refusal is safe, scanned where it
+// is not. ADR 0067 records the division.
+//
+// `luhn_check()` and `is_card_shaped()` are a second statement of `cardShapedRuns()` in
+// `packages/payments/src/redaction.ts`, because SQL cannot read TypeScript, so the check that holds them
+// equal ships in the same commit: `packages/fixtures/src/card-shape-agreement.itest.ts` drives
+// `CARD_SHAPE_PROBES` — stated once, in that module — through both and requires identical verdicts. The
+// direction the drift would take is the dangerous one: a database still accepting what the request boundary
+// had started refusing, so a test asserting the refusal would be satisfied by the wrong layer.
+//
 export const SCHEMA_VERSION = 117 as const

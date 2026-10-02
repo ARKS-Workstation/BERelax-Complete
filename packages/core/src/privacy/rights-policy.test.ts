@@ -308,6 +308,7 @@ describe('the erasure rule registry', () => {
       'C-AUTO-07',
       'C-CRM-10',
       'G-REV-02',
+      'G-REV-05',
       'P-HR-11',
       'P-HR-12',
       'W-SITE-10',

@@ -13001,7 +13001,11 @@ units:
       botKind is null by declaration, not by convention — and both suites assert the absence, so it reads as a
       decision rather than a gap.'
     - 'NOTE: deferred — nothing consumes the classifier yet, because none of its consumers exist. The ingest that
-      must set analytics.session.bot and bot_kind from classifyBot is deferred to A-FIRST-05; excluding
+      must set analytics.session.bot and bot_kind from classifyBot is deferred to A-FIRST-05 — DEFERRAL
+      SATISFIED: A-FIRST-05''s route calls classifyBot and writes both columns on the session row, with
+      no branch on the verdict anywhere in it (apps/web/app/api/collect/ingest.test.ts asserts the
+      absence structurally and collect.itest.ts asserts a declared crawler''s events are STORED and
+      flagged); excluding
       bot-flagged sessions from the funnel is deferred to A-FIRST-09; the bot-filtered share on the analytics page
       is deferred to A-FIRST-10, and the same figure on the operations dashboard is deferred to R-REP-07. Each
       must call classifyBot and store its verdict rather than re-deriving a flag — BOT_KINDS and
@@ -13046,7 +13050,7 @@ units:
       the classifier, and the pre-consent rule — no cookie and no identified session before consent, only
       an identifier-free aggregate landing counter so the funnel keeps a denominator.'
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - A-FIRST-01
@@ -13071,11 +13075,159 @@ units:
       is rejected 400 with a named error and no partial write'
     - per-visitor rate limiting returns 429 without writing, proven by firing 200 requests inside a frozen
       second
+    - 'NOTE: what was built beyond the four files this entry listed, and why each edit was needed. (1) The
+      collect WIRE CONTRACT is packages/shared/src/analytics/collect.ts and not packages/core: A-FIRST-06''s
+      browser collector lives in packages/ui, which may reach @berelax/shared and may NOT reach
+      @berelax/core, and @berelax/db writes the columns and may never import core either (ADR 0001) — so a
+      cap the collector does not know about is a cap that silently drops a browser''s whole batch. It holds
+      the caps, the Zod envelope, the device and breakpoint bands and the named refusals.
+      packages/shared/src/analytics/consent-signal.ts is the consent cookie and the four Consent Mode v2
+      signal names, in shared for the same reason: A-MEAS-02''s banner is a client component that has to
+      write it. Both sit under the strict scoped purity treatment (no Date, no Intl), so an event''s instant
+      arrives as an ISO string and is validated by pattern. (2) packages/core/src/analytics/ingest.ts holds
+      the two decisions that are arithmetic over instants — the 30-minute stitch and the request budget —
+      because all three of this unit''s frozen-clock acceptance claims are unmakeable against a function
+      that reads the clock. (3) packages/db/src/collect-ingest.test.ts is new and is the STATIC half of the
+      two refusals: a trigger deleted from the migration is invisible to a database that already has it, so
+      the integration suite would stay green on a tree that no longer creates it (gate case 123e''s shape,
+      one migration over), and pnpm db:conventions cannot cover it because its append-only rule keys on the
+      phrase "UPDATE and DELETE raise" and this counter is deliberately not append-only. It also holds the
+      basis vocabulary equal across the migration, the Drizzle mirror and the shared tuple.
+      (4) apps/web/src/breakpoint-capture.test.ts is new and is the drift check between the analytics
+      breakpoint bands and @berelax/ui''s BREAKPOINTS — apps/web is the only place both are reachable, which
+      is A-FIRST-04''s arrangement for the crawler table — and it holds the device vocabulary equal to
+      session_device_kind_known in all three places it is written. (5) apps/web/src/test-ports.test.ts was
+      widened from apps/web/src to the whole of apps/web: it could not see a suite under apps/web/app at
+      all, so this unit''s band would have been reported as declared-and-unused while the suite was using
+      it. (6) packages/harness/src/ports.ts gains the `collect` band. (7) scripts/test-gates.mjs block
+      144a-144bz, 41 checks. (8) docs/adr/0066, linked in docs/adr/README.md, and Y5-collect-rate-limit in
+      docs/OPEN-QUESTIONS.md.'
+    - 'NOTE: allocations. USED — migration 0116 (SCHEMA_VERSION raised to 116, with a ledger paragraph in
+      packages/db/src/index.ts opening "// 116 is 0116_collect_ingest.sql"), private SQLSTATEs ZY221 and
+      ZY222, gate block `// 144a-144z.` (as 144a-144bz), ADR number 0066, and the test port band
+      { start: 16_400, width: 300 } as `collect`. FREE — ZY223 through ZY230, all eight: nothing else here
+      raises from the database, and an entry for a code no migration raises is refused by pnpm sqlstate.
+      Nothing else was allocated and nothing else was taken.'
+    - 'NOTE: two edits to A-FIRST-01''s files that this unit''s schema change REQUIRED, reported because the
+      convention is to repair nothing beyond that. (a) packages/db/src/analytics.itest.ts: three session
+      fixtures now state trading_date_basis and take their instants from the trading day''s own opens_at,
+      because the column is NOT NULL and ZY222 holds it against business_day''s window — a fixture session
+      whose started_at had nothing to do with its trading_date was always a nonsense row and is now a
+      refused one. A helper `seededTradingDayNear` was added for it, choosing the day NEAREST a wanted
+      instant rather than the day containing it, so the file does not fail depending on what hour of the day
+      the suite runs in. The same file''s exemption list gains pre_consent_landing and its exemption count
+      goes from 400*4 to 400*5. (b) Nothing else in that file or any other unit''s was touched.'
+    - 'NOTE: three defects in this unit''s own work, each named with what caught it. (1) The batch envelope
+      validated the event NAME against the taxonomy''s own enum as well as parseAnalyticsEvent doing it, so
+      an unknown name was refused as `invalid_envelope` and the route''s `unknown_event` refusal became a
+      name nothing could raise — and the answer a tag author needs ("that name is not in the taxonomy, here
+      is the list") was replaced by "your batch is unreadable". Found by collect.itest.ts''s own
+      unknown-event case on its first run. Membership is now decided in exactly one place. (2) Two events
+      posted in one batch shared received_at AND occurred_at, so the only tie-break left was a
+      uuid_generate_v7 whose tail is random within a millisecond — `order by occurred_at, event_id` returned
+      a batch''s events in an order that was not the order they were sent in, and the entry-flag case passed
+      once and failed on the next run. Every fixture event now carries its own instant and the assertion is
+      keyed on a path the case chose. (3) The property test over the rate limiter refused ZERO times in
+      2,000 runs: offsets spread over a million milliseconds put almost nothing inside a 1,000 ms window,
+      and fc.array biases hard towards short arrays, so a maxLength of 200 produced fewer than ten hits
+      against a cap of fifty. The property held for a limiter that never refused anything. Found by the
+      vacuity floor brief rule 22 asks for, which is the whole argument for writing one; the length is now
+      drawn uniformly through a chain, the offsets from twice the window, and the measured refusing share is
+      50.5% against a floor of runs/8.'
+    - 'NOTE: a finding rather than an omission — there is no gate case breaking the `Math.max(1, …)` clamp on
+      Retry-After, because the clamp CANNOT BIND. Every live hit is strictly inside the window, so the oldest
+      frees strictly after the instant asked about, so the quotient is in (0, 1] and Math.ceil of that is 1.
+      Breaking the clamp changes no answer and no check could fire, which is what trying to write the case
+      showed. The clamp stays as the guard for the one edit that would make it reachable — a `<=` in the
+      window filter — and that edit is what gate case 144t breaks, against the half-open assertion that
+      actually holds the answer above zero. Said out loud in the source too, because a clamp that can never
+      bind is otherwise indistinguishable from one that is load-bearing.'
+    - 'NOTE: pre-existing failures this unit did NOT repair, each with the baseline proof the brief asks for.
+      (a) packages/fixtures/src/analytics-privacy.itest.ts fails two cases on
+      `public.google_reviews.reply_lint_content_sha256 [credential]` being unclassified in ERASURE_RULES.
+      That column is migration 0113''s (G-REV-05) and this unit touches neither it nor
+      packages/core/src/privacy/rights-policy.ts. PROVED on a database built from migrations 0001-0113 with
+      0116 deliberately excluded and seeded: the identical two cases fail, naming the identical column, on a
+      database that has never seen this unit''s migration. (b)
+      packages/db/src/sqlstate-registry.test.ts''s "in order" case fails on a single inversion,
+      ZY199 -> ZY181, in a region this unit does not touch. PROVED by reading the registry at the commit
+      this branch started from: the only inversion at HEAD is that pair, and this unit''s two entries sit in
+      sorted position immediately before ZZ001 — which is where they belong in both trees, since main''s fix
+      moves ZY181-ZY185 above ZY191 and leaves ZY199 followed by ZY221.'
+    - 'NOTE: deferred to A-MEAS-02 — the consent RECORD. This unit reads a consent signal off a cookie and
+      owns neither the banner, the wording version, its hash, nor the durable row docs/04 §8 requires. The
+      cookie is the transport of a decision the visitor already made and is explicitly not evidence of it:
+      what it may decide is bounded to whether the visitor''s OWN measurement is stored under an identifier,
+      it authorises no read, names no principal and reaches no other subject''s data — which is the bound
+      that makes a client-supplied value acceptable here and unacceptable for anything an admin session
+      cookie does (ADR 0039), and the same distinction ADR 0062 draws about a user agent.'
+    - 'NOTE: deferred to A-MEAS-02/A-MEAS-03 — Meta''s fbp/fbc, which A-FIRST-03 handed to this unit as
+      first-party COOKIES rather than query parameters. No column was added and none is read, because those
+      cookies exist only once a Meta pixel has run and the pixel cannot run before consent — A-MEAS-02''s own
+      acceptance line is zero requests to connect.facebook.net before a recorded consent. Storing them is
+      gated on ad_user_data, a signal A-MEAS-02 captures and this unit deliberately does not read.'
+    - 'NOTE: deferred to A-FIRST-09 — funnel_step rows. This unit writes analytics.visitor, .session,
+      .attribution, .event and .pre_consent_landing and no funnel step: A-FIRST-09''s own summary is
+      "materialise funnel_step rows from analytics and domain events". What this unit does for it is decide
+      the page_view `entry` flag, which A-FIRST-02 deferred here in so many words — it is overwritten
+      server-side on the session''s first page view, because a browser has never been told which session it
+      is in and a client claiming entry on its fourth page view would give one session four landings.'
+    - 'NOTE: deferred to A-FIRST-09 — which trading date daytime traffic belongs to (Y5-funnel-gap-bucket).
+      This unit could not defer it entirely, because analytics.session.trading_date is NOT NULL with a real
+      key to business_day and trading runs 11:00-02:00, so an instant between 02:00 and 11:00 belongs to no
+      trading date while web traffic carries on. The row is filed under the next date the calendar opens and
+      carries trading_date_basis saying why, enforced in both directions by ZY222 against business_day''s own
+      opens_at and closes_at — so the cohort is visible and re-bucketable rather than silently counted as
+      daytime trade. That is a mechanism, not an answer; the business decision is still open and A-FIRST-09
+      is the unit that has to act on it.'
+    - 'NOTE: scoped — the rate-limit bucket cannot be per-person before consent, and says so. The key is the
+      visitor cookie where there is one; where there is not — every pre-consent request, and the first
+      request of a consented visitor — there is no identifier, so every such request shares one anonymous
+      bucket. An IP address would be a per-person key and is personal data under the PDPL (docs/04 §8), so
+      keeping one per request in order to protect a store that holds no identifiers would be the wrong trade
+      in the wrong direction. The limiter''s state is also per PROCESS: two instances behind a load balancer
+      each allow the budget, which is stated in route.ts, and moving the state changes nothing else because
+      decideCollectRate is pure and takes the hit list as an argument.'
+    - 'NOTE: scoped — a forged visitor cookie. The server owns the identifier space: a presented id is
+      advanced by an UPDATE ... RETURNING, and one naming no row falls through to a freshly generated id, so
+      a purged or invented value becomes a new visitor rather than a row under a client-chosen uuid. A forged
+      id that happens to name a live visitor can still add events to that visitor''s measurement, and that is
+      stated rather than hidden: the cookie authorises no read, so the cost is one polluted session''s figures
+      and never a disclosure. Signing it would need a secret and would defend a measurement store against an
+      attack whose whole payoff is a wrong page-view count.'
+    - 'NOTE: scoped — the pre-consent landing count is the CLIENT''s claim about its own first page view.
+      With no session row there is nothing to measure "first page view of a session" against, and creating
+      one is precisely what consent gates, so the server-side correction it applies to a consented session is
+      not available here. The limitation is bounded: no cookie is ever set on that path, so the figure is a
+      count of ARRIVALS rather than of people — which is what a funnel''s first bucket is — and it is why the
+      consented share of landings has to be a data-quality figure on the analytics page (A-FIRST-10).'
     files:
     - apps/web/app/api/collect/route.ts
     - apps/web/app/api/collect/ingest.ts
-    - packages/db/src/repositories/analytics.ts
+    - apps/web/app/api/collect/ingest.test.ts
     - apps/web/app/api/collect/collect.itest.ts
+    - apps/web/src/breakpoint-capture.test.ts
+    - apps/web/src/test-ports.test.ts
+    - packages/shared/src/analytics/collect.ts
+    - packages/shared/src/analytics/collect.test.ts
+    - packages/shared/src/analytics/consent-signal.ts
+    - packages/shared/src/analytics/consent-signal.test.ts
+    - packages/shared/src/index.ts
+    - packages/core/src/analytics/ingest.ts
+    - packages/core/src/analytics/ingest.test.ts
+    - packages/core/src/analytics/index.ts
+    - packages/db/migrations/0116_collect_ingest.sql
+    - packages/db/src/repositories/analytics.ts
+    - packages/db/src/collect-ingest.test.ts
+    - packages/db/src/schema/analytics.ts
+    - packages/db/src/sqlstate-registry.ts
+    - packages/db/src/index.ts
+    - packages/db/src/analytics.itest.ts
+    - packages/harness/src/ports.ts
+    - scripts/test-gates.mjs
+    - docs/adr/0066-pre-consent-collection-is-a-projection-and-a-session-says-why-its-date-is-its-date.md
+    - docs/adr/README.md
+    - docs/OPEN-QUESTIONS.md
   - id: A-FIRST-06
     order: 109
     title: Typed browser collector and declarative interaction tracking
