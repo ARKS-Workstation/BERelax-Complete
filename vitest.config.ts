@@ -109,6 +109,42 @@ export default defineConfig({
           functions: 95,
           lines: 95,
         },
+        /*
+         * The modules the money invariants rest on, each with a floor of its own (M-VAT-13).
+         *
+         * ## Why they are not covered by the line above
+         *
+         * `packages/core/src/**` is an AGGREGATE over forty-odd directories, and an aggregate hides a
+         * small module inside a large one: `ledger`, `money` and `tax` are about 900 statements of a
+         * 6,500-statement package, so all four of these groups could fall to 70% without moving the
+         * package figure past its floor. And these are the modules nothing else can check: the half-up
+         * rounding rule, the release formula's complement and the expected-float expression each have
+         * exactly one statement and it is HERE, deliberately not restated in SQL — 0026_invoice.sql
+         * argues at length against a generated `vat_total` for that reason. `pnpm money-invariants`
+         * says those modules' tests RAN; only a floor says how much of them they reach.
+         *
+         * `money.ts` is listed beside `money/**` rather than folded into it: `splitGross` is in the FILE
+         * and the per-line derivation is in the DIRECTORY, and the file is the one that defines what
+         * "exact at the fils" means. A glob matching only the directory would leave it to the aggregate.
+         *
+         * ## Why only two dimensions
+         *
+         * M-VAT-13's acceptance line names lines and branches, and it names 95 and 90. Statements and
+         * functions are deliberately left to the `packages/core/src/**` group above, which still counts
+         * every one of these files — vitest computes each glob group independently and the global
+         * thresholds over everything, so a file matching two globs is held by both. Adding a 95% FUNCTION
+         * floor here would have been a tighter gate than the acceptance line asks for on a dimension it
+         * does not mention, and `money.ts` measures 95.45% on it today: one more uncovered function and
+         * the build would fail a threshold nobody asked for, which is how a floor becomes a figure people
+         * edit rather than a floor people meet.
+         *
+         * Measured when written, so the headroom is a fact rather than a hope: ledger 100.00% lines /
+         * 97.24% branches, money.ts 98.18/100.00, money/ 98.99/96.92, tax 98.23/93.90.
+         */
+        'packages/core/src/ledger/**': { branches: 90, lines: 95 },
+        'packages/core/src/money.ts': { branches: 90, lines: 95 },
+        'packages/core/src/money/**': { branches: 90, lines: 95 },
+        'packages/core/src/tax/**': { branches: 90, lines: 95 },
       },
     },
   },

@@ -48791,6 +48791,536 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 152a-152z. (M-VAT-13) The money invariant suite: every one of the seven claims shown to be able to
+//            stop being made, every rule that CAN be broken by a file edit shown to come back by the
+//            name of the test that states it, and the four coverage floors shown to fire.
+//
+//            The unit's acceptance lines are about WIRING, and that is why almost nothing here is a new
+//            assertion about money. Each of the seven invariants was already proved in the only place it
+//            can be — `net + vat === gross` as a property over generated amounts, `UPDATE on
+//            journal_line raises ZL001` only against real PostgreSQL, the exhaustive partition only over
+//            a closed period with documents behind it. What was missing is that nothing said the seven
+//            are a SET: each test was reachable only through a GLOB, so deleting one, renaming it, or
+//            wrapping it in `describe.skip` made the run one test shorter and nothing anywhere said
+//            which claim had stopped being made. That is ADR 0002's shape applied to the seven claims a
+//            tax authority asks about, and `MONEY_INVARIANTS` in `vitest.integration.config.ts` plus
+//            `scripts/money-invariants.mjs` are the fix.
+//
+//            So the cases come in four groups and each fails in a way the other three cannot see:
+//
+//              * **the registry can stop resolving.** 152a to 152j break one marker clause at a time,
+//                the id list, an invariant's whole test list, and a registered file path. Every one of
+//                them is refused by a FILE READ before any runner starts, which is what makes a renamed
+//                test cost a second rather than the suite.
+//              * **a test can be present and examine nothing.** 152k is the case the static half cannot
+//                see at all: the clause is in the file, the file runs, the runner exits zero, and the
+//                test was SKIPPED. It is why the count comes from the runner's own JSON report and not
+//                from a grep, and the first version of this check — a grep — passed over it.
+//              * **the rule itself can break.** 152l proves a FALSE invariant fails the runner and not
+//                only the file it lives in; 152m to 152s break the ONE statement each invariant rests
+//                on and require the named test back BY NAME (ADR 0003). Six are a file edit;
+//                152o is not, because `refuse_journal_change()` is a trigger plus a revoke that a
+//                migration has already applied, so the only way to see that gate fail is to DISABLE the
+//                trigger in the database and put it back in a `finally`. If a run of this block is
+//                killed between those two statements, `alter table journal_line enable trigger
+//                journal_line_no_update` is the recovery — stated here because brief rule 13 is about
+//                exactly that hazard.
+//              * **the wiring.** 152t to 152x: the four coverage floors shown to fire, the step shown to
+//                be in the chain, in case 29's array and in the workflow, its position after the
+//                migrated and seeded database shown to be load-bearing with a fixture that moves it,
+//                and every path the registry names shown to exist.
+//
+//            152y and 152z are the controls: every case above is satisfied by something FAILING, so two
+//            have to be satisfied by the real tree. 152y runs the runner over all nine registered files
+//            unedited; 152z proves the four coverage globs match real source, because istanbul reports an
+//            EMPTY coverage map as 100% and a glob with a typo in it is therefore a floor that can never
+//            fail. Whether the tree is ABOVE those floors is `pnpm coverage`'s own step in the chain —
+//            152z says why it is not re-run here.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const CONFIG = 'vitest.integration.config.ts'
+  const UNIT_CONFIG = 'vitest.config.ts'
+  const PKG = 'package.json'
+  const WORKFLOW = '.github/workflows/ci.yml'
+  const GATES = 'scripts/test-gates.mjs'
+
+  const JOURNAL_ITEST = 'packages/db/src/repositories/journal.itest.ts'
+  const NUMBERING_ITEST = 'packages/db/src/repositories/numbering.itest.ts'
+  const CASH_UP_ITEST = 'packages/fixtures/src/cash-up.itest.ts'
+  const LIABILITY_ITEST = 'packages/fixtures/src/package-liability.itest.ts'
+  const VAT201_ITEST = 'packages/fixtures/src/vat201.itest.ts'
+
+  const runner = () => ['money-invariants']
+  const oneFile = (config, file) => ['exec', 'vitest', 'run', '-c', config, file]
+
+  /** The runner's static half refuses before any vitest starts, so these cases cost a file read. */
+  const brokenRegistry = (edit) =>
+    withEditedFile(CONFIG, edit, () => runExpectingFailure('pnpm', runner()))
+
+  // ---- the registry can stop resolving ---------------------------------------------------------
+
+  // 152a-152g. One marker clause per invariant, re-pointed at a name no test has. This is the RENAME
+  //            case, and it is the one that would otherwise be silent: the test still exists, still
+  //            passes, and no longer answers the question the registry asked it.
+  const MARKERS = [
+    [
+      'LEDGER_BALANCES',
+      'accepts each line insert and fails the COMMIT when they do not sum to zero',
+    ],
+    ['VAT_ROUND_TRIP', 'net + vat === gross, exactly, for every gross amount'],
+    [
+      'JOURNAL_APPEND_ONLY',
+      'UPDATE and DELETE on journal_line raise ZL001 with the named trigger message',
+    ],
+    [
+      'NUMBERING_GAP_FREE',
+      'finds nothing across 10,000 issued documents, with rollbacks in the middle',
+    ],
+    ['PACKAGE_LIABILITY_IDENTITY', 'ties the sum of remaining package value to 2050, to the fils'],
+    [
+      'CASH_SESSION_BUSINESS_DAY',
+      'reconciles the session to the sum of the cash payment rows, exact to the fils',
+    ],
+    ['VAT_BOX_PARTITION', 'attributes every journal line in the return month exactly once'],
+  ]
+  for (const [id, marker] of MARKERS) {
+    checkRejectedBy(
+      `money invariants: ${id}'s marker re-pointed at a name no test has is refused by name`,
+      // The anchor is the quoted clause ALONE and not `nameContains: '…'`, because Biome wraps a long
+      // property onto its own line and three of the thirteen markers are long enough to be wrapped.
+      // `replaceOnce` found that for us: it refused the composite anchor by name rather than editing
+      // nothing and reporting PASS (brief rule 20).
+      brokenRegistry((source) =>
+        replaceOnce(source, `'${marker}'`, `'${marker} — RENAMED BY GATE FIXTURE 152'`),
+      ),
+      `[money-invariant-unresolved] ${id}`,
+    )
+  }
+
+  // 152h. The id list held to M-VAT-13's acceptance line. Removing a claim from the registry is the
+  //       cheapest way to make the step green, so it is the one the runner's own control refuses first —
+  //       before it reads a file or starts a runner, because a difference against a shorter list is a
+  //       smaller difference and would otherwise report success.
+  checkRejectedBy(
+    'money invariants: a claim deleted from the registry is refused against the acceptance line',
+    brokenRegistry((source) =>
+      replaceOnce(
+        source,
+        "    id: 'VAT_BOX_PARTITION',",
+        "    id: 'VAT_BOX_PARTITION_RENAMED_BY_GATE_FIXTURE_152',",
+      ),
+    ),
+    '[money-invariant-registry-incomplete]',
+  )
+
+  // 152i. An invariant registered with NO test at all. Different from 152a: the marker is not stale, it
+  //       is absent, and a loop over an empty list examines nothing without reporting anything.
+  checkRejectedBy(
+    'money invariants: an invariant that registers no test at all is refused by name',
+    brokenRegistry((source) =>
+      replaceOnce(
+        source,
+        `    tests: [
+      {
+        config: 'integration',
+        file: '${NUMBERING_ITEST}',
+        nameContains: 'finds nothing across 10,000 issued documents, with rollbacks in the middle',
+      },
+    ],`,
+        '    tests: [],',
+      ),
+    ),
+    '[money-invariant-unresolved] NUMBERING_GAP_FREE',
+  )
+
+  // 152j. A registered file that is not on disk. A file MOVED by a later unit presents exactly like a
+  //       claim that was deleted, and the refusal has to come before vitest — which would otherwise
+  //       report "no test files found", a message about the runner rather than about the claim.
+  checkRejectedBy(
+    'money invariants: a registered file that is not on disk is refused by name',
+    brokenRegistry((source) =>
+      replaceOnce(
+        source,
+        `file: '${VAT201_ITEST}'`,
+        "file: 'packages/fixtures/src/__gate_fixture_152__.itest.ts'",
+      ),
+    ),
+    '[money-invariant-unresolved] VAT_BOX_PARTITION',
+  )
+
+  // ---- a test can be present and examine nothing -----------------------------------------------
+
+  // 152k. The case the static half cannot see. `it.skip` leaves the clause in the file, the file in the
+  //       run and the runner's exit code at zero — so a grep for the clause passes, and the claim was
+  //       not examined. The count therefore comes from the runner's JSON report, where a skipped test
+  //       carries `status: 'skipped'` and is not counted as passed.
+  //
+  //       Measured rather than assumed: a `--reporter=json` run of this file with the property skipped
+  //       reports `skipped | splitGross — properties net + vat === gross, …`, which is why this is a
+  //       case and not a comment.
+  checkRejectedBy(
+    'money invariants: a registered test that is SKIPPED at run time is refused as examining nothing',
+    withEditedFile(
+      'packages/core/src/money.test.ts',
+      (source) =>
+        replaceOnce(
+          source,
+          "  it('net + vat === gross, exactly, for every gross amount', () => {",
+          "  it.skip('net + vat === gross, exactly, for every gross amount', () => {",
+        ),
+      () => runExpectingFailure('pnpm', runner()),
+    ),
+    '[money-invariant-examined-nothing] VAT_ROUND_TRIP',
+  )
+
+  // ---- the rule itself can break ---------------------------------------------------------------
+
+  /** Breaks one line of a shipped module and requires the test written for it back BY NAME. */
+  const breakAndExpect = (name, file, find, into, config, testFile, rule) => {
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        file,
+        (source) => replaceOnce(source, find, into),
+        () => runExpectingFailure('pnpm', oneFile(config, testFile)),
+      ),
+      rule,
+    )
+  }
+
+  // 152l. The runner's own failure wrapper. 152m to 152s run ONE file each, because that is cheap and
+  //       the rule's own test is what has to fire; this case is the other claim — that a money invariant
+  //       which is FALSE fails `pnpm money-invariants` itself rather than being reported as resolved.
+  checkRejectedBy(
+    'money invariants: a false invariant fails the runner, not only the file it lives in',
+    withEditedFile(
+      'packages/core/src/ledger/entry.ts',
+      (source) =>
+        replaceOnce(
+          source,
+          '  if (debits !== credits) throw new UnbalancedEntry(id, debits, credits)',
+          '  if (false) throw new UnbalancedEntry(id, debits, credits)',
+        ),
+      () => runExpectingFailure('pnpm', runner()),
+    ),
+    '[money-invariant-failed]',
+  )
+
+  // 152m. LEDGER_BALANCES in `@berelax/core`. `postEntry` refusing an unbalanced draft is the half that
+  //       stops a bad entry being BUILT; the database's ZL003 at COMMIT is the half that stops one being
+  //       written by anything else. Blind the first and the test named for it must fire.
+  breakAndExpect(
+    'money invariants: postEntry that returns an unbalanced entry fails its named test',
+    'packages/core/src/ledger/entry.ts',
+    '  if (debits !== credits) throw new UnbalancedEntry(id, debits, credits)',
+    '  if (false) throw new UnbalancedEntry(id, debits, credits)',
+    UNIT_CONFIG,
+    'packages/core/src/ledger/entry.test.ts',
+    'throws UnbalancedEntry rather than returning a value',
+  )
+
+  // 152n. VAT_ROUND_TRIP. ADR 0007's whole content is that VAT is the REMAINDER: `gross - net`, never a
+  //       second rounding. The fixture is the error a spreadsheet makes — five per cent OF THE GROSS,
+  //       which treats a VAT-inclusive figure as if it were net — and `net + vat === gross` then fails
+  //       for almost every amount: at 10 fils it claims 10 net and 1 VAT.
+  //
+  //       The first version of this fixture rounded the VAT independently at the inclusive rate, and it
+  //       was a NO-OP: for `a = g*20/21` and `b = g/21` the fractions sum to 0 or 1, and both can only
+  //       round up if each is exactly 0.5, which needs `2g = 21(2n+1)` — even equals odd, so never. The
+  //       case reported FAIL about a gate that was fine, which is the arithmetic a fixture author has to
+  //       do rather than assume.
+  breakAndExpect(
+    'money invariants: VAT taken as five per cent of the GROSS rather than as the remainder fails its named test',
+    'packages/core/src/money.ts',
+    '  const vat: Money = { fils: filsFrom(gross.fils - netFils), currency: gross.currency }',
+    '  const vat: Money = {\n    fils: filsFrom(roundHalfUp((gross.fils * rateBp) / 10_000)),\n    currency: gross.currency,\n  }',
+    UNIT_CONFIG,
+    'packages/core/src/money.test.ts',
+    'net + vat === gross, exactly, for every gross amount',
+  )
+
+  // 152o. JOURNAL_APPEND_ONLY, and the one case in this block that is not a file edit: the rule is
+  //       `refuse_journal_change()` plus a revoke, applied to the DATABASE by migration 0018, so there
+  //       is no source line whose breaking it would show. Disabling the trigger is the only way to see
+  //       this gate fail — `tgenabled` goes to 'D' and the trigger stays in the catalogue, which is
+  //       precisely why a check that only asked whether the trigger EXISTS would pass here.
+  //
+  //       Restored in a `finally`. If a run is killed in between, the recovery is
+  //       `alter table journal_line enable trigger journal_line_no_update`.
+  {
+    const url = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL']
+    if (!url) {
+      throw new Error(
+        'TEST_DATABASE_URL or DATABASE_URL is required for gate case 152o: the append-only rule is a ' +
+          'trigger in the database, so the only known-bad fixture for it is a disabled trigger. This ' +
+          'case must not be skipped — a gate nobody has seen fail may not be a gate (ADR 0003).',
+      )
+    }
+    const trigger = (action) =>
+      execFileSync(
+        'psql',
+        [
+          '--no-psqlrc',
+          '-v',
+          'ON_ERROR_STOP=1',
+          '-q',
+          url,
+          '-c',
+          `alter table journal_line ${action} trigger journal_line_no_update`,
+        ],
+        CHILD,
+      )
+    trigger('disable')
+    let refused
+    try {
+      refused = runExpectingFailure('pnpm', oneFile(CONFIG, JOURNAL_ITEST))
+    } finally {
+      trigger('enable')
+    }
+    checkRejectedBy(
+      'money invariants: journal_line with its UPDATE refusal disabled fails its named test',
+      refused,
+      'UPDATE and DELETE on journal_line raise ZL001 with the named trigger message',
+    )
+  }
+
+  // 152p. NUMBERING_GAP_FREE. The gap report is `number - row_number() over (partition … order by
+  //       number)`, constant inside a contiguous run and zero for a range starting at 1. Order the
+  //       window the other way and the offset is non-zero for every row, so the report invents gaps in
+  //       a range that has none — the direction that matters, because a report that could only ever
+  //       find nothing is satisfied by a range nobody numbered.
+  breakAndExpect(
+    'money invariants: a gap report whose window is ordered backwards fails its named test',
+    'packages/db/src/repositories/numbering.ts',
+    'partition by series_code, period_key order by number\n',
+    'partition by series_code, period_key order by number desc\n',
+    CONFIG,
+    NUMBERING_ITEST,
+    'finds nothing across 10,000 issued documents, with rollbacks in the middle',
+  )
+
+  // 152q. PACKAGE_LIABILITY_IDENTITY. The outstanding figure is `price - releaseThrough(...)`, and the
+  //       defect worth refusing is the one the test's own control names: crediting the WHOLE
+  //       consideration, which puts sessions already delivered back on the liability account.
+  breakAndExpect(
+    'money invariants: an opening liability credited at the whole consideration fails its named test',
+    'packages/core/src/ledger/opening-package-liability.ts',
+    '    outstanding: money(filsFrom(pricePaid.fils - consumed.fils), pricePaid.currency),',
+    '    outstanding: pricePaid,',
+    CONFIG,
+    LIABILITY_ITEST,
+    'ties the sum of remaining package value to 2050, to the fils',
+  )
+
+  // 152r. CASH_SESSION_BUSINESS_DAY. `expectedFloat` is one expression and the database's generated
+  //       column is the other; the suite compares them. Add the change given instead of subtracting it
+  //       and the two disagree by twice the change, which is the sign defect a reviewer reads past.
+  breakAndExpect(
+    'money invariants: an expected float that adds the change given fails its named test',
+    'packages/core/src/money/cash-up.ts',
+    '    takings.cashReceivedFils -\n    takings.changeGivenFils -',
+    '    takings.cashReceivedFils +\n    takings.changeGivenFils -',
+    CONFIG,
+    CASH_UP_ITEST,
+    'reconciles the session to the sum of the cash payment rows, exact to the fils',
+  )
+
+  // 152s. VAT_BOX_PARTITION. The census is seven counts out of one SQL function, and the reader is held
+  //       to that function's columns: read `boxed` where `lines_distinct` was meant and the partition
+  //       looks short by every out-of-scope line. A column renamed in the migration produces exactly
+  //       this, and nothing but the partition test would say so.
+  breakAndExpect(
+    'money invariants: a partition census reading the wrong column fails its named test',
+    'packages/db/src/queries/vat201-working-papers.ts',
+    '    linesDistinct: Number(row.lines_distinct),',
+    '    linesDistinct: Number(row.boxed),',
+    CONFIG,
+    VAT201_ITEST,
+    'attributes every journal line in the return month exactly once',
+  )
+
+  // ---- the wiring ------------------------------------------------------------------------------
+
+  // 152t. The three coverage floors FIRE, and they are not vacuous. A coverage run that does not
+  //       execute the money tests must fail naming each group, and the figure it reports is what proves
+  //       the glob matched files at all: istanbul's summary of an EMPTY coverage map is 0/0, which it
+  //       reports as 100% and which would therefore PASS every threshold. A group reading 0% has files
+  //       in it.
+  {
+    const uncovered = runExpectingFailure('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      UNIT_CONFIG,
+      '--coverage.enabled',
+      'packages/core/src/assert-never.test.ts',
+    ])
+    for (const group of [
+      'packages/core/src/ledger/**',
+      'packages/core/src/money.ts',
+      'packages/core/src/money/**',
+      'packages/core/src/tax/**',
+    ]) {
+      checkRejectedBy(
+        `money invariants: the coverage floor on ${group} fires over a run that did not exercise it`,
+        uncovered,
+        `does not meet "${group}" threshold`,
+      )
+    }
+  }
+
+  // 152u. The step is in the chain, registered in case 29's array, and present in the workflow. All
+  //       three, because each absence is a different loss: out of the chain and no unit runs it, out of
+  //       the array and `pnpm gate-registry` stops noticing it was dropped from CI, out of the workflow
+  //       and CI never ran it.
+  {
+    const chain = JSON.parse(readFileSync(PKG, 'utf8'))
+      .scripts.verify.split('&&')
+      .map((s) => s.trim())
+    const gates = readFileSync(GATES, 'utf8')
+    const workflow = readFileSync(WORKFLOW, 'utf8')
+    check(
+      'money invariants: the step is in the verify chain, in case 29 and in the workflow',
+      chain.includes('pnpm money-invariants') &&
+        gates.includes("'pnpm money-invariants',") &&
+        workflow.includes('run: pnpm money-invariants'),
+      `chain: ${chain.includes('pnpm money-invariants')}, case 29: ${gates.includes("'pnpm money-invariants',")}, ` +
+        `workflow: ${workflow.includes('run: pnpm money-invariants')}`,
+    )
+  }
+
+  // 152v and 152w. The step runs AFTER the migrated and seeded database exists, and that is
+  //               load-bearing rather than tidy: six of the nine registered files are integration tests,
+  //               which do not skip when the database is absent — they fail. Before `pnpm db:apply` the
+  //               schema is empty and before `pnpm seed` the fixture salon is not there, and either
+  //               failure reads as a money invariant that is false.
+  {
+    const orderHolds = (workflow) => {
+      const money = workflow.indexOf('run: pnpm money-invariants')
+      const apply = workflow.indexOf('run: pnpm db:apply')
+      const seed = workflow.indexOf('run: pnpm seed')
+      return money > apply && money > seed && apply !== -1 && seed !== -1 && money !== -1
+    }
+    check(
+      'money invariants: the CI step runs after the database is migrated and seeded',
+      orderHolds(readFileSync(WORKFLOW, 'utf8')),
+      'the money-invariants step does not come after both `pnpm db:apply` and `pnpm seed` in the ' +
+        'workflow, so its integration files would run against a schema or a salon that is not there',
+    )
+    // The control: the order check has to be able to say no. Move the step to the top of the job and the
+    // predicate must refuse it, or 152v is satisfied by a workflow in any order at all.
+    const moved = withEditedFile(
+      WORKFLOW,
+      (source) =>
+        replaceOnce(
+          source,
+          '      - name: Lint and format\n        run: pnpm lint\n',
+          '      - name: Money invariants planted by gate fixture 152w\n        run: pnpm money-invariants\n\n' +
+            '      - name: Lint and format\n        run: pnpm lint\n',
+        ),
+      () => orderHolds(readFileSync(WORKFLOW, 'utf8')),
+    )
+    check(
+      'money invariants: and the order check refuses the step moved ahead of the database steps',
+      moved === false,
+      'the order check still held with the money-invariants step planted before `pnpm db:apply`, so it ' +
+        'is reading something other than the order',
+    )
+  }
+
+  // 152x. Every path the registry names exists. `oneStatement` is prose a reader follows to the rule,
+  //       and prose pointing at a file somebody moved is worse than no pointer: it reads as a rule that
+  //       is stated somewhere. The scan is over the whole config because the registry is nearly all of
+  //       it, and the one path outside it — the seeded-rows global setup — is a path for the same reason.
+  {
+    const paths = (text) =>
+      [...text.matchAll(/packages\/[A-Za-z0-9_\-/.]+\.(?:ts|sql)/g)].map((m) => m[0])
+    const declared = paths(readFileSync(CONFIG, 'utf8'))
+    const missing = declared.filter((path) => !existsSync(path))
+    check(
+      'money invariants: every packages/ path the registry names is on disk',
+      declared.length >= 12 && missing.length === 0,
+      declared.length < 12
+        ? `the scan found only ${declared.length} path(s) in ${CONFIG}, so it is not reading the registry`
+        : `missing: ${missing.join(', ')}`,
+    )
+    // The control: a planted path must be found. Without this the scan is satisfied by a pattern that
+    // matches nothing, which is the shape ADR 0002 is about.
+    const planted = withEditedFile(
+      CONFIG,
+      (source) =>
+        replaceOnce(
+          source,
+          'export const MONEY_INVARIANTS',
+          "const GATE_FIXTURE_152 = 'packages/core/src/__gate_fixture_152__.ts'\n\nexport const MONEY_INVARIANTS",
+        ),
+      () => paths(readFileSync(CONFIG, 'utf8')).filter((path) => !existsSync(path)),
+    )
+    check(
+      'money invariants: and the path scan sees a planted path that is not on disk',
+      planted.includes('packages/core/src/__gate_fixture_152__.ts'),
+      `the scan found ${planted.length} missing path(s) in a file that had one planted in it, so it ` +
+        'would pass over the defect it exists to refuse',
+    )
+  }
+
+  // ---- the controls ----------------------------------------------------------------------------
+
+  // 152y. Every case above is satisfied by something failing, so this one is satisfied by the real tree
+  //       passing: the registry resolves, both runners exit zero, and every one of the thirteen markers
+  //       matched at least one PASSED test.
+  {
+    const real = run('pnpm', runner())
+    check(
+      'money invariants: the registry resolves and all seven invariants are examined over the real tree',
+      !real.failed,
+      real.output,
+    )
+  }
+
+  // 152z. And every coverage glob matches real, non-test source. Istanbul's summary of an EMPTY coverage
+  //       map is 0/0, which it reports as 100% and which therefore PASSES every threshold — so a glob
+  //       with a typo in it is a floor that can never fail, and nothing else in this file would say so.
+  //
+  //       This is deliberately NOT a second `pnpm coverage` run, and the reason is measured. The first
+  //       version of this case ran one, and it failed: `packages/core/src/hr/gratuity.property.test.ts`
+  //       timed out at its explicit 30,000 ms after 46,121 ms on a four-core container with three other
+  //       worktrees verifying, so the case reported on the machine rather than on the floors (brief rules
+  //       21 and 23) and the coverage summary was never reached. Scoping the run to the money test files
+  //       instead does not work either, and that is worth knowing: `money.ts` measures 98.18% lines over
+  //       the WHOLE unit suite and 90.90% over the money files alone, because `splitGross` is reached
+  //       from pricing and checkout as well. So "the floors are MET" is `pnpm coverage`'s own step in the
+  //       chain, which is the arbiter (brief rule 1), and this block's job is that the floors FIRE —
+  //       152t — and that they are not vacuous, which is here. Measured when written: ledger 100.00%
+  //       lines / 97.24% branches, money.ts 98.18/100.00, money/ 98.99/96.92, tax 98.23/93.90.
+  {
+    const SOURCE = (path) => path.endsWith('.ts') && !path.endsWith('.test.ts')
+    const groups = [
+      'packages/core/src/ledger/**',
+      'packages/core/src/money.ts',
+      'packages/core/src/money/**',
+      'packages/core/src/tax/**',
+    ]
+    const matched = groups.map((glob) => [glob, globSync(glob).filter(SOURCE).length])
+    const empty = matched.filter(([, count]) => count === 0).map(([glob]) => glob)
+    check(
+      'money invariants: every money coverage glob matches non-test source, so no floor is vacuous',
+      empty.length === 0,
+      `these glob(s) matched no non-test source file, so their threshold is satisfied by 0/0 and can ` +
+        `never fail: ${empty.join(', ')}`,
+    )
+    // The control: a glob with a typo in it must come back empty, or the check above is satisfied by
+    // anything at all.
+    check(
+      'money invariants: and a glob with a typo in it is seen to match nothing',
+      globSync('packages/core/src/mony/**').filter(SOURCE).length === 0,
+      'a deliberately misspelled glob matched source files, so the emptiness test is not reading the glob',
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -49667,6 +50197,12 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     // that breaks it; this list is only about presence.
     'pnpm seed',
     'pnpm test:integration',
+    // M-VAT-13's money-invariant census, in the position `pnpm verify` runs it: immediately after the
+    // integration suite, because that is what writes the money estate the census examines. Registered
+    // here because that is what makes dropping it from CI a failing build rather than the silent loss of
+    // the one check that re-adds every money identity over every row the database holds, rather than over
+    // the rows one unit's own fixture wrote. Its POSITION is asserted separately, in the 152a-152z block.
+    'pnpm money-invariants',
     'pnpm db:migrate:dry',
     'pnpm db:drift',
     'pnpm db:conventions',
