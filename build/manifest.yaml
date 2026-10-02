@@ -13987,7 +13987,7 @@ units:
       cost, discount leakage, labour cost % and break-even, each a registered pure function with an explicit
       formula.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - M-TILL-01
@@ -14023,11 +14023,131 @@ units:
       zero sales returns NoData, never 0'
     - labour cost % uses net revenue as its denominator and excludes tips from its numerator, asserted on
       a fixture containing tips
+    - 'NOTE: the figure this unit is named for CANNOT be computed from this build''s data, and ADR 0070
+      records why at length. "Net price minus attributable therapist cost, consumables, room consumables
+      and payment fees" has one term that exists and three that do not. The net price is a snapshot and is
+      read from the row that recognised it. The therapist cost has two paths and neither has a figure:
+      P-HR-11''s commission is per appointment, which is exactly the right grain, but the module ships
+      disabled with no published rule version (Y9-commission) so there are no lines; and
+      employee.basic_wage_fils is NULL for all nineteen employment records (Y8-staff), so no wage can be
+      attributed either — and a monthly salary is a cost of the MONTH, so turning one into a per-treatment
+      figure needs a basis nobody has stated. Consumables and room consumables are recorded NOWHERE per
+      service: the ledger holds the period total on 6030 and there is no bill of materials, no product per
+      service and no room cost. So a cost component is measured, none_by_construction or unattributable,
+      and 0 is NOT one of those states — a zero reports the HIGHEST possible margin on the screen
+      somebody prices from, which is the failure rota_version.forecast_unpriced_employees already measured
+      ("a forecast over a rota where no wage is recorded is 0 fils and reads as a free rota", and all
+      nineteen seeded employees are in exactly that state). contributionMarginUnit therefore refuses a
+      cost list that does not state every component exactly once, and returns not_attributable naming the
+      components and the open questions rather than a larger margin.'
+    - 'NOTE: a pro-rata allocation of the period totals was REFUSED rather than overlooked. 6030 divided by
+      treatments delivered, 5010 divided by treatment minutes and 6080 divided by card turnover are each
+      one line of arithmetic and each a POLICY DECISION disguised as a calculation: the basis decides which
+      services look profitable, and the output of this unit is a ranking somebody prices from. ADR 0064
+      rejected a pro-rata split inside the cash flow for the narrower version of this reason. The figures,
+      and the basis, are the new Y9-unit-cost-basis row in docs/OPEN-QUESTIONS.md; the mechanism is here
+      and is asserted to the fils against hand-computed fixtures for one Asian and one Arabic variant, as
+      the acceptance line asks.'
+    - 'NOTE: the payment fee is the one component with a real answer for part of the population, and it is
+      DERIVED rather than stated. A tender debited to a clearing account (1040 card terminal, 1030 gateway)
+      is one a processor settles in a batch net of fees — 0068_payment_tender.sql''s own reason for
+      card_in_salon debiting 1040 rather than the bank — so cash and bank_transfer are
+      none_by_construction (there is no acquirer, which is a fact) and the two card tenders are
+      unattributable against the new Y7-card-fee row. The classifier reads TENDER_ACCOUNT rather than
+      listing the tenders, so a kind added to TENDER_KINDS is classified by construction and a future
+      gateway type cannot default to fee-free. THE PROVISIONAL 250 bps IN THIS ENTRY''S provisional: LINE
+      WAS REFUSED under brief rule 15: a plausible rate is indistinguishable from a contracted one in the
+      one place every margin reads it. Likewise the provisional "therapist cost = treatment_minutes / 60 x
+      attributable hourly cost": the wage it divides does not exist for any employee.'
+    - 'NOTE: break-even and the contribution margin ratio answer no_data, naming variableCostFils and
+      fixedCostFils, because NOTHING in this build classifies an expense account as fixed or variable —
+      account carries type, normalBalance, contra, vatBox and inputVatRecoverable and no cost behaviour.
+      The split is not arithmetic (6020 Utilities is semi-variable; 5010 Therapist wages is fixed for
+      nineteen salaried staff and variable under a commission structure nobody has published), and unlike
+      R-REP-02''s statement layout — which is checkable against the chart in both directions and visible on
+      the artefact — a cost behaviour is INVISIBLE in the figure it produces. It is the fourth part of
+      Y9-unit-cost-basis.'
+    - 'NOTE: discount_leakage ties exactly to invoice_line rows WITHOUT a new column, and the pair of
+      figures is worth stating. The charged gross is invoice_line.unit_gross_fils x quantity, generated in
+      the database; the list gross is appointment.gross_price_fils reached through invoice_appointment,
+      which serviceLineFromAppointment copies "field for field" into the basket line the till then
+      discounts. So the difference is the TILL discount, exact to the fils. Two limits are reported rather
+      than smoothed: a line that bills no appointment has no snapshotted list gross and makes the figure
+      not_attributable rather than contributing zero; and a price reduced by a price_list row or a
+      promotion is already inside appointment.gross_price_fils, whose own list price is snapshotted nowhere
+      (dim_service.list_gross_fils is the price TODAY, migration 0110), so a campaign menu is invisible to
+      this figure and kpiDiscountCoverage counts the deliveries in that state. DEFERRED TO R-REP-07: its
+      data-quality check over discount leakage must read the coverage counts and mark the tile
+      unreconciled when a campaign-priced delivery is in the window, rather than showing a figure that
+      means less than its label.'
+    - 'NOTE: this unit builds NO KPI registry. R-REP-03 owns kpi-registry.ts and was in flight in another
+      worktree while this was written, so OPERATIONAL_KPI_DEFINITIONS is a frozen Record over a closed
+      union of eight ids with NO lookup function and NO mutation — a set to be REGISTERED, not a registry.
+      Each definition carries the same pure function the typed export is, plus the adaptation from one
+      figures bag (PeriodFigures) to a KpiOutcome, which is the part a registry cannot write for eight
+      different shapes. SEAM FOR R-REP-03: register these eight through OPERATIONAL_KPI_DEFINITIONS and
+      call assertKpiDefinitions() (or kpiDefinitionFindings(), which returns all of them) from the registry
+      test — every definition already carries a non-empty formula, a grain and the figures it reads, and
+      the five rules in KPI_DEFINITION_RULES are each broken by a case in gate block 148. If R-REP-03 has
+      defined its own outcome union, the two must be COLLAPSED onto one at the merge rather than coexisting
+      (a second statement of a fact drifts); ADR 0070 states the four states it must have and why zero is
+      not one of them.'
+    - 'NOTE: the suite the files list implies — a pure test only — cannot assert three of the acceptance
+      lines, so packages/fixtures/src/contribution-margin.itest.ts is added to this unit''s files. Its
+      reason is R-REP-02''s verbatim: packages/db may never import packages/core (ADR 0001), the arithmetic
+      is core''s and the rows are db''s, and fixtures is the one package allowed to depend on both. It
+      proves what a pure test cannot reach: that a redemption''s revenue is its own snapshot AFTER a new
+      template version at a different price has been published, that the leakage figure ties to the
+      invoice_line rows, and that the therapist cost is MEASURED to be unavailable (zero published
+      commission rule versions, every delivering employee unpriced) rather than asserted to be.'
+    - 'NOTE: the suite reserves the whole of trading year 2075 and takes the first day with no business_day
+      row, because invoice, invoice_line, journal_entry and package_redemption all refuse DELETE for every
+      role and a fixed day would double every figure on a second run (R-REP-02''s arrangement over
+      2250-2299). TWO DEFECTS IN THIS UNIT''S OWN WORK WERE FOUND THAT WAY AND BOTH WOULD HAVE FAILED
+      ANOTHER UNIT''S FILE. (1) The first version used 2097-02, and TAX-INV resets ANNUALLY: four runs took
+      TI-2097-00001 through 00004, and packages/db/src/services/issue-credit-note.itest.ts asserts
+      displayNumber === "TI-2097-00001". The year is now one nothing in the repository claims. (2)
+      allocate_document_number sets next_number = 2 whenever the period_key CHANGES (0013), so a run in
+      2075, then any other suite issuing in its own probe year, then a second run here, resets the counter
+      to 1 and collides with TI-2075-00001 on invoice_display_number_unique — with a message about a
+      display number and nothing about ordering. The suite therefore aligns the counter to one past the
+      highest number the series has issued in its own period before allocating, which is idempotent and is
+      what issue-credit-note.itest.ts already does in its beforeEach. Verified by resetting the counter to
+      a different period by hand between two runs.'
+    - 'NOTE: a KPI period is bounded on THREE different columns and that is deliberate — a delivery on
+      appointment.trading_date, a tax document on invoice.tax_point_date, a ledger position on
+      journal_entry.entry_date, which has no foreign key to business_day because the journal must record
+      the rent for a month containing days the premises were shut (ADR 0064). Net revenue is therefore the
+      DOCUMENTS'' net (invoices less credit notes over their tax points, the quantity fact_sale sums) and
+      NOT the revenue accounts'' movement, so labour cost %''s denominator cannot disagree with every other
+      revenue figure in the build by whatever straddles a boundary. kpiLedgerMovement goes through
+      R-REP-02''s statementLedgerFigures rather than aggregating journal_line again, which that module asks
+      for in so many words ("trialBalanceMovement would be a third read of the same quantity"); the
+      subtraction happens in db because the caller would be core''s movementBetween and db may not import
+      it.'
+    - 'NOTE: retail attachment is a MEASURED zero rather than a missing figure, and the mechanism reads the
+      ACCOUNT. basket.ts has four line kinds — service, discount, tip, package redemption — so nothing in
+      this build can sell a retail product (ADR 0021) and no ticket can carry retail. The count reaches
+      4030 Retail product revenue through checkout_finalisation, which is the only row tying a document to
+      its journal entry (invoice_line carries no account code and no product reference, so a retail line
+      is indistinguishable from a treatment line ON THE DOCUMENT). It starts answering the day a retail
+      line kind exists, with no change here. The rebooking window has NO default for the reason
+      Y9-crm-lifecycle gives about the lapse thresholds — "events supplied by the caller, not durations
+      this build has chosen" — and a window of 0 is refused by name in both core and db.'
+    - 'NOTE: this unit adds NO migration and NO private SQLSTATE, and ADR 0070 records why — the same
+      conclusion ADR 0064 reached for R-REP-02. Every refusal here is a refusal of ARITHMETIC (a cost list
+      missing a component, a negative cost, a surcharge reported as leakage) and none can be raised by the
+      database, there being no new relation and nothing new written. Migration number 0120 and the band
+      ZY261-ZY270 are RELEASED UNUSED, as is the test port band { start: 17_000, width: 300 } — nothing
+      here starts a server. SCHEMA_VERSION is untouched and no paragraph was added to the migration ledger.
+      Gate block 148a-148z and ADR 0070 are the allocations that were used.'
     files:
     - packages/core/src/reporting/contribution-margin.ts
     - packages/core/src/reporting/operational-kpis.ts
     - packages/core/src/reporting/contribution-margin.test.ts
     - packages/db/src/reporting/kpi-queries.ts
+    - packages/fixtures/src/contribution-margin.itest.ts
+    - docs/adr/0070-an-unattributable-cost-is-a-refusal-and-never-a-zero.md
   - id: R-REP-05
     order: 125
     title: Cohorts, LTV, CAC and payback, outstanding package liability
@@ -14132,8 +14252,16 @@ units:
       old numbers
     - the data-quality view lists every registered check with last run, pass/fail and a drill-down to the
       offending rows; a check that has never run reads 'unknown', never 'pass'
-    - a known-bad fixture in scripts/test-gates.mjs proves the gate fails when a check is deleted from the
-      registry, so a future session cannot quietly drop one
+    - 'NOTE: deferred from R-REP-04. Two of its KPIs produce a figure whose COVERAGE is narrower than its
+      label, and a check here has to read that rather than the figure. (1) discount_leakage is the TILL
+      discount only: a price reduced by a price_list row or a promotion is already inside
+      appointment.gross_price_fils and the catalogue price it came off is snapshotted nowhere, so
+      kpiDiscountCoverage returns pricedByPriceList and pricedByPromotion and a non-zero count means the
+      figure understates the discount given. (2) contribution margin and break-even answer
+      not_attributable and no_data respectively for this build''s own data (ADR 0070, Y9-unit-cost-basis),
+      which is a state a tile must render and not a number it may fall back from. R-REP-04''s KpiOutcome
+      union is already the shape R-REP-07''s typed result needs: value, no_denominator, no_data,
+      not_attributable, with no numeric fallback branch.'
     files:
     - packages/core/src/reporting/data-quality.ts
     - packages/ui/src/reporting/kpi-tile.tsx

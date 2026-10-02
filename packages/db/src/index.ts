@@ -317,6 +317,35 @@ export {
   vat201UnrepresentableGroupings,
   vat201WorkingPapers,
 } from './queries/vat201-working-papers.ts'
+// R-REP-04's KPI reads. The contribution margin and the eight operational KPIs are ARITHMETIC and live in
+// `@berelax/core`; these are the rows they are computed from. `kpiLedgerMovement` goes through
+// `statementLedgerFigures` rather than aggregating `journal_line` again, which is what that module asks
+// for — a third read of a ledger position is a third answer to one question. No account code is stated in
+// that file: every query that needs one takes it as an argument, because the chart is `ACCOUNTS` in a
+// package `packages/db` may not import.
+export {
+  type KpiAccountCodes,
+  type KpiAccountMovement,
+  type KpiDeliveryRow,
+  type KpiDiscountCoverage,
+  type KpiDocumentCounts,
+  type KpiInvoiceLineRow,
+  type KpiNoShowRow,
+  type KpiPeriod,
+  type KpiPeriodFigures,
+  type KpiRebooking,
+  type KpiTherapistCostCensus,
+  type KpiTherapistCostRow,
+  kpiDeliveryRows,
+  kpiDiscountCoverage,
+  kpiDocumentCounts,
+  kpiInvoiceLineRows,
+  kpiLedgerMovement,
+  kpiNoShowRows,
+  kpiPeriodFigures,
+  kpiRebooking,
+  kpiTherapistCostCensus,
+} from './reporting/kpi-queries.ts'
 // R-REP-02's ledger reads. The three statements are ARITHMETIC and live in `@berelax/core`; these are the
 // rows they are computed from, plus the drill-down that lets a caller add the rows up itself and the census
 // that counts what no account set claims. `statementBytes` delegates to M-VAT-07's canonicaliser rather than

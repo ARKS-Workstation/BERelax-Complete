@@ -45929,6 +45929,309 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 148a-148z. (R-REP-04) Contribution margin and the operational KPIs: every way an unknown cost could
+//            become a zero, shown to be caught, and every refusal shown to be able to stop refusing.
+//
+//            The unit's acceptance line is one subtraction, so almost nothing here is about arithmetic.
+//            What it is about is that **a cost nobody can put a figure on must not be summed as zero**,
+//            because a zero produces the HIGHEST possible margin on the screen somebody prices from and
+//            is indistinguishable from a cost that was genuinely nil. This build has measured that
+//            failure once already: `rota_version.forecast_unpriced_employees` exists because "an
+//            employee with no wage contributes nothing to a sum, so a forecast over a rota where no wage
+//            is recorded is 0 fils and reads as a free rota", and all nineteen seeded employees are in
+//            exactly that state (ADR 0070).
+//
+//            So the cases come in three groups and each fails in a way the other two cannot see:
+//
+//              * **the three states a cost can be in.** 148a to 148f break the completeness check, the
+//                unattributable branch, the negative-cost refusal, the no-data answer, the
+//                zero-by-construction distinction and the tender classifier. Every one of them turns a
+//                refusal into a number, which is the only direction that matters.
+//              * **the arithmetic that cannot be wrong quietly.** 148g to 148k break the one rounding
+//                rule, the zero-denominator answer, the tips exclusion and the leakage attribution. A
+//                truncating division and a half-up one agree on most inputs, and a tips numerator is
+//                right on every fixture whose tips are zero.
+//              * **the two gates this unit had to stay inside.** 148l: the KPI arithmetic may not read a
+//                clock, which is what makes a KPI for a closed month the same figure next year. 148m:
+//                `packages/db` may not import `packages/core`, which is why the pairing suite is in
+//                `packages/fixtures`. 148n is a scan of its own: no account code may be written in the
+//                query module, because the chart lives in a package it may not import.
+//
+//            148y and 148z are the controls: every case above is satisfied by something FAILING, so one
+//            has to be satisfied by the real tree passing — the unit suite and the pairing suite, both
+//            unedited.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const MARGIN = 'packages/core/src/reporting/contribution-margin.ts'
+  const KPIS = 'packages/core/src/reporting/operational-kpis.ts'
+  const MARGIN_SUITE = 'packages/core/src/reporting/contribution-margin.test.ts'
+  const KPI_QUERIES = 'packages/db/src/reporting/kpi-queries.ts'
+  const PAIR_SUITE = 'packages/fixtures/src/contribution-margin.itest.ts'
+
+  const marginUnit = () => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', MARGIN_SUITE]
+  const marginIntegration = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    PAIR_SUITE,
+  ]
+
+  /** Breaks one line of a shipped module and requires the test written for it back by name. */
+  const breakAndExpect = (name, file, find, into, rule) => {
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        file,
+        (source) => replaceOnce(source, find, into),
+        () => runExpectingFailure('pnpm', marginUnit()),
+      ),
+      rule,
+    )
+  }
+
+  // ---- the three states a cost can be in -------------------------------------------------------
+
+  // 148a. The completeness check. A component left out of the cost list is summed as zero by any
+  //       implementation that does not refuse one, and the margin is then too high by exactly that cost
+  //       with nothing saying so. Blind the "absent" half and the case written for it must fire.
+  breakAndExpect(
+    'margin: a completeness check blind to a component left out of the cost list fails by name',
+    MARGIN,
+    '  const absent = COST_COMPONENTS.filter((component) => !byId.has(component))',
+    '  const absent: CostComponentId[] = []',
+    'a component left out of the cost list is refused rather than summed as zero',
+  )
+
+  // 148b. The unattributable branch, which is the unit's whole subject. Drop the component from
+  //       `missing` and an unknown cost contributes nothing to the total and nothing to the refusal —
+  //       so the result is a `margin`, computed over the costs that happened to be known.
+  breakAndExpect(
+    'margin: an unattributable component counted as nothing rather than as missing fails by name',
+    MARGIN,
+    '    missing.push(component.component)',
+    '    attributedCostFils += 0n',
+    'an unattributable component makes the margin not_attributable, never a larger margin',
+  )
+
+  // 148c. The negative-cost refusal is what makes "contribution margin <= net revenue" a PROPERTY
+  //       rather than a hope: the inequality holds for every input precisely because no cost can be
+  //       negative. Remove the refusal and the property test over generated cost sets is what notices.
+  breakAndExpect(
+    'margin: a cost that may be negative fails the property that a margin cannot exceed its price',
+    MARGIN,
+    '  if (fils < 0n) {',
+    '  if (false) {',
+    'refuses a negative cost, which is what makes margin <= net price a property',
+  )
+
+  // 148d. `no_data` and never zero for a service nobody bought. A zero on a margin report is read as
+  //       "bought at no margin", which is a different and much worse claim — 0011's own argument about
+  //       a closed day counted as zero takings, one subject along.
+  breakAndExpect(
+    'margin: a service with no delivery answering zero rather than no_data fails by name',
+    MARGIN,
+    '  if (input.units.length === 0) {',
+    '  if (false) {',
+    'a service with no delivery in the period is no_data, never zero',
+  )
+
+  // 148e. `none_by_construction` is the same NUMBER as a measured zero and a different claim: a cash
+  //       tender has no acquirer, while a card tender measured at zero is an acquirer that charged
+  //       nothing. Collapse the two and only one of them survives somebody signing an agreement.
+  breakAndExpect(
+    'margin: a zero by construction collapsed into a measured zero fails by name',
+    MARGIN,
+    "    state: 'none_by_construction' as const,",
+    "    state: 'measured' as const,\n    fils: 0n,",
+    'a cost of zero by construction is a figure, and is not the same state as an unknown',
+  )
+
+  // 148f. The tender classifier is read off `TENDER_ACCOUNT` so that a kind added to the registry is
+  //       classified by construction. Pin it at "nothing clears through a processor" and every card
+  //       delivery reports a payment fee of zero — a figure for a rate nobody has ever been quoted.
+  breakAndExpect(
+    'margin: a tender classifier that finds no processor fails by name',
+    MARGIN,
+    '  return PROCESSOR_CLEARING_ACCOUNTS.includes(TENDER_ACCOUNT[kind])',
+    '  return false',
+    'is zero by construction for money received in hand and unknown for a processed tender',
+  )
+
+  // ---- the arithmetic that cannot be wrong quietly ---------------------------------------------
+
+  // 148g. The one rounding rule. `bigint` division truncates, which agrees with half-up on most inputs
+  //       and is a silent downward bias on the rest — a hundred average tickets each truncated by half
+  //       a fils is fifty fils belonging to nobody.
+  breakAndExpect(
+    'kpis: a rounding rule that truncates instead of rounding half-up fails by name',
+    KPIS,
+    '  if (twice < denominator) return quotient',
+    '  if (true) return quotient',
+    'rounds half-up AWAY from zero, in both directions',
+  )
+
+  // 148h. A zero denominator is a KpiOutcome and not an arithmetic case. Let one through and the
+  //       figures become NaN, Infinity or 0 depending on the operator — and a 0% rebooking rate on a
+  //       day nobody was treated reads as every client declining to come back.
+  breakAndExpect(
+    'kpis: a zero denominator answered rather than refused fails by name',
+    KPIS,
+    '  if (denominator <= 0n) {',
+    '  if (false) {',
+    'refuses a zero denominator rather than answering one',
+  )
+
+  // 148i. Tips are EXCLUDED from labour cost %, and the exclusion is structural: there is no field for
+  //       a tip in `LabourCostComponents`. Add one to the numerator and every fixture whose tips are
+  //       zero still passes, which is why the suite's fixture carries tips and names the wrong figure.
+  breakAndExpect(
+    'kpis: a labour numerator that includes tips fails by name',
+    KPIS,
+    '    input.labour.leaveAccrualFils\n  if (input.netRevenueFils <= 0n) {',
+    '    input.labour.leaveAccrualFils +\n    input.tipsCollectedFils\n  if (input.netRevenueFils <= 0n) {',
+    'uses net revenue as its denominator and excludes tips from its numerator',
+  )
+
+  // 148j. Discount leakage over a line with no snapshotted list gross. Contributing zero reports the
+  //       same figure over a population one line larger, which is a figure that quietly means less than
+  //       its label — the defect `kpiDiscountCoverage` exists beside, and this is its sharp edge.
+  breakAndExpect(
+    'kpis: a leakage figure that reads a missing list price as no discount fails by name',
+    KPIS,
+    '  if (withoutListPrice.length > 0) {',
+    '  if (false) {',
+    'a line with no snapshotted list gross makes the figure not_attributable, not smaller',
+  )
+
+  // 148k. Every KPI definition carries a non-empty formula, which is what makes the registry R-REP-03
+  //       owns a registry of FORMULAS rather than of numbers. Blind the detector and a definition that
+  //       has stopped carrying one passes for ever (ADR 0003).
+  breakAndExpect(
+    'kpis: a definition rule blind to an empty formula fails by name',
+    KPIS,
+    "    if (definition.formula.trim() === '') {",
+    '    if (false) {',
+    'every definition rule is shown to be able to fail',
+  )
+
+  // ---- the two gates this unit had to stay inside, and the one scan of its own ------------------
+
+  // 148l. The KPI arithmetic may not read a clock. Every date and figure is an argument, which is what
+  //       makes a KPI for a closed month the same figure next year — and a `Date.now()` here would be
+  //       invisible to every assertion in the suite, because the figures would still be right today.
+  checkRejectedBy(
+    'margin: a clock read in the margin module fails the purity gate',
+    withEditedFile(
+      MARGIN,
+      (source) =>
+        replaceOnce(
+          source,
+          'export const COST_COMPONENTS = [',
+          'export const GATE_FIXTURE_NOW = Date.now()\n\nexport const COST_COMPONENTS = [',
+        ),
+      () => runExpectingFailure('pnpm', ['purity']),
+    ),
+    'reading the clock',
+  )
+
+  // 148m. And the boundary that puts the arithmetic in `core` and the rows in `db`. It is the reason the
+  //       pairing suite is in `packages/fixtures` at all, so an import that reversed it would make this
+  //       unit's two halves one module and nothing else would say so.
+  checkRejectedBy(
+    'kpis: the KPI queries importing @berelax/core fails the boundary gate',
+    withEditedFile(
+      KPI_QUERIES,
+      (source) =>
+        replaceOnce(
+          source,
+          "import { AppError } from '@berelax/shared'",
+          [
+            "import { AppError } from '@berelax/shared'",
+            "import { ACCOUNTS } from '@berelax/core'",
+            'export const GATE_FIXTURE_CODE = ACCOUNTS.therapistWages',
+          ].join('\n'),
+        ),
+      () => runExpectingFailure('pnpm', ['boundaries']),
+    ),
+    'db-must-not-import-core',
+  )
+
+  // 148n. No account code is written in the query module, and this is the scan that keeps it out.
+  //
+  //       The reason is 148m's: the chart of accounts is `ACCOUNTS` in `packages/core`, which this
+  //       package may not import, so a literal `'5010'` here would be a second statement of a code whose
+  //       first statement is somewhere unreachable — and the two would drift with nothing comparing
+  //       them. Every query that needs one takes it as an ARGUMENT, and the pairing suite passes
+  //       `ACCOUNTS.therapistWages`, which is what holds the two equal.
+  //
+  //       The scan is this case's own, because the rule is about one file. A four-digit string literal
+  //       is what an account code looks like in this chart (1010 through 9999); the known-bad fixture
+  //       puts one back and the scan must see it.
+  {
+    const accountCodeLiterals = (source) => {
+      // Strings only, and four digits exactly: `${startsOn}::date` and `make_interval(days => 30)` are
+      // not account codes, and a bare 2026 in a comment is a year.
+      const matches = source.match(/'[0-9]{4}'/g) ?? []
+      return [...new Set(matches)]
+    }
+    const clean = accountCodeLiterals(readFileSync(KPI_QUERIES, 'utf8'))
+    check(
+      'kpis: the KPI query module states no account code of its own',
+      clean.length === 0,
+      `${KPI_QUERIES} contains the four-digit string literal(s) ${clean.join(', ')}. The chart lives ` +
+        'in packages/core, which this package may not import, so an account code here is a second ' +
+        'statement of it — take it as an argument instead.',
+    )
+    // And the known-bad fixture, because a scan that has never been seen to fire is not a scan
+    // (ADR 0003). The control is the same scan over a file that DOES contain one.
+    const planted = withEditedFile(
+      KPI_QUERIES,
+      (source) =>
+        replaceOnce(
+          source,
+          'const ISO_DATE = ',
+          "const GATE_FIXTURE_ACCOUNT = '5010'\n\nconst ISO_DATE = ",
+        ),
+      () => accountCodeLiterals(readFileSync(KPI_QUERIES, 'utf8')),
+    )
+    check(
+      'kpis: the account-code scan sees a planted account code',
+      planted.includes("'5010'"),
+      `the scan found ${planted.length} literal(s) in a file that had one planted in it, so it would ` +
+        'pass over the defect it exists to refuse',
+    )
+  }
+
+  // ---- the controls ----------------------------------------------------------------------------
+
+  // 148y. Every case above is satisfied by something failing, so this one is satisfied by the real tree
+  //       passing: the pure suite over the margin, the eight KPIs and the definition rules.
+  {
+    const unit = run('pnpm', marginUnit())
+    check(
+      'margin: the margin, the eight KPIs and the definition rules pass over the real tree',
+      !unit.failed,
+      unit.output,
+    )
+  }
+
+  // 148z. And the pairing suite, against the real database — which is where the claims a pure test
+  //       cannot reach are proved: that a redemption's revenue is its own snapshot after the catalogue
+  //       price has moved, that the leakage figure ties to `invoice_line` rows, and that the therapist
+  //       cost is MEASURED to be unavailable rather than asserted to be.
+  {
+    const pair = run('pnpm', marginIntegration())
+    check(
+      'margin: the KPI reads and the margin pair pass against the real database',
+      !pair.failed,
+      pair.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
