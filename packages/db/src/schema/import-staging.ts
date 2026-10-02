@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm'
 import {
   bigint,
   check,
+  date,
   index,
   integer,
   jsonb,
@@ -11,6 +12,7 @@ import {
   unique,
   uuid,
 } from 'drizzle-orm/pg-core'
+import { businessDay } from './trading.ts'
 
 /**
  * Drizzle mirrors of the `import_staging` schema (migration 0111, H-MIG-01).
@@ -154,6 +156,60 @@ export const importProvenance = importStagingSchema.table(
     ),
     index('import_provenance_row').on(table.importRowId),
     index('import_provenance_target_relation').on(table.targetSchema, table.targetTable),
+  ],
+)
+
+/**
+ * The owner's attestation for ONE source file, mirroring `0119` (H-MIG-03).
+ *
+ * The table H-MIG-01 deliberately did not create — "a table with no unit deciding who may sign and what a
+ * signature covers would be a shape for somebody else to work around" — and the hash it attests to was
+ * already here: `importRun.sourceFileHash`, the sha-256 of the file's bytes, which is the only identity a
+ * typed spreadsheet has.
+ *
+ * Four things the mirror cannot say:
+ *
+ *   1. **It is append-only.** UPDATE and DELETE raise `ZY251`, and the application role holds neither
+ *      privilege. A signature that can be edited afterwards is not a signature; a corrected reconstruction
+ *      is a new file, which has a new hash, which needs a new signature.
+ *   2. **`cashReceivedFils` is INDEPENDENT of the file.** It is what the business says it actually
+ *      received, and the whole point of the reconciliation is that it comes from somewhere else — a figure
+ *      derived from the workbook would confirm itself. H-MIG-03 blocks the import when the file's prices
+ *      do not sum to it, to the fils, and names every contributing row.
+ *   3. **`openingDate` is a foreign key into `business_day`**, so an import cannot be filed on a date the
+ *      trading calendar does not hold. It is the day the liability enters these books, which is NOT the day
+ *      any package was bought: `business_day` has no row for most historical dates (0011 leaves a closed
+ *      date absent) and ZL004 refuses an entry dated before the books open.
+ *   4. **`ZY256` holds every imported row's run to `sourceFileHash`.** The check walks from the imported
+ *      row, through `entityProvenance`, to the run that produced it, and refuses the COMMIT unless that
+ *      run's hash is this one — so a signature cannot be about a file other than the one imported, whatever
+ *      an importer passed.
+ */
+export const importSignOff = importStagingSchema.table(
+  'import_sign_off',
+  {
+    id: uuid('id').primaryKey().default(sql`uuid_generate_v7()`),
+    importer: text('importer').notNull(),
+    sourceFileHash: text('source_file_hash').notNull(),
+    /** Who signed, as they identified themselves. Never defaulted and never a role name (brief rule 15). */
+    signedBy: text('signed_by').notNull(),
+    signedOn: date('signed_on').notNull(),
+    statement: text('statement').notNull(),
+    rowsAttested: integer('rows_attested').notNull(),
+    totalPricePaidFils: bigint('total_price_paid_fils', { mode: 'bigint' }).notNull(),
+    cashReceivedFils: bigint('cash_received_fils', { mode: 'bigint' }).notNull(),
+    openingDate: date('opening_date')
+      .notNull()
+      .references(() => businessDay.tradingDate, { onUpdate: 'cascade', onDelete: 'restrict' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('import_sign_off_one_per_file').on(table.importer, table.sourceFileHash),
+    index('import_sign_off_importer').on(table.importer, table.createdAt),
+    check('import_sign_off_hash_is_sha256', sql`${table.sourceFileHash} ~ '^[0-9a-f]{64}$'`),
+    check('import_sign_off_rows_attested_positive', sql`${table.rowsAttested} >= 1`),
+    check('import_sign_off_total_positive', sql`${table.totalPricePaidFils} > 0`),
+    check('import_sign_off_cash_positive', sql`${table.cashReceivedFils} > 0`),
   ],
 )
 

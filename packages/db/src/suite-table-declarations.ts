@@ -123,6 +123,7 @@ export const DECLARED_UNQUALIFIED: readonly DeclaredUnqualified[] = Object.freez
       'invoice_line',
       'invoice',
       'package_redemption',
+      'imported_package_sale',
       'package_balance',
       'package_sale',
       'package_template_line',

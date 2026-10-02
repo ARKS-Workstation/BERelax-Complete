@@ -20327,7 +20327,8 @@ units:
       somebody to create a template that is already there. `readWorkbookPackageTemplates` projects the sell list
       to the four columns the workbook prints, dropping the drawdown this system has recorded: a reference block
       showing "0 sales" beside every template would be a true figure making a false suggestion.'
-    - 'NOTE: deferred to H-MIG-03, with what was and was not built. (1) There is **no entry in `IMPORTERS`**.
+    - 'NOTE: deferred to H-MIG-03 — **DEFERRAL SATISFIED** (migration 0119, ADR 0069; the detail is at
+      the end of this note) — with what was and was not built. (1) There is **no entry in `IMPORTERS`**.
       An `ImporterDefinition` needs an `apply`, and `apply` for this importer writes `package_sale`,
       `package_balance` and the opening deferred-revenue liability — H-MIG-03''s whole unit and its acceptance.
       Registering one whose `apply` threw would put an unrunnable entry in the registry a person is supposed to
@@ -20339,7 +20340,13 @@ units:
       and ADR 0065 says why both exist. (3) The attestation FLAG on the customer record and in the liability
       report is H-MIG-03''s; this unit counts the attested rows in the validator''s report so that unit has the
       population. (4) The report also carries `totalPricePaidFils` and `totalSessionsRemaining`, which are
-      properties of the FILE, for H-MIG-03''s cash reconciliation.'
+      properties of the FILE, for H-MIG-03''s cash reconciliation. **DEFERRAL SATISFIED** by H-MIG-03
+      (migration 0119, ADR 0069): the `IMPORTERS` entry is `packagesImporter()`, the sign-off record is
+      `import_staging.import_sign_off` attesting to `import_run.source_file_hash`, and the attestation flag
+      is `imported_package_sale.admitted_on_attestation` — generated from the evidence kind, so it cannot
+      disagree with it — surfaced by `customer_package_attestation` on the customer record and by
+      `imported_package_liability` in the liability report. All four of this unit''s report figures are
+      read: `totalPricePaidFils` is what the sign-off attests to, `attested` is the flagged population.'
     - 'NOTE: two checks deliberately NOT written, because each would refuse a real liability. The price paid is
       not held against the template''s price, and the expiry is not held against the purchase date plus the
       template''s validity. A package may have been sold at a discount nobody recorded and under terms this
@@ -20374,7 +20381,7 @@ units:
       rows plus the opening deferred-revenue liability, reconciles the total to cash actually received,
       and refuses to complete on any variance or without the owner's sign-off.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - H-MIG-02
@@ -20408,11 +20415,133 @@ units:
       against the hash of the file it attests to
     - a package admitted under the honour-once-on-evidence policy is flagged as such, and the flag is visible
       on the customer record and in the liability report
+    - 'NOTE: allocations actually used. Migration **0119** (`0119_migration_signoff.sql`), SCHEMA_VERSION
+      raised to 119, gate block `// 147a-147z.` (24 cases), **ADR 0069**, and private SQLSTATEs
+      **ZY251-ZY258** of the allocated ZY251-ZY260 band — ZY259 and ZY260 are left FREE and deliberately
+      UNREGISTERED, because an entry for a code no migration raises is what direction 3 of `pnpm sqlstate`
+      refuses (H-MIG-01 left ZY200 free for the same reason). The allocated test port band
+      `{ start: 16_100, width: 300 }` was NOT used and is NOT declared in `TEST_PORT_BANDS`: this unit starts
+      no server — it adds no route and no page, and every claim it makes is proved against real PostgreSQL —
+      and a declared-but-unused band fails `apps/web/src/test-ports.test.ts`, so declaring it would have been
+      the defect. The manifest listed the migration as `00XX-migration-signoff.sql` and it landed as
+      `0119_migration_signoff.sql` (four digits and underscores, per the convention on disk).'
+    - 'NOTE: the decision, which is ADR 0069 and is why this is the highest-risk artefact. **A reconstructed
+      `package_sale` records the entitlement that REMAINS, not the package as it was sold**, is filed on the
+      day the liability enters these books rather than the day the customer paid, and is held equal to the
+      workbook row that attests to it rather than to the template version it names. Four of 0078''s and
+      0083''s rules are right for a till sale and cannot express a liability arriving out of a spreadsheet,
+      and each was taken seriously rather than worked around: ZG009 holds a balance''s drawdown to its
+      `package_redemption` rows, and a reconstruction''s taken sessions have none and must not — a redemption
+      posts the release through `4020` and `2030` (ZG008), which would be output VAT on a supply made before
+      this system traded; ZG002 holds the price to the catalogue, and the price is what the customer handed
+      over (H-MIG-02''s own clean fixture carries a row paid at 95,000 against a configured 100,000);
+      `trading_date` references `business_day`, whose rows are absent for most historical dates (0011) while
+      ZL004 and `period_lock` refuse an entry before the books open or inside a closed period; and
+      `expires_on` was GENERATED from terms that were an assumption when these packages were sold. So 0119
+      drops that expression (deriving it still, by trigger, for every sale the till makes — ZY253 refuses a
+      stated date that is not the terms'', ZY254 makes the column immutable), EXEMPTS ZG002 for a
+      reconstruction and REPLACES it with ZY257 against the workbook row, and adds ZY258 so the exemption
+      mark cannot be carried by a sale nothing attests to. **One other unit''s function is edited:
+      `package_sale_terms_match_version` gains one `if new.reconstructed then return null; end if;` branch
+      and nothing else moves; gate case 147m sells a package the ordinary way at a price its version does not
+      hold and requires ZG002 back by name, so the guard is shown to have survived.** ZG005, ZG006, ZG009 and
+      ZG010 are untouched — ZG005 is what makes "no output VAT at import" a property of the database rather
+      than of this unit''s code. The registry entry for ZG002 moves from migration 0078 to 0119, because
+      `liveDefinitions` maps a function to the last file that defines it.'
+    - 'NOTE: a FULLY DRAWN package imports as an `imported_package_sale` with NO sale, no balance and no
+      posting. Nothing is outstanding, so there is no liability for these books to carry, and
+      `package_balance_value_positive` and `package_balance_sessions_positive` would refuse a sale of nothing
+      in any case. The row is kept because the cash WAS received — it belongs in the reconciliation — and
+      because the history is what the holder will ask about; H-MIG-02''s clean fixture carries such a row
+      deliberately. The consequence to know about: "how many did I buy" is answered from the reconstruction
+      record and the workbook line, and "how many are left" from `package_balance`, which is what the front
+      desk asks and is right.'
+    - 'NOTE: the cash reconciliation is enforced as a CHECK on the sign-off
+      (`import_sign_off_reconciles_to_the_cash_received`), so a file whose prices do not sum to the cash
+      received cannot be SIGNED FOR — and without a signature the import refuses before anything is applied.
+      No tolerance, not even one fils: both sides are sums of integers (ADR 0007) and a tolerance would be a
+      number somebody chose, after which an import out by the width of it would complete and the opening
+      balance sheet would be wrong by it for ever. A CHECK cannot say WHICH of forty lines was mistyped, so
+      the refusal and the report are deliberately in two places: `formatOpeningPackageVariance` in
+      `@berelax/core` lists every contributing row, largest first, and `scripts/migrate-package-liability.mjs`
+      prints it before reaching the refusal.'
+    - 'NOTE: the posting is `Dr 3030 Retained earnings / Cr 2050 Deferred revenue — packages` at what is
+      still owed, dated on the opening date, `source = ''opening_balance''` (load-bearing: ZL004 exempts only
+      an opening balance and a reversal). **The counterpart is equity and NOT cash, and that is a deferral to
+      H-MIG-07.** The money was received in a period these books do not contain, so the other side is opening
+      equity; the CASH is that unit''s opening asset — its acceptance says the opening balance sheet ties to
+      the H-MIG-03 package liability, cash and bank "to the fils" — and `artifacts/migration/package-liability.json`
+      carries `openingDeferredRevenueFils` and `cashReceivedFils` for it to include. Debiting cash here as
+      well would double it the moment that unit imports the opening trial balance, which is the one error in
+      an opening position that is undetectable afterwards because the books still balance. Also H-MIG-07''s:
+      the `opening_balance_import` row and the cutover period lock. This unit writes neither — a row there
+      sets `opening_date_for()` and therefore the ZL004 threshold for the whole ledger — and it adds no
+      cutover-date SETTING either, which would be the shape that unit has to work around; the opening date is
+      a column on the sign-off, foreign-keyed to `business_day` so nothing invents a trading date.'
+    - 'NOTE: three things the importer REFUSES rather than invents (brief rule 15), and the units they are
+      deferred to. (1) **A holder must already be a `customer`** — `CustomerUnknown` names **H-MIG-04**,
+      which owns the customer import and the consent floor every imported record arrives with
+      (`marketing_consent = false` with no flag able to change it); a record created from a package workbook
+      would go round that floor, so the customer import runs FIRST. (2) **A template must have exactly ONE
+      line.** The workbook states one session count for the whole package and nothing in it says which line a
+      taken session came from, so apportioning a multi-line template would invent which treatments the holder
+      had — and the shares a redemption draws on would be wrong by whatever the lines are worth differently.
+      Refused by name, with the template key, before anything is written. If a real reconstruction meets a
+      multi-line package the workbook needs a per-line session count, which is H-MIG-02''s schema and a new
+      column. (3) **No template, price, session count, validity, expiry or opening date is seeded anywhere**,
+      and `artifacts/migration/package-liability.json` ships with every figure null: Y8-packages is
+      unanswered, so the committed artefact is the SHAPE H-MIG-07 and H-MIG-08 read and nothing else.'
+    - 'NOTE: two defects found in this unit''s own work, and what caught each. (1) `apply` first resolved the
+      owner sign-off through "the open run of this importer" and required exactly one. A run that fails
+      part-way stays `running` by design (0111''s resume path), so after one failed import every later import
+      of every other file was refused for a reason that had nothing to do with it —
+      `package-liability.itest.ts` reported it on its second case. The run is now found from the row''s own
+      content hash among the rows still pending, and ZY256 is the backstop either way: it walks from the
+      written row through `import_staging.entity_provenance` to the run that actually produced it, so a wrong
+      answer cannot COMMIT. (2) The registry entry''s validator deferred the two template reasons by
+      REWRITING H-MIG-02''s verdict to `ok`. That validator answers the FIRST reason it finds and stops, and
+      the template check is sixth of sixteen — so a file with a price in dirhams, a negative session count or
+      no owner sign-off validated CLEAN. `import.test.ts`''s control case ("defers NOTHING else") caught it;
+      the deferral is now structural, with the validator built from the keys the FILE names, and gate case
+      147s makes it unconditional again and requires the control to fire. A third, in the migration:
+      `sessions_remaining` is a GENERATED column and PostgreSQL computes those AFTER the BEFORE triggers, so
+      ZY257''s first version read NULL and let every row through — 0078''s own recorded trap with
+      `expires_on`, found again by the suite.'
+    - 'NOTE: a PRE-EXISTING failure was repaired as collateral, with baseline proof in the unit report.
+      `packages/db/src/sqlstate-registry.test.ts` requires the registry array to be SORTED, and on the
+      baseline it was not: ZY231 (0117, Y-PAY-03) sat before ZY221 and ZY222 (0116, A-FIRST-05), which is the
+      auto-merge drift the comment above ZY181 already describes once. This unit adds entries to the same
+      array and cannot pass while it is unsorted, so the ZY231 block was MOVED after ZY222 and nothing else
+      about it was touched. Nothing else in the file was renumbered.'
+    - 'NOTE: two open questions recorded in `docs/OPEN-QUESTIONS.md`. `Y8-package-liability-cash` — nobody
+      has stated what cash was actually received for the outstanding packages, and that figure is the only
+      independent check the reconstruction has; the mechanism is built and the figure is a blank the sign-off
+      refuses to default. `Y9-package-thin-once` — the provisional answer is "honour once on evidence,
+      logged", and this unit implements the LOGGING half (the flag is generated from the evidence kind, and
+      is visible on the customer record and in the liability report). Nothing enforces "once": there is no
+      second redemption to refuse until a holder presents one, and a limit imposed here would be a policy
+      nobody has stated.'
+    - 'NOTE: `packages/migration` is still not in `vitest.config.ts`''s coverage `include` list, for the
+      reason H-MIG-01 recorded, and this unit added nothing to `pnpm verify` or to gate case 29''s array:
+      `scripts/migrate-package-liability.mjs` is an operator command, like `scripts/migrate-import.mjs`, and
+      is driven by the integration suite rather than by a verify step. It also did NOT edit the next-free
+      sentence in `packages/db/src/index.ts`''s allocation note — `allocation-note.test.ts` refuses a second
+      next-free claim in any wording, and a guess about whether a number another worktree holds is still held
+      is how two branches come to apply one number to different SQL.'
     files:
-    - packages/migration/src/importers/packages/import.ts
+    - packages/db/migrations/0119_migration_signoff.sql
+    - packages/db/src/services/import-package-liability.ts
     - packages/core/src/ledger/opening-package-liability.ts
-    - packages/db/migrations/00XX-migration-signoff.sql
+    - packages/core/src/ledger/opening-package-liability.test.ts
+    - packages/migration/src/importers/packages/import.ts
+    - packages/migration/src/importers/packages/import.test.ts
+    - packages/migration/src/importers/packages/index.ts
+    - packages/fixtures/src/package-liability.ts
+    - packages/fixtures/src/package-liability.test.ts
+    - packages/fixtures/src/package-liability.itest.ts
+    - scripts/migrate-package-liability.mjs
     - artifacts/migration/package-liability.json
+    - docs/adr/0069-a-reconstructed-package-sale-is-the-outstanding-entitlement-held-to-its-workbook-row.md
   - id: H-MIG-04
     order: 186
     title: 'Customer import: E.164 normalisation, dedup and the consent floor'

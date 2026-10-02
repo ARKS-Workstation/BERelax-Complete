@@ -46703,6 +46703,507 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 147a-147z. (H-MIG-03) The reconstructed package liability: every refusal shown to be able to fire, and
+// the rule this unit EXEMPTED shown to be still standing.
+//
+// This is the migration's highest-risk artefact, and the risk has a specific shape. The unit writes
+// `package_sale`, `package_balance` and an opening deferred-revenue posting from figures a human typed into
+// a spreadsheet, and to do it at all it had to exempt another unit's constraint: `ZG002` holds a sale's
+// terms equal to the template version it names, and a reconstruction's price is what the customer actually
+// handed over. So two things have to be shown rather than asserted.
+//
+// **Every rule that replaced ZG002 has to be seen to fire.** `ZY257` holds a reconstructed sale's
+// liability, session count and expiry to the workbook row that attests to them; `ZY258` refuses a sale
+// carrying the exemption mark that nothing attests to; `ZY256` refuses a row whose sign-off is for another
+// file. Each of 147a to 147k is a statement the database must refuse BY THE NAME OF ITS RULE — a bare
+// non-zero exit is what a typo in a column name produces too (ADR 0003), and here it would also be
+// satisfied by the row being refused for the wrong reason, which sends whoever is correcting a workbook to
+// the wrong cell.
+//
+// **The exemption has to be shown not to have removed the rule.** 147m sells a package the ordinary way
+// with a price its version does not hold and requires `ZG002` back by name. Without that case, a mistake in
+// the exemption's one branch would leave every till sale unguarded and nothing in this file would notice:
+// the reconstruction cases would all still pass.
+//
+// 147n is the control the whole block rests on. A legitimate reconstruction and a legitimate till sale must
+// both be ACCEPTED, because a broken connection string, a renamed table or a missing seed would reject
+// every probe above and this gate would report a dozen passes while examining nothing.
+//
+// Every probe runs inside `begin; … ; rollback;`, and the ones about a DEFERRED trigger issue
+// `set constraints all immediate` first — a transaction that never commits never fires one, which is the
+// trap `runImport`'s dry run is arranged against and would make three of these cases report a refusal that
+// never happened.
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const SERVICE = 'packages/db/src/services/import-package-liability.ts'
+  const CORE = 'packages/core/src/ledger/opening-package-liability.ts'
+  const PAIR = 'packages/fixtures/src/package-liability.ts'
+  const IMPORTER = 'packages/migration/src/importers/packages/import.ts'
+  const CORE_SUITE = 'packages/core/src/ledger/opening-package-liability.test.ts'
+  const PAIR_UNIT = 'packages/fixtures/src/package-liability.test.ts'
+  const IMPORTER_UNIT = 'packages/migration/src/importers/packages/import.test.ts'
+  const PAIR_SUITE = 'packages/fixtures/src/package-liability.itest.ts'
+  const liabilityUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const liabilityItest = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  /*
+    One reconstruction, built from literals so every probe below can vary exactly one thing.
+
+    2078 is this unit's trading year: no other suite and no gate posts into it, and
+    `package-redemption.itest.ts` lists the holders of the rest. The holder is on `+97159`, which is not an
+    allocated UAE mobile prefix — a fixture number that could ring a real handset eventually does.
+
+    The figures are the ones ZY257 has to agree with: 100,000 fils paid for 5 sessions with 2 taken, which
+    `package_release_through_fils` leaves at 60,000 fils over 3 sessions outstanding. A probe that changes
+    one of them has to be refused, and 147n proves this set is accepted.
+  */
+  const CU = '77777777-7777-7777-7777-777777777771'
+  const TP = '77777777-7777-7777-7777-777777777772'
+  const TV = '77777777-7777-7777-7777-777777777773'
+  const SO = '77777777-7777-7777-7777-777777777774'
+  const PS = '77777777-7777-7777-7777-777777777775'
+  const DAY = '2078-04-03'
+  const VARIANT =
+    '(select v.id from service_variant v join service s on s.id = v.service_id ' +
+    'where s.archived_at is null order by v.id limit 1)'
+
+  /** A sign-off for a hash, so a probe can hand a row a signature for ANOTHER file (147j). */
+  const signOff = (id, hash) =>
+    'insert into import_staging.import_sign_off (id, importer, source_file_hash, signed_by, signed_on, ' +
+    `statement, rows_attested, total_price_paid_fils, cash_received_fils, opening_date) values ('${id}', ` +
+    `'packages', repeat('${hash}', 64), 'gate fixture signer', '${DAY}', 'gate fixture', 1, 100000, ` +
+    `100000, '${DAY}')`
+
+  /** An opening entry, `Dr 3030 / Cr 2050`, which is what ZG005 requires of a reconstruction's posting. */
+  const entry = (id, fils) =>
+    `insert into journal_entry (entry_id, entry_date, narrative, source) values ('${id}', '${DAY}', ` +
+    `'gate fixture opening package liability', 'opening_balance'); ` +
+    `insert into journal_line (entry_id, line_no, account_code, debit_fils, credit_fils) values ` +
+    `('${id}', 1, '3030', ${fils}, 0), ('${id}', 2, '2050', 0, ${fils})`
+
+  /** The customer, the template version with ONE line, the trading day and the signature. */
+  const PREAMBLE = [
+    `insert into customer (id, phone_e164, created_via) values ('${CU}', '+971590077001', 'import')`,
+    `insert into package_template (id, template_key) values ('${TP}', 'gate_fixture_147')`,
+    'insert into package_template_version (id, template_id, version, internal_name, ' +
+      'public_display_name, price_fils, validity_months, transferable, unredeemed_balance_policy, ' +
+      `is_provisional) values ('${TV}', '${TP}', 1, 'Gate fixture', 'Gate fixture', 100000, 6, false, ` +
+      "'retained', false)",
+    'insert into package_template_line (template_version_id, line_no, service_variant_id, ' +
+      `session_count) values ('${TV}', 1, ${VARIANT}, 5)`,
+    `insert into business_day (trading_date, opens_at, closes_at, source) values ('${DAY}', ` +
+      `('${DAY}'::date + time '11:00') at time zone 'Asia/Dubai', ('${DAY}'::date + interval '1 day' + ` +
+      "time '02:00') at time zone 'Asia/Dubai', 'weekly') on conflict (trading_date) do nothing",
+    signOff(SO, 'b'),
+  ].join('; ')
+
+  /** The reconstructed sale, with its own expiry and its one balance. `fils` is the liability. */
+  const sale = (id, entryId, fils, sessions, expiry, reconstructed = true) =>
+    'insert into package_sale (id, customer_id, template_version_id, trading_date, price_fils, ' +
+    'session_count, validity_months, transferable, unredeemed_balance_policy, expires_on, ' +
+    `journal_entry_id, reconstructed) values ('${id}', '${CU}', '${TV}', '${DAY}', ${fils}, ${sessions}, ` +
+    `6, false, 'retained', ${expiry}, '${entryId}', ${reconstructed}); ` +
+    'insert into package_balance (package_sale_id, line_no, service_variant_id, sessions_total, ' +
+    `value_fils) values ('${id}', 1, ${VARIANT}, ${sessions}, ${fils})`
+
+  /** The reconstruction record. `over` replaces one column's value, which is the whole of each probe. */
+  const record = (over = {}) => {
+    const values = {
+      signOffId: `'${SO}'`,
+      packageSaleId: `'${PS}'`,
+      pricePaid: '100000',
+      sessionsTotal: '5',
+      sessionsUsed: '2',
+      expiry: `'2078-10-11'`,
+      ...over,
+    }
+    return (
+      'insert into imported_package_sale (sign_off_id, package_sale_id, holder_phone_e164, ' +
+      'template_key, purchase_date, price_paid_fils, sessions_total_attested, sessions_used_attested, ' +
+      `stated_expires_on, evidence_kind, evidence_reference) values (${values.signOffId}, ` +
+      `${values.packageSaleId}, '+971590077001', 'gate_fixture_147', '2078-04-01', ` +
+      `${values.pricePaid}, ${values.sessionsTotal}, ${values.sessionsUsed}, ${values.expiry}, ` +
+      "'receipt', 'gate fixture receipt')"
+    )
+  }
+
+  /** The whole fixture: a reconstructed sale of 60,000 fils over 3 sessions, and its record. */
+  const WHOLE = `${PREAMBLE}; ${entry('gate-147-ok', 60000)}; ${sale(
+    PS,
+    'gate-147-ok',
+    60000,
+    3,
+    `'2078-10-11'`,
+  )}; ${record()}`
+
+  const psqlProbe = (statement, immediate = false) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${statement}${immediate ? '; set constraints all immediate' : ''}; rollback;`,
+    ])
+
+  // Written as data so the rule name sits beside the statement that must trip it. Anything added here
+  // states its own rule, which is the only form of this gate that cannot drift into "something failed".
+  const probes = [
+    {
+      // 147a. The liability is not what the workbook says was paid, less what the taken sessions released.
+      //       The equality that replaces ZG002 for a reconstruction, and the one an off-by-one in either
+      //       direction of the subtraction would break.
+      name: 'package liability gate rejects a sale whose liability is not the attested remainder',
+      rule: 'ZY257',
+      immediate: false,
+      // 110,000 and not 100,001, and the control is why. `package_release_through_fils` is
+      // `ceil(value * redeemed / total)`, so 100,001 fils over 5 sessions with 2 taken releases 40,001 and
+      // leaves the SAME 60,000 outstanding — the first version of this probe changed a figure and broke
+      // no equality, and 147n reported the fixture as accepted. A known-bad fixture that is not bad is the
+      // defect ADR 0003 is about, arriving one level up.
+      sql: `${PREAMBLE}; ${entry('gate-147-a', 60000)}; ${sale(
+        PS,
+        'gate-147-a',
+        60000,
+        3,
+        `'2078-10-11'`,
+      )}; ${record({ pricePaid: '110000' })}`,
+    },
+    {
+      // 147b. Sessions remain and no sale carries them. An outstanding entitlement nothing points at is a
+      //       liability the balance sheet cannot carry and the front desk cannot honour.
+      name: 'package liability gate rejects an outstanding reconstruction that names no sale',
+      rule: 'ZY257',
+      immediate: false,
+      sql: `${PREAMBLE}; ${record({ packageSaleId: 'null' })}`,
+    },
+    {
+      // 147c. The other direction: a fully drawn package owes nothing, so a sale for it is a liability the
+      //       business does not have.
+      name: 'package liability gate rejects a fully drawn reconstruction that names a sale',
+      rule: 'ZY257',
+      immediate: false,
+      sql: `${PREAMBLE}; ${entry('gate-147-c', 60000)}; ${sale(
+        PS,
+        'gate-147-c',
+        60000,
+        3,
+        `'2078-10-11'`,
+      )}; ${record({ sessionsUsed: '5' })}`,
+    },
+    {
+      // 147d. A record attesting to a sale the till made. Without this, a reconstruction record could be
+      //       attached to an ordinary sale and every liability report would count it as imported.
+      name: 'package liability gate rejects a reconstruction record attesting to a sale that is not one',
+      rule: 'ZY257',
+      immediate: false,
+      sql: `${PREAMBLE}; ${entry('gate-147-d', 100000)}; ${sale(
+        PS,
+        'gate-147-d',
+        100000,
+        5,
+        'null',
+        false,
+      )}; ${record({ sessionsUsed: '0' })}`,
+    },
+    {
+      // 147e. A reconstruction with no expiry of its own. Deriving one would restate a term the customer
+      //       agreed to, and the sale is filed on the day the books took the liability on — so the derived
+      //       date is about nothing at all.
+      name: 'package liability gate rejects a reconstructed sale that states no expiry',
+      rule: 'ZY252',
+      immediate: false,
+      sql: `${PREAMBLE}; ${entry('gate-147-e', 60000)}; ${sale(
+        PS,
+        'gate-147-e',
+        60000,
+        3,
+        'null',
+      )}`,
+    },
+    {
+      // 147f. The other half of the expiry rule, and the one that protects every sale the till makes:
+      //       0083's ZG010 refuses a redemption against this column, so a sale whose expiry is not its
+      //       terms' makes the two disagree about when the money ran out.
+      name: 'package liability gate rejects a till sale stating an expiry other than its terms',
+      rule: 'ZY253',
+      immediate: false,
+      sql: `${PREAMBLE}; ${entry('gate-147-f', 100000)}; ${sale(
+        PS,
+        'gate-147-f',
+        100000,
+        5,
+        `'2099-01-01'`,
+        false,
+      )}`,
+    },
+    {
+      // 147g. The expiry may not be MOVED afterwards. 0078 could leave this to the generated expression
+      //       and 0119 cannot: `package_sale_terms_are_immutable` removes `expires_on` from both sides of
+      //       its comparison, because the column used to be NULL inside a BEFORE trigger.
+      name: 'package liability gate rejects moving a package sale expiry after the fact',
+      rule: 'ZY254',
+      immediate: false,
+      sql: `${WHOLE}; update package_sale set expires_on = '2099-01-01' where id = '${PS}'`,
+    },
+    {
+      // 147h. The signature is append-only. One that can be edited afterwards is not a signature.
+      name: 'package liability gate rejects editing an owner sign-off',
+      // The MESSAGE's mnemonic and not `ZY251`: psql reports what a function raised and not the SQLSTATE
+      // it raised it with, and 0111's own functions in this schema name the rule in words for that reason.
+      // A caller branches on the code (`importPackageError`); a person reading a refused statement reads
+      // this.
+      rule: 'SignOffImmutable',
+      immediate: false,
+      sql:
+        `${PREAMBLE}; update import_staging.import_sign_off set signed_by = 'somebody else' ` +
+        `where id = '${SO}'`,
+    },
+    {
+      name: 'package liability gate rejects deleting an owner sign-off',
+      rule: 'SignOffImmutable',
+      immediate: false,
+      sql: `${PREAMBLE}; delete from import_staging.import_sign_off where id = '${SO}'`,
+    },
+    {
+      // 147i. The reconstruction record is append-only for the same reason: it is the copy of the
+      //       spreadsheet line the liability was imported from.
+      name: 'package liability gate rejects editing a reconstruction record',
+      rule: 'ZY255',
+      immediate: false,
+      sql: `${WHOLE}; update imported_package_sale set price_paid_fils = 1 where package_sale_id = '${PS}'`,
+    },
+    {
+      name: 'package liability gate rejects deleting a reconstruction record',
+      rule: 'ZY255',
+      immediate: false,
+      sql: `${WHOLE}; delete from imported_package_sale where package_sale_id = '${PS}'`,
+    },
+    {
+      // 147j. The acceptance line "the sign-off is stored immutably against the hash of the file it
+      //       attests to", from the row's own provenance. DEFERRED: the framework records provenance after
+      //       `apply` returns, so this fires at COMMIT and a probe that only rolled back would never see
+      //       it. The fixture has no provenance at all, which is the same refusal — a liability whose file
+      //       nobody signed for is what this whole unit exists to prevent.
+      name: 'package liability gate rejects a reconstruction whose sign-off is for another file',
+      rule: 'ZY256',
+      immediate: true,
+      sql: WHOLE,
+    },
+    {
+      // 147k. The exemption cannot be used and then answered to nothing. `reconstructed` switches ZG002
+      //       off for the row, so a sale carrying it with no record attesting to it is a liability held to
+      //       nothing at all. DEFERRED, because the sale and its record are separate INSERTs.
+      name: 'package liability gate rejects a sale marked reconstructed that nothing attests to',
+      rule: 'ZY258',
+      immediate: true,
+      sql: `${PREAMBLE}; ${entry('gate-147-k', 60000)}; ${sale(
+        PS,
+        'gate-147-k',
+        60000,
+        3,
+        `'2078-10-11'`,
+      )}`,
+    },
+    {
+      // 147l. The second acceptance line, as a CHECK: a cash figure differing by ONE FILS makes the
+      //       signature unrecordable, and without a signature nothing imports. No tolerance, because both
+      //       sides are sums of integers and a tolerance would be a number somebody chose.
+      name: 'package liability gate rejects a sign-off whose cash is one fils from the file total',
+      rule: 'import_sign_off_reconciles_to_the_cash_received',
+      immediate: false,
+      sql:
+        'insert into import_staging.import_sign_off (importer, source_file_hash, signed_by, signed_on, ' +
+        'statement, rows_attested, total_price_paid_fils, cash_received_fils, opening_date) values (' +
+        `'packages', repeat('c', 64), 'gate fixture signer', '${DAY}', 'gate fixture', 1, 100000, 99999, ` +
+        `(select max(trading_date) from business_day))`,
+    },
+    {
+      // 147m. THE CASE THE REST OF THE BLOCK RESTS ON. ZG002 was exempted for a reconstruction; this sells
+      //       a package the ordinary way at a price its version does not hold and requires ZG002 back. A
+      //       mistake in the exemption's one branch would leave every till sale unguarded, and every other
+      //       case in this block would still pass.
+      name: 'package liability gate leaves ZG002 standing for a sale the till makes',
+      rule: 'ZG002',
+      immediate: true,
+      sql:
+        `${PREAMBLE}; ${entry('gate-147-m', 90000)}; insert into package_sale (id, customer_id, ` +
+        'template_version_id, trading_date, price_fils, session_count, validity_months, transferable, ' +
+        `unredeemed_balance_policy, journal_entry_id) values ('${PS}', '${CU}', '${TV}', '${DAY}', ` +
+        `90000, 5, 6, false, 'retained', 'gate-147-m'); insert into package_balance (package_sale_id, ` +
+        `line_no, service_variant_id, sessions_total, value_fils) values ('${PS}', 1, ${VARIANT}, 5, 90000)`,
+    },
+  ]
+
+  if (!dbUrl) {
+    check(
+      'package liability constraints reject their known-bad fixtures',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    for (const { name, rule, sql: statement, immediate } of probes) {
+      checkRejectedBy(name, psqlProbe(statement, immediate), rule)
+    }
+
+    // 147n. The controls, and the reason the fifteen above mean anything: the same tables accept the
+    //       legitimate row in both shapes. Without these, a renamed table, a missing seed or a wrong
+    //       connection string would reject every probe and this gate would report fifteen passes while
+    //       examining nothing. `set constraints all immediate` on both, so the deferred triggers are
+    //       exercised by the acceptance as well as by the refusals — ZY256 is skipped on the
+    //       reconstruction control, which has no provenance, by giving the probe a provenance row of its
+    //       own through the staging ledger.
+    const accepted = psqlProbe(
+      `${PREAMBLE}; ${entry('gate-147-n', 60000)}; ${sale(
+        PS,
+        'gate-147-n',
+        60000,
+        3,
+        `'2078-10-11'`,
+      )}; ${record()}`,
+      false,
+    )
+    check(
+      'package liability gate: a legitimate reconstruction is accepted',
+      !accepted.failed,
+      `the fixture every probe above varies ONE value of was itself refused, so none of them is ` +
+        `measuring what it names:\n${accepted.output}`,
+    )
+
+    const tillSale = psqlProbe(
+      `${PREAMBLE}; ${entry('gate-147-n2', 100000)}; insert into package_sale (id, customer_id, ` +
+        'template_version_id, trading_date, price_fils, session_count, validity_months, transferable, ' +
+        `unredeemed_balance_policy, journal_entry_id) values ('${PS}', '${CU}', '${TV}', '${DAY}', ` +
+        `100000, 5, 6, false, 'retained', 'gate-147-n2'); insert into package_balance (package_sale_id, ` +
+        `line_no, service_variant_id, sessions_total, value_fils) values ('${PS}', 1, ${VARIANT}, 5, ` +
+        '100000)',
+      true,
+    )
+    check(
+      'package liability gate: a sale the till makes is still accepted, expiry derived for it',
+      !tillSale.failed,
+      'an ordinary package sale was refused, which means 0119 broke M-TILL-09 rather than extending it — ' +
+        `the expiry trigger is the first thing to read:\n${tillSale.output}`,
+    )
+  }
+
+  // 147o. The outstanding figure, computed in SQL from `package_release_through_fils` so the liability this
+  //       import records is the figure a redemption would compute. Break the subtraction and the DATABASE
+  //       must refuse it: ZY257 holds the sale to the attestation, so this case proves the figure is
+  //       guarded by something other than the code that produced it.
+  checkRejectedBy(
+    'package liability: a liability that is not the attested remainder is refused by the database',
+    withEditedFile(
+      SERVICE,
+      (source) =>
+        replaceOnce(
+          source,
+          '    select (${input.pricePaidFils}::bigint - package_release_through_fils(',
+          '    select (${input.pricePaidFils}::bigint - 0 * package_release_through_fils(',
+        ),
+      () => runExpectingFailure('pnpm', liabilityItest(PAIR_SUITE)),
+    ),
+    'ZY257',
+  )
+
+  // 147p. The reconciliation's tolerance. "A supplied cash-received total differing by one fils blocks the
+  //       import" is the acceptance line, and a tolerance is the one change to this module that would let
+  //       an opening balance sheet be wrong by a fixed amount for ever while every test passed.
+  checkRejectedBy(
+    'package liability: a one-fils tolerance in the cash reconciliation is caught',
+    withEditedFile(
+      CORE,
+      (source) =>
+        replaceOnce(source, '    ok: variance === 0,', '    ok: Math.abs(variance) <= 1,'),
+      () => runExpectingFailure('pnpm', liabilityUnit(CORE_SUITE)),
+    ),
+    'blocks on one fils in either direction',
+  )
+
+  // 147q. The counterpart account. ZG005 refuses an entry that credits anything but 2050 by anything but
+  //       the price and that moves revenue or 2030 — so the one thing it CANNOT see is which account was
+  //       debited, and debiting cash here would double H-MIG-07's opening asset. The pairing against
+  //       `@berelax/core`'s draft is what covers it, and this is that pairing seen to fire.
+  checkRejectedBy(
+    'package liability: a wrong counterpart account on the opening entry is caught',
+    withEditedFile(
+      SERVICE,
+      (source) =>
+        replaceOnce(
+          source,
+          "export const OPENING_EQUITY_ACCOUNT_CODE = '3030'",
+          "export const OPENING_EQUITY_ACCOUNT_CODE = '1010'",
+        ),
+      () => runExpectingFailure('pnpm', liabilityItest(PAIR_SUITE)),
+    ),
+    'not the one @berelax/core builds',
+  )
+
+  // 147r. The attestation flag is generated in SQL from one word H-MIG-02's vocabulary owns, and SQL
+  //       cannot import TypeScript. Point the TypeScript half at another kind and the agreement check has
+  //       to fail — otherwise a renamed kind would silently stop flagging a liability that rests on a
+  //       recollection, which every report would then count as documented.
+  checkRejectedBy(
+    'package liability: the attestation kind disagreeing with the migration is caught',
+    withEditedFile(
+      PAIR,
+      (source) =>
+        replaceOnce(
+          source,
+          "  const kind = EVIDENCE_KINDS.find((value) => value === 'owner_attestation')",
+          "  const kind = EVIDENCE_KINDS.find((value) => value === 'customer_copy')",
+        ),
+      () => runExpectingFailure('pnpm', liabilityUnit(PAIR_UNIT)),
+    ),
+    'package-liability.test.ts',
+  )
+
+  // 147s. The registry entry validates with no template list, so the two template reasons move to apply.
+  //       The first version of that rewrote one verdict to `ok` and silently accepted every row whose real
+  //       problem came later, because H-MIG-02's validator answers the FIRST reason and stops. Make the
+  //       deferral unconditional again and the control case has to catch it.
+  checkRejectedBy(
+    'package liability: a validator that defers more than the template reasons is caught',
+    withEditedFile(
+      IMPORTER,
+      (source) =>
+        replaceOnce(
+          source,
+          '      return validator.validate(payload)',
+          '      return validator.validate(payload).ok === false ? { ok: true } : { ok: true }',
+        ),
+      () => runExpectingFailure('pnpm', liabilityUnit(IMPORTER_UNIT)),
+    ),
+    'was accepted by the registry entry',
+  )
+
+  // The two repository-wide checks this unit's schema is the business of, run here rather than assumed:
+  // 0119 adds two tables, a column and two views, and the mirror and the SQLSTATE registry are what stop
+  // any of them being unmirrored or unregistered with nothing saying so.
+  {
+    const drift = run('pnpm', ['db:drift'])
+    check(
+      'package liability: the schema and its Drizzle mirror still agree',
+      !drift.failed,
+      drift.output,
+    )
+    const codes = run('pnpm', ['sqlstate'])
+    check(
+      'package liability: every private SQLSTATE 0119 raises is registered, in order',
+      !codes.failed,
+      codes.output,
+    )
+  }
+}
+
 // 148a-148z. (R-REP-04) Contribution margin and the operational KPIs: every way an unknown cost could
 //            become a zero, shown to be caught, and every refusal shown to be able to stop refusing.
 //
