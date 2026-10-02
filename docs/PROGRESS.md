@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**160 / 211 units complete.**
+**161 / 211 units complete.**
 
 ## Next up
 
@@ -189,7 +189,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 168 | `G-SEO-01` | GSC warehouse: nightly snapshots, startRow paging, the rare-query gap | `G-AGT-01`, `G-CONN-05` | — | — |
 | [x] | 169 | `G-SEO-02` | The seo_agent principal: publish denied at the permission layer, target allowlist | `F07`, `G-SEO-01` | — | — |
 | [x] | 170 | `G-SEO-03` | Query-side deterministic analyses: CTR outliers, content gaps, cannibalisation | `G-SEO-01` | — | — |
-| [ ] | 171 | `G-SEO-04` | Site-side deterministic analyses: coverage anomalies, internal links, structured data | `G-SEO-01`, `W-SITE-01`, `W-SITE-02`, `W-SITE-03`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07`, `W-SITE-08`, `W-SITE-09`, `W-SITE-10`, `W-SITE-11` | — | — |
+| [x] | 171 | `G-SEO-04` | Site-side deterministic analyses: coverage anomalies, internal links, structured data | `G-SEO-01`, `W-SITE-01`, `W-SITE-02`, `W-SITE-03`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07`, `W-SITE-08`, `W-SITE-09`, `W-SITE-10`, `W-SITE-11` | — | — |
 | [ ] | 172 | `G-SEO-05` | Suggestion store with before/after and rollback, LLM drafting, red-team gate | `G-AGT-01`, `G-SEO-02`, `G-SEO-03`, `G-SEO-04` | — | — |
 | [ ] | 173 | `G-SEO-06` | GBP-versus-website consistency check, degrading to a manual snapshot | `G-CONN-05`, `G-SEO-04` | — | Y3-gbp-api, Y1-nap |
 | [ ] | 174 | `G-SEO-07` | Weekly plain-English report by Resend, five prioritised actions | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `G-AGT-02`, `G-SEO-05`, `G-SEO-06` | — | — |

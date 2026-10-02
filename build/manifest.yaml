@@ -19867,7 +19867,7 @@ units:
       agent does not cry wolf, an internal-link and orphan audit against the real sitemap, and structured-data
       validation that refuses the types the licence does not permit.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - G-SEO-01

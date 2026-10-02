@@ -50180,6 +50180,315 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 163a-163z. (G-SEO-04) The site-side deterministic analyses: every condition of the cry-wolf threshold
+// shown to be able to stop discriminating, the absence shown to be able to become a zero, and the two
+// scans shown to be able to examine nothing.
+//
+// The subject of this block is a THRESHOLD, which is the hardest kind of rule to keep alive: every one of
+// its three conditions can be deleted and the analysis still answers, still returns findings, and still
+// passes any test that only asks whether it found something. Two of them have already been wrong in this
+// unit's own history — the dispersion condition was implemented as a median absolute deviation whose value
+// is identically zero on a two-valued series, so `drop >= dispersion x multiple` was `drop >= 0`, and the
+// test that was supposed to prove it discriminates passed because its run sat above a median pinned to the
+// series' lower value and the absolute floor refused it first. Neither was visible in a green suite.
+//
+// So each condition gets a case that removes it and names the claim that must then fail, and the two
+// structural scans — the dependency rule that keeps fetched bytes inside the untrusted envelope, and the
+// NAP literal scan — get both halves: a planted violation they must report, and the committed tree they
+// must pass. ADR 0085 is the decision record; ADR 0002 and ADR 0003 are why this block exists at all.
+{
+  const ANOMALY = 'packages/core/src/seo/coverage-anomaly.ts'
+  const ANOMALY_SUITE = 'packages/core/src/seo/coverage-anomaly.test.ts'
+  const AUDIT = 'packages/core/src/seo/internal-link-audit.ts'
+  const AUDIT_SUITE = 'packages/core/src/seo/internal-link-audit.test.ts'
+  const VALIDATE = 'packages/core/src/seo/structured-data-validate.ts'
+  const VALIDATE_SUITE = 'packages/core/src/seo/structured-data-validate.test.ts'
+  const FIXTURES = 'packages/core/src/seo/structured-data.fixtures/index.ts'
+  const SPECIMEN = 'packages/core/src/seo/jsonld/specimen.ts'
+  const NAP_SUITE = 'packages/fixtures/src/seo-nap-literals.test.ts'
+  const runUnit = (file) => run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file])
+  const cruise = () =>
+    run('pnpm', ['exec', 'depcruise', '--config', '.dependency-cruiser.cjs', 'packages'])
+
+  // 163a. The consecutive-days condition. Without it one bad day is a finding, which is the first half of
+  // the acceptance criterion and the whole reason the analysis is not six lines of subtraction.
+  withEditedFile(
+    ANOMALY,
+    (source) => replaceOnce(source, 'if (days < config.minConsecutiveDays) {', 'if (days < 1) {'),
+    () =>
+      checkRejectedBy(
+        'coverage anomalies: a single-day dip reported as a finding is caught',
+        runUnit(ANOMALY_SUITE),
+        'produces ZERO findings for a single-day impression dip',
+      ),
+  )
+
+  // 163b. The dispersion condition, which is what makes the threshold statistical rather than a second
+  // magic number. This is the condition that was already dead once; see the block header.
+  withEditedFile(
+    ANOMALY,
+    (source) =>
+      replaceOnce(
+        source,
+        'return drop * 1_000 >= dispersion * config.minDispersionMultipleMilli',
+        'return true',
+      ),
+    () =>
+      checkRejectedBy(
+        'coverage anomalies: a drop inside the series own noise reported as a finding is caught',
+        runUnit(ANOMALY_SUITE),
+        'refuses a drop that is relatively large and smaller than the series own noise',
+      ),
+  )
+
+  // 163c. The absolute floor. Both other conditions are RATIOS, and a ratio over small numbers means
+  // nothing: five impressions falling to two is a 50% drop past any dispersion such a series can have.
+  // It points at the TINY-COUNTS case and not at the PageSpeed one, which this case is why: the PageSpeed
+  // series was two-valued, so its median sat on its own lower value, the drop was never positive, and the
+  // floor could be deleted with nothing failing. Both the series and this anchor were fixed together.
+  withEditedFile(
+    ANOMALY,
+    (source) => replaceOnce(source, '  if (drop < config.minAbsoluteDrop) return false\n', ''),
+    () =>
+      checkRejectedBy(
+        'coverage anomalies: a large relative drop on tiny counts reported as a finding is caught',
+        runUnit(ANOMALY_SUITE),
+        'refuses a large relative drop on a series of counts too small to mean anything',
+      ),
+  )
+
+  // 163d. One finding per RUN. Resuming one day into a run re-detects the same collapse against a baseline
+  // that is now partly the collapse — seven findings for one event, and a weaker test of it each time.
+  withEditedFile(
+    ANOMALY,
+    (source) =>
+      replaceOnce(
+        source,
+        '    at = end\n  }\n  return findings',
+        '    at += 1\n  }\n  return findings',
+      ),
+    () =>
+      checkRejectedBy(
+        'coverage anomalies: one sustained drop reported as several findings is caught',
+        runUnit(ANOMALY_SUITE),
+        'produces EXACTLY one finding for a sustained 40% impression drop over seven consecutive days',
+      ),
+  )
+
+  // 163e. A gap is not a zero. A day Search Console has not finished processing, read as a day with no
+  // impressions, manufactures the exact collapse `gsc-window.ts`' lag exists to avoid.
+  withEditedFile(
+    ANOMALY,
+    (source) =>
+      replaceOnce(
+        source,
+        '  if (value === null) return false',
+        '  if (value === null) return true',
+      ),
+    () =>
+      checkRejectedBy(
+        'coverage anomalies: a missing day read as a qualifying day is caught',
+        runUnit(ANOMALY_SUITE),
+        'breaks a run on a day the source had no row for',
+      ),
+  )
+
+  // 163f. The no-field-data finding carrying a number. ADR 0070 structurally: the assertion is over the
+  // payload's own values, so a field a screen could render as the worst possible LCP fails here.
+  withEditedFile(
+    ANOMALY,
+    (source) =>
+      replaceOnce(
+        source,
+        "      rule: 'crux_no_field_data',\n      subject: observation.subject,",
+        "      rule: 'crux_no_field_data',\n      lcpMs: 0,\n      subject: observation.subject,",
+      ),
+    () =>
+      checkRejectedBy(
+        'coverage anomalies: an absent field-data answer carrying a zero is caught',
+        runUnit(ANOMALY_SUITE),
+        'no field data',
+      ),
+  )
+
+  // 163g. The therapist refusal, which is the rule that is really an absence (ADR 0020). Without it the
+  // report opens with nineteen findings about pages that are missing on purpose.
+  withEditedFile(
+    AUDIT,
+    (source) => replaceOnce(source, '    if (refusals.length > 0) {', '    if (false) {'),
+    () =>
+      checkRejectedBy(
+        'internal-link audit: a therapist absent for a recorded reason reported as an orphan is caught',
+        runUnit(AUDIT_SUITE),
+        'is EXCUSED and not an orphan when the therapist has no display name',
+      ),
+  )
+
+  // 163h. A link from a `noindex` page is not an internal signal, because a crawler never sees it.
+  // Counting it excuses exactly the orphan a preview surface happens to mention.
+  withEditedFile(
+    AUDIT,
+    (source) =>
+      replaceOnce(
+        source,
+        '    if (!node.indexable) continue\n    const from = normaliseLinkPath(node.path)',
+        '    const from = normaliseLinkPath(node.path)',
+      ),
+    () =>
+      checkRejectedBy(
+        'internal-link audit: a link from a non-indexable page counted as a signal is caught',
+        runUnit(AUDIT_SUITE),
+        'does not count a link from a non-indexable page as an internal signal',
+      ),
+  )
+
+  // 163i. The evidence comparison. This is THE rule of the structured-data analysis: a rating built from
+  // the site's own testimonials is valid markup with a well-formed count, so nothing about the bytes
+  // refuses it and only the evidenced count can.
+  withEditedFile(
+    VALIDATE,
+    (source) =>
+      replaceOnce(
+        source,
+        'if (claim.claimed <= input.evidencedReviewCount) continue',
+        'if (true) continue',
+      ),
+    () =>
+      checkRejectedBy(
+        'structured data: a self-serving aggregateRating accepted is caught',
+        runUnit(VALIDATE_SUITE),
+        'aggregate_rating_not_evidenced',
+      ),
+  )
+
+  // 163j. And the other direction, which a refusal cannot state: the rule must not also report the case
+  // the graph validator already reports, or an owner fixes one property twice.
+  withEditedFile(
+    VALIDATE,
+    (source) =>
+      replaceOnce(
+        replaceOnce(source, '      if (claim.claimed === null) continue\n', ''),
+        'if (claim.claimed <= input.evidencedReviewCount) continue',
+        'if (claim.claimed !== null && claim.claimed <= input.evidencedReviewCount) continue',
+      ),
+    () =>
+      checkRejectedBy(
+        'structured data: a rating with no usable count reported twice is caught',
+        runUnit(VALIDATE_SUITE),
+        'leaves a rating with no usable count to the graph validator',
+      ),
+  )
+
+  // 163k. The known-bad fixture is load-bearing. A mutation that stopped mutating would leave three cases
+  // reporting PASS about the specimen graph — `reply-linter.fixtures`' defect, one subject along.
+  withEditedFile(
+    FIXTURES,
+    (source) => replaceOnce(source, '    reviewCount: 14,', '    reviewCount: 0,'),
+    () =>
+      checkRejectedBy(
+        'structured data: a known-bad fixture that no longer trips its rule is caught',
+        runUnit(VALIDATE_SUITE),
+        'aggregate_rating_from_own_testimonials',
+      ),
+  )
+
+  // 163l. The dependency rule that keeps fetched bytes inside the untrusted envelope. It can only ever
+  // fire on a fixture, because the committed tree satisfies it — so this case is the only evidence it is
+  // alive (ADR 0003), exactly as its companion `seo-prompt-must-use-the-untrusted-envelope` records.
+  withEditedFile(
+    VALIDATE,
+    (source) =>
+      replaceOnce(
+        replaceOnce(
+          source,
+          "import { type SeoUntrustedEnvelope } from './untrusted-envelope.ts'\n",
+          '',
+        ),
+        '  readonly html: SeoUntrustedEnvelope',
+        '  readonly html: { readonly fenced: string }',
+      ),
+    () =>
+      checkRejectedBy(
+        'boundaries: a site analysis taking fetched bytes outside the untrusted envelope is caught',
+        cruise(),
+        'seo-site-analysis-must-take-the-untrusted-envelope',
+      ),
+  )
+
+  // 163m. And its control. Without it 163l is satisfied by a rule that refuses the module however it is
+  // written, which would be a rule nobody could ever make pass.
+  {
+    const clean = cruise()
+    check(
+      'boundaries: the committed site analyses satisfy the untrusted-envelope rule',
+      !clean.failed && clean.output.includes('no dependency violations found'),
+      clean.output,
+    )
+  }
+
+  // 163n. The NAP scan, walked. A planted telephone number in a module the exemption list does not cover
+  // must be reported: the premises row (0003) is the only authority for the name, address, phone and
+  // hours, and a module holding its own copy answers "consistent" about itself.
+  withEditedFile(
+    ANOMALY,
+    (source) => `${source}\nconst __gatePhone = '+971501234567'\nvoid __gatePhone\n`,
+    () =>
+      checkRejectedBy(
+        'NAP scan: a telephone literal in an SEO analysis is caught',
+        runUnit(NAP_SUITE),
+        'holds no literal of a telephone number',
+      ),
+  )
+
+  // 163o. The same walk, a different pattern, because three patterns share one file walk and only one of
+  // them being exercised is how the other two quietly stop matching anything.
+  withEditedFile(
+    AUDIT,
+    (source) => `${source}\nconst __gateOpens = '11:00'\nvoid __gateOpens\n`,
+    () =>
+      checkRejectedBy(
+        'NAP scan: an opening-hour literal in an SEO analysis is caught',
+        runUnit(NAP_SUITE),
+        'holds no literal of an opening-hour time',
+      ),
+  )
+
+  // 163p. A stale exemption. The two exempt files are exempt for a stated literal, and an exemption that
+  // has outlived its reason is a permission nobody can see the justification for any more.
+  withEditedFile(
+    SPECIMEN,
+    (source) => replaceOnce(source, "e164: '+97120000000'", "e164: '+97140000000'"),
+    () =>
+      checkRejectedBy(
+        'NAP scan: an exemption whose justifying literal has gone is caught',
+        runUnit(NAP_SUITE),
+        'names only exemptions that still need one',
+      ),
+  )
+
+  // 163y. Every case above is satisfied by something failing, so this one is satisfied by the real tree:
+  // the four suites pass as committed. Without it the fifteen cases above are consistent with suites that
+  // were already red.
+  {
+    const real = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.config.ts',
+      ANOMALY_SUITE,
+      AUDIT_SUITE,
+      VALIDATE_SUITE,
+      NAP_SUITE,
+    ])
+    check(
+      'the committed site-side analyses, audit, structured-data validator and NAP scan all pass',
+      !real.failed,
+      real.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

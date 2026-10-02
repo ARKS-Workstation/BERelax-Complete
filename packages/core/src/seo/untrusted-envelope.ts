@@ -129,6 +129,31 @@ export interface SeoUntrustedEnvelope {
   readonly region: string
   /** The fingerprint the fences carry: of the text AS FENCED, after stripping and truncation. */
   readonly fingerprint: string
+  /**
+   * The bytes that were enclosed: {@link encloseUntrustedSeoData}'s input after stripping and the cap.
+   *
+   * Added for G-SEO-04, whose three site-side analyses are handed **fetched HTML** and whose acceptance
+   * criterion requires that HTML to arrive *already wrapped by this envelope* — so the wrapping is what a
+   * reader of the call site sees, and the dependency rule
+   * `seo-site-analysis-must-take-the-untrusted-envelope` is what keeps it true. A validator cannot parse a
+   * guttered region, so something has to hand it the text.
+   *
+   * This field rather than an inverse function, and that was not the first design. An un-gutter-and-
+   * re-fingerprint reader was written first and is wrong: the body is split on EVERY separator a renderer
+   * might honour (`\r\n`, `\r`, `\u2028`, `\u2029`) and joined back with `\n`, while
+   * {@link fingerprint} was taken BEFORE that split — so a page served with CRLF line endings, which is
+   * most of them, recovers text that cannot hash to its own fences. The reader would have thrown
+   * `seo_untrusted_envelope_broken` on correctly-built envelopes, which is a broken feature wearing an
+   * integrity check's clothes. The enclosed bytes are a fact this function already holds; carrying them is
+   * exact, and deriving them is a guess.
+   *
+   * It does NOT weaken the envelope. The guarantee is about what reaches a MODEL — one region, no
+   * instruction bytes, an unforgeable label — and {@link region} is still the only thing a prompt is built
+   * from, enforced by `seo-prompt-must-use-the-untrusted-envelope` and by the fuzz suite. The deterministic
+   * analyses are not a model: they parse the bytes, and a parser that was handed a fence would be reading
+   * our framing as the page's content.
+   */
+  readonly fenced: string
   /** How many characters the cap dropped. Non-zero is ordinary for a fetched page. */
   readonly truncatedCharacters: number
   /** How many control or format characters were removed. Non-zero is itself a signal. */
@@ -215,6 +240,7 @@ export function encloseUntrustedSeoData(args: {
     source: args.source,
     region,
     fingerprint,
+    fenced,
     truncatedCharacters,
     strippedControlCharacters,
   })
