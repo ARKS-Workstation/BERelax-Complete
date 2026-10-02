@@ -26,6 +26,9 @@
       "@berelax/messaging": ["../../packages/messaging/src/index.ts"],
       "@berelax/providers": ["../../packages/providers/src/index.ts"],
       "@berelax/shared": ["../../packages/shared/src/index.ts"],
+      "@berelax/shared/analytics/collect-limits": [
+        "../../packages/shared/src/analytics/collect-limits.ts"
+      ],
       "@berelax/ui": ["../../packages/ui/src/index.ts"],
       "@berelax/harness/accessibility": ["../../packages/harness/src/accessibility.ts"],
       "@berelax/harness/matrix": ["../../packages/harness/src/matrix.ts"],
@@ -35,6 +38,10 @@
       "@berelax/providers/failure": ["../../packages/providers/src/failure.ts"],
       "@berelax/providers/google": ["../../packages/providers/src/google/index.ts"],
       "@berelax/ui/*": ["../../packages/ui/src/*"],
+      "@berelax/ui/analytics": ["../../packages/ui/src/analytics/index.ts"],
+      "@berelax/ui/analytics/collector-island": [
+        "../../packages/ui/src/analytics/collector.island.tsx"
+      ],
       "@berelax/ui/direction": ["../../packages/ui/src/primitives/direction.tsx"],
       "@berelax/ui/icon": ["../../packages/ui/src/icon.tsx"],
       "@berelax/ui/layout": ["../../packages/ui/src/layout/index.tsx"],

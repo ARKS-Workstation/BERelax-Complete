@@ -13392,7 +13392,7 @@ units:
       W-SITE's public CTAs attach to the same SDK later and the build-time check makes an unnamed event
       a build failure.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - A-FIRST-05
@@ -13412,11 +13412,113 @@ units:
     - the collector adds no more than 3 KB gzipped to the public bundle (bundle-size budget) and does not
       appear in the LCP critical request chain (Lighthouse CI budget unchanged)
     - request interception asserts the collector contacts no origin other than the site's own
+    - 'NOTE: the shape, and why. (1) packages/ui/src/analytics is four files and none of them imports a
+      validator: attributes.ts (the attribute vocabulary, zero imports), collector.ts (the queue, the
+      double-fire window, the batch split and the flush, with every browser effect injected as a
+      CollectorHost), use-track.ts (the one delegated capture-phase listener and the walk from a click to
+      the declaring element, over structural types so it runs in environment: node), and
+      collector.island.tsx (the React boundary, the browser host and the deferral to the load event).
+      The SDK decides nothing the server owns - membership is parseAnalyticsEvent at /api/collect, the caps
+      are A-FIRST-05''s, and there is no consent decision in the browser at all. (2)
+      scripts/check-event-attributes.mjs is what makes the declarative design verifiable: six rules read
+      from the REAL ANALYTICS_EVENT_SCHEMAS under tsx, with the required-attribute set DERIVED from each
+      event''s own Zod shape, and an attribute composed from an expression refused by name. It is a verify
+      step (pnpm event-attributes), a CI step, and registered in gate case 29. (3) The committed fixture
+      page is a real dev route /collector in both locales (registry id `collector`), because the thing
+      under test is the BUNDLED collector and because build/budgets.json measures the collector''s weight
+      off that route''s own client-reference manifest. (4) /book declares exactly one interaction - the desk
+      telephone, the only element on it the taxonomy has an event for. (5) gate block 156a-156z (as 156a-156ae), 39 checks.
+      (6) ADR 0078, linked in docs/adr/README.md. (7) packages/shared/src/analytics/collect-limits.ts is
+      new and is a zod-free re-statement of nothing: the three figures MOVED there and collect.ts
+      re-exports them, so every existing consumer and every statement of every number is unchanged.'
+    - 'NOTE: allocations. USED - gate block `// 156a-156z.` (as 156a-156ae, inserted after 152a-152z and
+      before 79a-79k), ADR number 0078, and the test port band { start: 18_200, width: 300 } as
+      `collector`. RELEASED, unused - migration 0126 (this unit changes no schema) and the WHOLE SQLSTATE
+      band ZY321-ZY330, all ten (nothing here raises from the database, and an entry for a code no
+      migration raises is refused by pnpm sqlstate). Nothing else was allocated and nothing else was
+      taken.'
+    - 'NOTE: three defects in this unit''s own work, each named with what caught it. (1) The collector
+      imported the caps from @berelax/shared, so zod and every schema in the package arrived in the client
+      bundle: 98,927 bytes gzipped against a 3,072-byte budget, on a module whose job is to post a few
+      hundred bytes of JSON. Nothing else noticed - it typechecked, it worked, every test passed. Caught by
+      pnpm budgets, which is the whole argument for the budget existing. The fix is
+      packages/shared/src/analytics/collect-limits.ts plus moving validation off the browser entirely,
+      which is also the better design and is ADR 0078''s second half. (2) The same defect a second time in
+      a different disguise: `import { type AnalyticsEvent, COLLECT_PATH } from ''@berelax/shared''`
+      compiles under verbatimModuleSyntax to a bare side-effect `import ''@berelax/shared''`, which kept
+      the whole package in the chunk at 98,455 bytes while nothing was used from it at runtime. Caught by
+      the same budget; the fix is `import type { X }` on a line of its own, and the island carries the
+      comment. (3) The unit-test harness wrote `options.viewportWidth ?? 412`, so the one case about a
+      client reporting NO viewport asserted 412 - `??` treats null as absent. Caught by that case on its
+      first run. The brief states this trap for `''''`; it is the same trap one type over. (4) The fixture
+      page declared whatsapp_ref_shown on a button, and the collector adds `path` to every declared
+      interaction - but every payload schema is a strictObject and whatsappRefShownPayloadSchema holds
+      refCode alone, so the event arrived with an unknown extra property and /api/collect would refuse the
+      whole thing as invalid_event_payload: a tag that renders, works, and produces a 400 nobody is
+      watching. Caught by collector.itest.ts parsing each posted batch through collectBatchSchema - the
+      server''s own envelope - which is the whole reason the suite parses rather than reading JSON. The fix
+      is a seventh build-time rule, event-attribute-declares-an-event-with-no-page-field, so the mistake
+      cannot be made on any surface; the event belongs to the imperative door, which is where A-FIRST-07
+      will raise it. (5) Five cases of the browser suite failed on their first run because they counted
+      batches immediately after `goto`: the entry page view''s beacon is asynchronous and arrived in the
+      middle of the clicks, so five failures each pointed at the collector rather than at the suite.
+      Nothing in the file now sleeps for a fixed interval - every count goes through a settle that polls
+      for the batches the case is waiting for and fails saying how many arrived.'
+    - 'NOTE: one finding about another unit''s page, reported and not repaired. `/book` bare renders the
+      `needs-treatment` named state and NO call to action at all - the desk telephone belongs to the edge
+      states, so the one interaction this unit declares on that route is conditional. The browser suite
+      therefore drives the cheapest reachable state that renders it, `no-trading-days`, with a `?date=` the
+      trading calendar does not reach, which is docs/09 Sec 3''s own enumerated state. That is a fact about
+      the page rather than a defect, and B-UI-02 is where a decision to give `/book` an unconditional call
+      CTA belongs.'
+    - 'NOTE: two edits to other units'' files that this unit''s work REQUIRED, reported because the
+      convention is to repair nothing beyond that. (a) apps/web/src/book.itest.ts: the ISLANDS list is an
+      EXACT equality over /book''s first-party client modules, so instrumenting the route at all fails it.
+      packages/ui/src/analytics/collector.island.tsx is listed, with the reason beside it - which is what
+      that assertion is for. (b) scripts/check-budgets.mjs: a `modules` budget may now name an `entry`,
+      which narrows the measurement to one route. Without it the scope SUMS the defining chunk of every
+      route that ships the module, and that sum is not a quantity any visitor downloads: the collector is
+      on four routes, and its defining chunk on /book is shared with the booking flow''s two islands, so
+      the number came back as 5,928 bytes of which 4,127 was the slot picker and the details step. A budget
+      that moves when a module becomes more POPULAR rather than when it grows is a budget that gets raised.
+      Omitting `entry` is unchanged, so the three budgets that predate this measure exactly what they did -
+      verified: 0.8KB, 0.9KB and 44.8KB before and after.'
+    - 'NOTE: two things scoped out, with the reason. (a) The ADMIN screens are deliberately NOT
+      instrumented, against this unit''s own summary line. The taxonomy holds five events and every one is
+      a statement about a visitor''s journey, so a staff screen could only produce page_view - and staff
+      are never shown a consent banner, so analyticsStorageGranted is false for every one of their requests
+      and ADR 0066''s projection would add each one to the pre-consent landing counter, putting the front
+      desk''s own browsing into the denominator of every conversion rate on the analytics page. The honest
+      instrumentation of staff work is the audit trail, which already exists. ADR 0078 records the
+      decision. (b) "Lighthouse CI budget unchanged" is satisfied by there being no Lighthouse in this
+      repository: lighthouse/budget.json and lighthouserc.cjs are in W-SITE-11''s files list and pnpm
+      verify has no step that could run one, which is the deferral B-UI-02 and W-SITE-04 both recorded.
+      This unit changes no Lighthouse budget, enforces the claim by construction (the island touches no
+      network until the load event) and asserts it two ways in a real browser - no collect request before
+      loadEventStart, read out of the page''s own Resource Timing, and no blocking build-chunk script in
+      the served HTML.'
+    - 'NOTE: measured, not estimated. The collector weighs 1,801 bytes gzipped (build/budgets.json entry
+      collector-client-js, scope modules, entry app/(en)/(dev)/collector/page) against the acceptance
+      line''s 3,072-byte budget - 1.2KB of headroom. The figure is the defining chunk of
+      collector.island.tsx on the one route that ships the collector and nothing else, read out of the real
+      next build.'
+    - 'NOTE: apps/web/e2e/collector.itest.ts and not collector.spec.ts, which is the filename this entry''s
+      files list asks for. A `.spec.ts` is run by NOTHING in this repository: vitest.config.ts excludes
+      **/e2e/** from the unit suite and vitest.integration.config.ts includes apps/**/*.itest.ts, so a spec
+      there would be a suite nobody runs - and apps/web/src/test-ports.test.ts scans for *.itest.ts only,
+      so the port band would have been reported as declared-and-unused while the suite was using it. There
+      is no Playwright runner in this repository and adding one would be a second test runner for one file.
+      The suite drives Playwright''s library API from the integration runner, which is what every other
+      browser suite here does.'
     files:
+    - packages/ui/src/analytics/attributes.ts
     - packages/ui/src/analytics/collector.ts
     - packages/ui/src/analytics/use-track.ts
+    - packages/ui/src/analytics/collector.island.tsx
+    - packages/shared/src/analytics/collect-limits.ts
     - scripts/check-event-attributes.mjs
-    - apps/web/e2e/collector.spec.ts
+    - apps/web/app/_analytics/collector-fixture.tsx
+    - apps/web/e2e/collector.itest.ts
   - id: A-FIRST-07
     order: 110
     title: WhatsApp reference-code loop, end to end

@@ -25,29 +25,28 @@
  */
 import { z } from 'zod'
 
-/** The one path the collector posts to. Written once, so a rename cannot leave the client behind. */
-export const COLLECT_PATH = '/api/collect'
-
-/**
- * The largest body `/api/collect` will read, in bytes.
+/*
+ * The three limits, RE-EXPORTED from a module that imports nothing (A-FIRST-06).
  *
- * 64 KiB, and the figure is the acceptance line's. It is generous for the shape below — fifty events of
- * a few hundred bytes each — and that headroom is deliberate: the cap exists to bound what an anonymous
- * internet caller can make the server parse, not to be a budget a real page has to fit inside.
+ * They were declared here, and the browser collector needs them — A-FIRST-06's own header above says why
+ * ("a cap the collector does not know about is a cap that silently drops a browser's whole batch"). What
+ * that cost, measured rather than argued, is that importing a cap from this file imports `zod` and, through
+ * the package barrel, every schema in `@berelax/shared`: 98,927 bytes gzipped in the client bundle against
+ * a 3,072-byte budget. Nothing else noticed — it typechecked and it worked.
+ *
+ * So the numbers moved one file over and are re-exported here, which keeps every existing consumer and
+ * every statement of every figure exactly where it was. `collect-limits.ts` carries the argument.
  *
  * Enforced on the BYTES rather than on the parsed object, and before the parse: a body is refused for
  * being too large by a check that has not yet allocated anything proportional to it.
  */
-export const COLLECT_MAX_BODY_BYTES = 65_536
+export {
+  COLLECT_MAX_BATCH_EVENTS,
+  COLLECT_MAX_BODY_BYTES,
+  COLLECT_PATH,
+} from './collect-limits.ts'
 
-/**
- * The most events one batch may carry.
- *
- * Fifty, from the acceptance line. The collector batches and flushes on `visibilitychange`, so a queue
- * longer than this is split into more than one request rather than refused — which is why a cap here
- * costs a real client nothing and bounds the work one request can ask for.
- */
-export const COLLECT_MAX_BATCH_EVENTS = 50
+import { COLLECT_MAX_BATCH_EVENTS } from './collect-limits.ts'
 
 /**
  * How long a session may be idle before the next event begins a new one, in milliseconds.

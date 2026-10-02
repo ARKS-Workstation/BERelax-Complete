@@ -99,6 +99,16 @@
       "why": "docs/08 \u00a76 budgets \"a ~1.4KB island\" to attach the hero video after LCP, and W-SYS-07's acceptance holds it to \u22642KB gzip. Measured over the chunk that DEFINES the module, the same narrow reading as the two motion islands above \u2014 Turbopack gives every client module on a route the same chunk list, so a chunk list cannot be divided between the modules that share it. The number is what makes the design checkable rather than asserted: the whole point of this island is that the hero costs ~0ms LCP and a kilobyte or two of deferred JavaScript, and an island that quietly grew a library would still work, still pass every behavioural test, and cost what the video hero was supposed to save. `[missing-client-module]` is the vacuity guard in the other direction: a budget over a module no route ships measures zero bytes and passes forever, which is exactly how a check stops being one (ADR 0003)."
     },
     {
+      "id": "collector-client-js",
+      "label": "The browser collector",
+      "kind": "client-js",
+      "scope": "modules",
+      "modules": ["packages/ui/src/analytics/collector.island.tsx"],
+      "entry": "app/(en)/(dev)/collector/page",
+      "maxBytes": 3072,
+      "why": "A-FIRST-06's acceptance line: the collector adds no more than 3KB gzipped to the public bundle. It ships to every visitor of every route that declares a tracked element, which today is /book and the fixture route, and it is the one thing on this site whose weight buys the reader nothing \u2014 a measurement SDK is pure overhead to the person waiting for the page, so the budget is the discipline that keeps it from becoming a tag manager. Measured over the chunk that DEFINES the island, the same narrow reading as the two motion islands and the hero attach island: Turbopack gives every client module on a route the same chunk list, so a chunk list cannot be divided between the modules that share it, and the defining chunk is where the island and the three React-free modules it statically imports (collector.ts, attributes.ts, use-track.ts) are bundled. `entry` narrows it to the fixture route, which is the one route that ships the collector and nothing else: on /book the same defining chunk also holds the slot picker and the details step, so the unnarrowed number was 5,928 bytes of which 4,127 belonged to the booking flow \u2014 a budget that moved when the collector became more popular rather than when it grew. `[missing-client-module]` is the vacuity guard in the other direction \u2014 a budget over a module no route ships measures zero bytes and passes forever, which is exactly how a check stops being one (ADR 0003). The second half of the acceptance line, that the collector is not in the LCP critical request chain, is NOT a byte count: it is enforced by construction \u2014 the island touches no network until the `load` event \u2014 and asserted in apps/web/e2e/collector.itest.ts, because Lighthouse CI does not exist in this repository and is W-SITE-11's to add."
+    },
+    {
       "id": "gallery-page",
       "label": "Screenshot gallery page",
       "kind": "file",

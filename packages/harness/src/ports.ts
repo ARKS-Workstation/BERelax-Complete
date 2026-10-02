@@ -208,7 +208,6 @@ export const TEST_PORT_BANDS = {
   //     banner, which is a computed style in a browser rather than a string in a render;
   //   * the endpoint's `Set-Cookie` and its exact attributes, including the one attribute deliberately
   //     ABSENT (`HttpOnly`), and the 409 a tree whose banner copy has no published version receives.
-  //
   // 17_900 is the band this unit was allocated. It was A-MEAS-01's allocation first and that unit declined
   // it, having started no server — so it is reused rather than a new number, and nothing else holds it.
   // It does not reach into [16_700, 17_900), which is held by units in flight in other worktrees; a band
@@ -218,6 +217,20 @@ export const TEST_PORT_BANDS = {
   // `usableWidth` is the full 300, which matters here because this suite drives Chromium and a port it
   // refuses to CONNECT to is gate case 89b's whole subject.
   'analytics-consent': { start: 17_900, width: 300 },
+  // A-FIRST-06's browser collector, which needs a real server and a real browser for every claim it makes,
+  // because not one of them can be read off source. "Each declared interaction produces exactly one event"
+  // is a count of `sendBeacon` calls against a running route; "a double click inside 300 ms produces one"
+  // is two real `click` events a hundred milliseconds apart; "events queued while offline flush on the
+  // next visibilitychange" needs a browser that can be taken offline and a `visibilitychange` the page
+  // believes; and "the collector contacts no origin other than the site's own" is request interception
+  // over everything the document fetched, which is a property of the BUILT bundle rather than of the
+  // module graph.
+  // 18_200 is the band this unit was allocated. 16_700 through 18_100 are allocations held by units in
+  // flight in other worktrees, and a band chosen from what one worktree can see is exactly how
+  // `template-editor` and `book-flow` came to share one. [18_200, 18_500) contains none of
+  // RESTRICTED_PORTS — the highest entry in that table below the ephemeral floor is 6697, and Chromium's
+  // own list has nothing between 10080 and the floor — so `usableWidth` is the full 300.
+  collector: { start: 18_200, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

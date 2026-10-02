@@ -603,6 +603,29 @@ export const ROUTES = [
       'form. Covered by the /clients noindex prefix.',
   },
   {
+    id: 'collector',
+    path: '/collector',
+    kind: 'document',
+    rendering: 'dynamic',
+    locales: LOCALES,
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      "A-FIRST-06's collector fixture: one element per declarable event in the measurement taxonomy. A " +
+      'development surface like the kitchen sink and the hero demo, so noindex and in no sitemap - and in ' +
+      'the registry anyway, because it is a route and a route the registry does not know about is the ' +
+      'failure this file exists to prevent. In both locales because a document route served in one would ' +
+      'publish an hreflang set pointing at a 404, which invalidates the set; a dev route is not exempt ' +
+      'from that and an exemption would be a hole in the check that keeps every alternate set reciprocal. ' +
+      'It is a real route rather than an HTML file in a test directory for two reasons: the thing under ' +
+      "test is the BUNDLED collector, and build/budgets.json's collector-client-js budget is measured off " +
+      "this route's own page_client-reference-manifest.js - the acceptance line's 3KB gzipped, over a " +
+      'page that ships no other client JavaScript at all. Dynamic so it is never prerendered: the budget ' +
+      'rests on this route having an entry of its own, and a static page is the one shape a future build ' +
+      'could fold into another entry while the budget went on passing against something else.',
+  },
+  {
     id: 'compliance-calendar',
     path: '/compliance',
     kind: 'handler',
