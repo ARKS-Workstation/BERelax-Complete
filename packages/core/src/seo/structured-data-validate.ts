@@ -287,8 +287,8 @@ export function validatePageStructuredData(input: StructuredDataPageInput): Stru
       rule: 'jsonld_block_absent',
       path: input.pagePath,
       detail:
-        'the page serves no <script type="application/ld+json"> block. Every rule about a graph passes ' +
-        'vacuously against a page that has none, which is why the absence is the finding.',
+        'the page serves no JSON-LD script block at all. Every rule about a graph passes vacuously ' +
+        'against a page that has none, which is why the absence is the finding.',
     })
     return { findings, coverage: { blocksFound: 0, blocksParsed: 0, nodesJudged: 0 } }
   }

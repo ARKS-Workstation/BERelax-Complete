@@ -172,6 +172,34 @@ export const ROUTES = [
       'on it is an aggregate.',
   },
   {
+    id: 'seo-suggestions',
+    path: '/agents/seo/suggestions',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'G-SEO-05s suggestion queue: the only path from an agent proposal to a live page, and it runs ' +
+      'through a person. The agent cannot publish - its code may not import the publication chokepoint ' +
+      '(seo-agent-must-not-reach-a-publish-path) and the permission layer refuses its principal - so a ' +
+      'queue nobody can act on would make the cage a way of doing nothing. A handler rather than a ' +
+      'document for the reason the diary, the pipeline board, the Messages inbox, the template editor, ' +
+      'the compliance calendar, the duplicate queue, the quick-book screen and the review paste form all ' +
+      'give: a registry document must be served in BOTH locales, which needs an Arabic admin document ' +
+      'and the W-SYS-01 shell. It WRITES - one POST approves, applies or rolls back, and an apply ' +
+      'records a draft, a lint pass, a named approval against the exact content hash and a published ' +
+      'record (0093) - and it IS authenticated through `guardAdminRoute`, refusing on the F07 matrix ' +
+      'with `content:publish` in BOTH verbs, because the page shows copy nobody has approved yet. There ' +
+      'is deliberately no ?role= and no ?suggestion= acted on from the query string, which is what keeps ' +
+      'it on the right side of W-SYS-11s scan: the only thing the form carries is which suggestion and ' +
+      'which of three actions. Dynamic because every approval row it writes carries an instant, and ' +
+      'because the queue is a read of rows that change. Not indexable and not in the sitemap: it is ' +
+      'under the /agents prefix in ADMIN_GROUP_PREFIXES, and it states noindex on its own response as ' +
+      'well.',
+  },
+  {
     id: 'collect',
     path: '/api/collect',
     kind: 'handler',
@@ -1534,6 +1562,13 @@ export type RouteId = Route['id']
  *
  */
 export const ADMIN_GROUP_PREFIXES: readonly string[] = [
+  // G-SEO-05's suggestion queue. A prefix rather than a bare path because the agents estate is already
+  // allocated there — the GBP consistency snapshot (G-SEO-06) is the screen that goes beside it, and the
+  // agent console docs/07 §3 describes would land under it too — and a screen listing what an agent
+  // proposed to publish, with the copy a human has not approved yet, is not a page for the public. The
+  // second route under a prefix arrives noindex on the commit that creates it rather than on the commit
+  // that remembers to.
+  '/agents',
   // M-VAT-12's closed-month reconciliation. A prefix rather than a bare path because the accounts estate
   // will grow — R-REP-02's three financial statements and M-VAT-09's filing export both land under it —
   // and a prefix added with the first route covers every one of them the moment it exists.

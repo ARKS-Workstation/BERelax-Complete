@@ -2124,6 +2124,27 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     translators: ['packages/db/src/repositories/deposit.ts'],
   },
   {
+    code: 'ZY401',
+    rule: 'A rollback descriptor must name a restorable before-state: a known method and this surface.',
+    migration: '0133',
+    raisedBy: ['assert_seo_suggestion_rollback_usable'],
+    translators: ['packages/db/src/repositories/seo-suggestion.ts'],
+  },
+  {
+    code: 'ZY402',
+    rule: 'A suggestion\u2019s evidence columns are immutable, no row may be deleted, and the state moves in one direction.',
+    migration: '0133',
+    raisedBy: ['assert_seo_suggestion_evidence_immutable'],
+    translators: ['packages/db/src/repositories/seo-suggestion.ts'],
+  },
+  {
+    code: 'ZY403',
+    rule: 'The publication a suggestion names must carry the content hash it says was applied or restored.',
+    migration: '0133',
+    raisedBy: ['assert_seo_suggestion_published_hash'],
+    translators: ['packages/db/src/repositories/seo-suggestion.ts'],
+  },
+  {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',
     migration: '0093',

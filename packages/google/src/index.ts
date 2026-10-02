@@ -328,6 +328,22 @@ export {
   type SeoIngestLogLine,
   type SuggestionCandidatePersist,
 } from './seo/candidate-ingest.ts'
+/*
+  G-SEO-05's drafting pass and the human apply/rollback path. Two directories, deliberately: the pass is
+  under `src/seo/` and is inside the cage `seo-agent-must-not-reach-a-publish-path` draws, and the apply
+  path is under `src/suggestions/` because applying a suggestion is not the agent's code — it is what an
+  operator does to the agent's output, and the directory boundary IS the cage.
+*/
+export {
+  runSeoSuggestionDraftPass,
+  SEO_ESCALATION_AUDIT_ACTION,
+  SEO_SUGGESTION_AGENT,
+  type SeoDraftDeps,
+  type SeoDraftPassOptions,
+  type SeoDraftPassResult,
+  type SeoDraftRequest,
+  type SeoModelAnswer,
+} from './seo/draft-suggestions.ts'
 export {
   assertWindowRespectsLag,
   type CollectOptions,
@@ -359,6 +375,18 @@ export {
   inspectClaimedUrls,
   type UrlInspectionDeps,
 } from './seo/url-inspection.ts'
+export {
+  type AppliedSuggestion,
+  type ApplySeoSuggestionInput,
+  applySeoSuggestion,
+  type RollbackSeoSuggestionInput,
+  type RolledBackSuggestion,
+  rollbackSeoSuggestion,
+  SUGGESTION_APPLY_REFUSALS,
+  type SuggestionApplyRefusal,
+  type SuggestionApprover,
+  suggestionApplyRefusalOf,
+} from './suggestions/apply.ts'
 /**
  * The token *shape*, and deliberately not the token *accessors*.
  *

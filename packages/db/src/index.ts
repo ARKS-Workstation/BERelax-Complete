@@ -1473,6 +1473,35 @@ export {
   type SuggestionCandidateRow,
   type SuggestionCandidateWrite,
 } from './repositories/seo-candidates.ts'
+/*
+  G-SEO-05's suggestion store. The only module that writes `seo_suggestion`: 0133 makes every evidence
+  column immutable and refuses every DELETE (ZY402), so a caller reaching for `db.update(seoSuggestion)`
+  gets a refusal rather than a second write path — and the rollback descriptor is DERIVED here rather than
+  accepted, because a descriptor naming another surface is the one field whose being wrong is invisible
+  until somebody needs a rollback.
+*/
+export {
+  approveSeoSuggestion,
+  type InsertSeoSuggestionInput,
+  insertSeoSuggestion,
+  markSeoSuggestionApplied,
+  markSeoSuggestionRolledBack,
+  openSeoSuggestions,
+  refuseSeoSuggestion,
+  SEO_ROLLBACK_METHOD,
+  SEO_SUGGESTION_REFUSALS,
+  SEO_SUGGESTION_SQLSTATE,
+  SEO_SUGGESTION_STATES,
+  SEO_SUGGESTION_TRANSITIONS,
+  type SeoSuggestionRefusal,
+  type SeoSuggestionRow,
+  type SeoSuggestionState,
+  type SuggestionRegion,
+  seoSuggestionById,
+  seoSuggestionCountsForRun,
+  seoSuggestionRefusalOf,
+  seoSuggestionSqlstateOf,
+} from './repositories/seo-suggestion.ts'
 export {
   type ClaimedInspection,
   claimUrlInspectionBatch,
@@ -4391,4 +4420,49 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises. The test port band
 // { start: 17_600, width: 300 } allocated to this unit is released UNUSED: nothing here starts a server.
 //
-export const SCHEMA_VERSION = 124 as const
+// 133 is 0133_seo_suggestion.sql (G-SEO-05) — the SEO suggestion store: the before-state is STORED, so a
+// change always has a way back.
+//
+// **Why the before-state is a column and not something the rollback recomputes.** The obvious
+// implementation reads what the page says now and works backwards, and it fails in the two cases a
+// rollback exists for: an editor who touched the page between the apply and the rollback has made the
+// current content a different document, so working backwards destroys an edit nobody asked to lose; and a
+// suggestion that changed a title the agent had itself changed a week earlier has no recoverable earlier
+// state at all. So `before_regions` and `before_content_sha256` are written at the moment the suggestion
+// is drafted. A suggestion that can be applied and not un-applied is a change with no way back, and the
+// before/after pair is this unit's primitive rather than a convenience.
+//
+// `rollback_descriptor` is NOT a second copy of the before-state — that would be two answers to compare on
+// the day somebody needs one. It says HOW the stored before-state goes back: the method, and the surface.
+// ZY401 is what makes it a claim rather than a blob, because NOT NULL already admits `'{}'::jsonb` and a
+// descriptor that says nothing is a rollback nobody can perform, discovered at the worst moment.
+//
+// **ZY403 is what makes "rollback is exact" a database fact.** An `applied` row's `publication_record`
+// must carry `after_content_sha256`, and a `rolled_back` row's must carry `before_content_sha256`. A
+// composite foreign key would be better and is what 0093 uses to tie an approval to the hash its lint pass
+// cleared; it needs `unique (id, content_sha256)` on `publication_record`, which 0093 did not add, and
+// adding a unique index to another unit's append-only evidence table from here would be a wider change
+// than this unit needs. The trigger is the narrower answer and it is exact.
+//
+// **Everything that is evidence is immutable (ZY402) and no row may be deleted at all**, so a suite
+// asserts a DELTA on this table and never a total. The state is a sequence rather than a value —
+// `proposed` to `approved` or `refused`, `approved` to `applied`, `applied` to `rolled_back` — and in
+// particular `refused` to `approved` is refused: what refused a suggestion was a lint version and a
+// profile version, so a row promoted past its own refusal would carry a lint stamp for a decision the lint
+// did not make.
+//
+// There is no `approved_by` column: the named approver is `publication_approval.approver_user_id` and
+// `approver_display_name`, snapshotted by 0093 so a later rename cannot rewrite who approved what. There
+// is no second cost cap either — `agent_definition.budget_fils_per_run` enforced mid-run by
+// `createRunBudget` is the cap, and a second one would be a second answer to whether a run may continue.
+// `cost_fils` is the `fils_nonneg` domain, the same one `agent_run.cost_fils` uses, so the per-suggestion
+// figure and the per-run total it sums into cannot disagree.
+//
+// The manifest entry for this unit names `packages/db/migrations/0047_seo_suggestion.sql`. 0047 does not
+// exist and was never this unit's: the number allocated to G-SEO-05 is 133, and the manifest's file list
+// is the only place that said otherwise.
+//
+// ZY401-ZY403 of the band ZY401-ZY410 are used; ZY404-ZY410 are released UNUSED and deliberately
+// unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
+//
+export const SCHEMA_VERSION = 133 as const

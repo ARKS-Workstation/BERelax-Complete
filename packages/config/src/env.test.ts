@@ -56,6 +56,19 @@ describe('parseConfig', () => {
         )
       })
 
+      /*
+       * G-SEO-05's acceptance line: *"Live LLM mode defaults off and a test asserts it cannot be selected
+       * unless APP_ENV=production"*. `LLM_PROVIDER` was in the schema and NOT in the refusal list until
+       * that unit, so this case is the one that would have failed on the committed tree — the symptom
+       * was `notImplemented('llm')` throwing at boot, which names a pending integration rather than a
+       * misconfiguration, which is why it went unnoticed. The default is `fake`, asserted below.
+       */
+      it(`REFUSES LLM_PROVIDER=real when APP_ENV=${env} — a real model spends real money on fetched text`, () => {
+        expect(() => parseConfig({ ...base, APP_ENV: env, LLM_PROVIDER: 'real' })).toThrow(
+          /LLM_PROVIDER=real is refused/,
+        )
+      })
+
       // The private bucket holds nineteen full-resolution photographs of real employees whose
       // photography consent is not on record. A staging run writing those to the real bucket is the
       // failure this refusal exists for.
@@ -65,6 +78,15 @@ describe('parseConfig', () => {
         )
       })
     }
+
+    it('defaults LLM_PROVIDER to fake, so live mode is off unless somebody turns it on', () => {
+      // The other half of "defaults off": a refusal outside production is worth nothing if the default
+      // IS `real` and production is the only place anybody runs.
+      expect(parseConfig(base).LLM_PROVIDER).toBe('fake')
+      expect(
+        parseConfig({ ...base, APP_ENV: 'production', LLM_PROVIDER: 'real' }).LLM_PROVIDER,
+      ).toBe('real')
+    })
 
     it('reports every offending provider in one error, not just the first', () => {
       try {
