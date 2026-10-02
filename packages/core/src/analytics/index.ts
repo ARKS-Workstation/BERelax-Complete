@@ -1,5 +1,6 @@
 export * from './bots.ts'
 export * from './category-codes.ts'
+export * from './consent-gate.ts'
 export * from './egress-guard.ts'
 export * from './funnel.ts'
 export * from './ingest.ts'

@@ -929,7 +929,12 @@ describe('the rollups, kept indefinitely', () => {
     // route and a count, with no instant finer than the date — so there is nothing for retention to protect
     // anybody from, and it is the only surviving record that a pre-consent visit happened, because the event
     // itself was never stored. A 90-day window would silently delete the funnel's own denominator.
+    // `consent_record` joined it with A-MEAS-02 (migration 0125) for a third reason again: it holds no
+    // identifier of any kind — a decision, four booleans, a wording reference and an instant — and it is
+    // the evidence docs/04 SS8 requires a consent decision to leave behind, so a 90-day window would
+    // delete the proof that somebody was asked.
     expect(exempt).toEqual([
+      'consent_record',
       'daily_funnel',
       'daily_source_revenue',
       'daily_traffic',
@@ -997,9 +1002,10 @@ describe('the rollups, kept indefinitely', () => {
     expect(outcome.after).toBe(outcome.before)
     expect(outcome.mutated).not.toBe(outcome.before)
     // The pass ran 400 times and reported every exempt relation on every one of them. Without this the
-    // equality above is satisfied by 400 runs that all refused, or by a loop that never ran. FIVE since
-    // A-FIRST-05, not four: `pre_consent_landing` is on the exemption list too.
-    expect(outcome.exemptions).toBe(400 * 5)
+    // equality above is satisfied by 400 runs that all refused, or by a loop that never ran. SIX since
+    // A-MEAS-02, not five: `pre_consent_landing` joined with A-FIRST-05 and `consent_record` with
+    // migration 0125, and the count is read off the list in the case above rather than guessed.
+    expect(outcome.exemptions).toBe(400 * 6)
     // And it was really doing work: advancing the clock 400 days past today drops every raw partition on
     // disk. The rollups survived a pass that was demonstrably removing things.
     expect(outcome.dropped).toBeGreaterThan(0)

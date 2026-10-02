@@ -4,6 +4,20 @@
  */
 
 export {
+  ANALYTICS_CONSENT_COPY_OPEN_QUESTION,
+  ANALYTICS_CONSENT_DECISIONS,
+  ANALYTICS_CONSENT_PATH,
+  ANALYTICS_CONSENT_REFUSALS,
+  ANALYTICS_CONSENT_SURFACES,
+  ANALYTICS_CONSENT_WORDING,
+  type AnalyticsConsentDecision,
+  type AnalyticsConsentDecisionBody,
+  type AnalyticsConsentRefusal,
+  type AnalyticsConsentSurface,
+  analyticsConsentDecisionSchema,
+  analyticsConsentShapeRefusal,
+} from './analytics/analytics-consent.ts'
+export {
   ANALYTICS_BREAKPOINT_BANDS,
   ANALYTICS_BREAKPOINTS,
   type AnalyticsBreakpoint,
@@ -247,11 +261,13 @@ export {
   treatmentStyleSchema,
 } from './schemas/catalogue.ts'
 export {
+  ANALYTICS_CONSENT_PURPOSE,
   CONSENT_ACTOR_KINDS,
   CONSENT_CAPTURE_SOURCES,
   CONSENT_CHANNELS,
   CONSENT_KINDS,
   CONSENT_LOCALES,
+  CONSENT_PURPOSE_VOCABULARY,
   CONSENT_PURPOSES,
   type ConsentActorKind,
   type ConsentCaptureContext,

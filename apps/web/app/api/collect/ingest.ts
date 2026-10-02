@@ -16,6 +16,7 @@ import {
   type CollectRefusal,
   collectBatchSchema,
   deviceKindFor,
+  grantedConsentSignals,
   parseAnalyticsEvent,
   SESSION_INACTIVITY_MS,
   UnknownEventError,
@@ -422,6 +423,15 @@ export async function handleCollectRequest(
             resolverVersion: resolution.resolverVersion,
           }
         : null,
+    /*
+     * The four Consent Mode v2 signals this request's cookie claimed (A-MEAS-02, migration 0125).
+     *
+     * `grantedConsentSignals` and NOT a second read of the cookie: `analyticsStorageGranted` above is the
+     * same parse asking about one of the four, and A-MEAS-02's whole subject is that a consent decision
+     * asked in two places gets two answers. The session row then carries the state the dispatch gate
+     * reads, because a dispatch is enqueued server-side where there is no cookie at all.
+     */
+    consentSignals: [...grantedConsentSignals(cookieHeader)],
     events: validated,
   }
 

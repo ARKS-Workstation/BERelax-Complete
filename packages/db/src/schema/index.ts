@@ -11,6 +11,14 @@ export * from './agents.ts'
  * would be somebody else's. `schema.analytics.session` reads the way the SQL does.
  */
 export * as analytics from './analytics.ts'
+/*
+ * The dispatch queue's mirrors, which are PUBLIC tables about the analytics schema's subject.
+ *
+ * `export *` and not a namespace, unlike the line above, because `analytics_dispatch` and
+ * `analytics_dispatch_destination` are in `public` — and their names already carry the word, so
+ * `schema.analyticsDispatch` reads the way the SQL does. 0125's header is why the queue is in `public`.
+ */
+export * from './analytics-dispatch.ts'
 export * from './attendance.ts'
 export * from './bill.ts'
 export * from './booking.ts'

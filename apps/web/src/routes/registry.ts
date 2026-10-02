@@ -243,6 +243,31 @@ export const ROUTES = [
       'locks the room rows and writes, on every request.',
   },
   {
+    id: 'consent-analytics',
+    path: '/api/v1/consent/analytics',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'A-MEAS-02s analytics consent endpoint: the one path a consent decision is recorded through, and ' +
+      'the one that issues the cookie the gate reads. Under /api/v1 and NOT beside /api/collect, which ' +
+      'is deliberately outside the versioned prefix because it is the other half of a client this ' +
+      'repository ships - this one is answered by a banner on every public page, so its shape is a ' +
+      'contract with documents that were prerendered at a particular version and a v2 has to be able to ' +
+      'exist beside a v1. Held once in ANALYTICS_CONSENT_PATH so the banner and the route cannot drift. ' +
+      'Exempt from the proxy for the reason every endpoint here records: a 301 on a mistyped trailing ' +
+      'slash would downgrade this POST to a GET with the decision dropped. Locale-neutral, because the ' +
+      'LOCALE is a field in the body - the record stores which language the statement was shown in, and ' +
+      'two URLs for that would be two endpoints to keep in step. Dynamic by necessity: it reads the ' +
+      'consent cookie and the visitor cookie and answers 204, 400 or 409. Not indexable and nothing to ' +
+      'index - it answers no GET at all. Nothing is read from the query string, not a decision and not a ' +
+      'visitor, which the integration suite asserts by posting a body that says the opposite of the ' +
+      'query and reading back what was stored.',
+  },
+  {
     id: 'media-publish',
     path: '/api/v1/media/publish',
     kind: 'handler',

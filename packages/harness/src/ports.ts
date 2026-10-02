@@ -198,6 +198,26 @@ export const TEST_PORT_BANDS = {
   // in that table below the ephemeral floor is 6697, and Chromium's own list has nothing between 10080 and
   // the floor — so `usableWidth` is the full 300.
   collect: { start: 16_400, width: 300 },
+  // A-MEAS-02's consent banner and consent endpoint, which need a real server for the claims no pure test
+  // can make, and one of them needs a real BROWSER:
+  //
+  //   * zero requests to any third-party tag host are made while loading the public pages, before any
+  //     decision and after an explicit denial — which is a claim about the network a document generates
+  //     and can only be made with request interception against the bytes the application serves;
+  //   * the inline bootstrap sets `data-consent` on `<html>` before first paint, and the CSS hides the
+  //     banner, which is a computed style in a browser rather than a string in a render;
+  //   * the endpoint's `Set-Cookie` and its exact attributes, including the one attribute deliberately
+  //     ABSENT (`HttpOnly`), and the 409 a tree whose banner copy has no published version receives.
+  //
+  // 17_900 is the band this unit was allocated. It was A-MEAS-01's allocation first and that unit declined
+  // it, having started no server — so it is reused rather than a new number, and nothing else holds it.
+  // It does not reach into [16_700, 17_900), which is held by units in flight in other worktrees; a band
+  // chosen from what one worktree can see is exactly how `template-editor` and `book-flow` came to share
+  // one. [17_900, 18_200) contains none of RESTRICTED_PORTS — the highest entry in that table below the
+  // ephemeral floor is 6697, and Chromium's own list has nothing between 10080 and the floor — so
+  // `usableWidth` is the full 300, which matters here because this suite drives Chromium and a port it
+  // refuses to CONNECT to is gate case 89b's whole subject.
+  'analytics-consent': { start: 17_900, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

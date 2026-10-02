@@ -13297,18 +13297,30 @@ units:
       this branch started from: the only inversion at HEAD is that pair, and this unit''s two entries sit in
       sorted position immediately before ZZ001 — which is where they belong in both trees, since main''s fix
       moves ZY181-ZY185 above ZY191 and leaves ZY199 followed by ZY221.'
-    - 'NOTE: deferred to A-MEAS-02 — the consent RECORD. This unit reads a consent signal off a cookie and
+    - 'NOTE: deferred to A-MEAS-02 — DEFERRAL SATISFIED — the consent RECORD. This unit reads a consent
+      signal off a cookie and
       owns neither the banner, the wording version, its hash, nor the durable row docs/04 §8 requires. The
       cookie is the transport of a decision the visitor already made and is explicitly not evidence of it:
       what it may decide is bounded to whether the visitor''s OWN measurement is stored under an identifier,
       it authorises no read, names no principal and reaches no other subject''s data — which is the bound
       that makes a client-supplied value acceptable here and unacceptable for anything an admin session
-      cookie does (ADR 0039), and the same distinction ADR 0062 draws about a user agent.'
-    - 'NOTE: deferred to A-MEAS-02/A-MEAS-03 — Meta''s fbp/fbc, which A-FIRST-03 handed to this unit as
+      cookie does (ADR 0039), and the same distinction ADR 0062 draws about a user agent. Satisfied by
+      A-MEAS-02 (migration 0125): analytics.consent_record is the durable row, the banner and its wording
+      version are consent_wording''s fifth purpose, and every record carries the wording hash and a
+      timestamptz. The one thing it does NOT carry is a subject — the visitor row is created AT consent by
+      ingestCollectBatch, so there is none to name when the banner is answered, and A-MEAS-02''s own NOTE
+      states the consequence.'
+    - 'NOTE: deferred to A-MEAS-02/A-MEAS-03 — DEFERRAL SATISFIED IN PART — Meta''s fbp/fbc, which
+      A-FIRST-03 handed to this unit as
       first-party COOKIES rather than query parameters. No column was added and none is read, because those
       cookies exist only once a Meta pixel has run and the pixel cannot run before consent — A-MEAS-02''s own
       acceptance line is zero requests to connect.facebook.net before a recorded consent. Storing them is
-      gated on ad_user_data, a signal A-MEAS-02 captures and this unit deliberately does not read.'
+      gated on ad_user_data, a signal A-MEAS-02 captures and this unit deliberately does not read. What
+      A-MEAS-02 did: ad_user_data is captured on every consent record and on every session
+      (migration 0125), and a server-side advertising push is gated on exactly that signal (ADR 0076). The
+      fbp/fbc COLUMNS remain open and are A-MEAS-03''s, which forwards them; A-MEAS-02 added none, for the
+      reason it added no event_id — a column with no producer is indistinguishable from a column whose
+      producer stopped working.'
     - 'NOTE: deferred to A-FIRST-09 — funnel_step rows. This unit writes analytics.visitor, .session,
       .attribution, .event and .pre_consent_landing and no funnel step: A-FIRST-09''s own summary is
       "materialise funnel_step rows from analytics and domain events". What this unit does for it is decide
@@ -13666,7 +13678,7 @@ units:
       store, defaulting to denied before any interaction, and make the gate code on both paths — client
       tags never load and server dispatches never enqueue without the matching signal.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - A-FIRST-05
@@ -13697,11 +13709,186 @@ units:
       the gate — it is code, not configuration
     - a known-bad fixture in scripts/test-gates.mjs proves the consent-invariant suite goes red when the
       gate is removed
+    - 'NOTE: what was built beyond the four files this entry listed, and why each edit was needed. (1) The GATE
+      is packages/core/src/analytics/consent-gate.ts and it is ONE function over ONE table of targets, which is
+      ADR 0076 and the whole shape of the unit: the two halves of the title are two CALL SITES, because two
+      gates is two statements of which signal a destination needs and the drift is silent — an outbound push
+      that happens while the on-page tag correctly refuses. (2)
+      packages/shared/src/analytics/analytics-consent.ts holds the banner''s exact words, the wire contract and
+      the three decision kinds, in shared because the banner (apps/web, prerendered), the seed and the writer
+      (packages/db, which may never import core) all read them. (3) Migration 0125 adds
+      analytics.consent_record, four Consent Mode v2 boolean columns on analytics.session,
+      public.analytics_dispatch and public.analytics_dispatch_destination, plus dispatch_consent_gap() — the ONE
+      statement of the comparison inside the database, called by the ZY312 trigger and by
+      enqueueAnalyticsDispatch, because ADR 0001 stops the writer asking the pure gate. (4)
+      packages/db/src/repositories/analytics-consent.ts rather than repositories/consent.ts, which this entry
+      names: that file is C-CRM-03''s and every function in it is keyed on a contact and a message_channel,
+      while the analytics subject is a visitor with neither — a subject-less record reached through a
+      contact-and-channel door is the second consent decision this unit exists to prevent. The one thing the two
+      share, the canonical wording hash, is shared rather than copied. (5)
+      packages/db/src/analytics-consent.test.ts is the STATIC half: a trigger deleted from the migration is
+      invisible to a database that already has it, and `default false` on a session consent column is a value no
+      runtime assertion can defend. (6) apps/web/app/api/v1/consent/analytics/{route,handler}.ts is the
+      endpoint, split the way /api/collect splits. (7) apps/web/src/consent-bootstrap.test.ts runs the real
+      inline-script string against a fabricated document and holds its cookie extraction equal to
+      grantedConsentSignals — apps/web is the only place both are reachable. (8)
+      packages/fixtures/src/consent-gate-arch.test.ts and packages/fixtures/src/analytics-consent.itest.ts, in
+      fixtures because each needs two packages that may not import each other. (9) scripts/test-gates.mjs block
+      155a-155z, 26 checks. (10) docs/adr/0076, linked in docs/adr/README.md.'
+    - 'NOTE: the banner ships ZERO client JavaScript modules, and that is a requirement rather than a flourish.
+      build/budgets.json caps the client JS every route ships at 4096 bytes and NAMES the two modules allowed in
+      it, so a third name fails `pnpm budgets` by rule name — and the budget has under 3.5KB of room with the
+      theme and direction providers already in it. The stronger reason is timing: a banner that hydrates decides
+      whether a tag may load AFTER the first paint and after whatever the page has already begun fetching, so
+      the decision is an inline blocking script in the document head, exactly as themeBootstrapScript() and
+      motionBootstrapScript() are and for the same stated reason — except that here lateness costs a REQUEST
+      rather than a frame. The script answers one question (has a decision been recorded on this device) and
+      sets data-consent on <html> so the CSS can hide the banner; it deliberately does NOT decide whether
+      anything may load, because that is mayLoadClientTag''s answer over the cookie and an attribute a page can
+      set would be a second authority.'
+    - 'NOTE: DEFERRED to A-MEAS-04 — the half of the Playwright acceptance line that cannot be made non-vacuous
+      here. What SHIPPED is real request interception: every request Chromium makes while loading /, /ar and
+      /treatments is logged in three consent states (no decision, an explicit denial, a full grant) and the four
+      hosts are asserted absent from all of it, with the controls that make it a check — the log is asserted
+      non-empty and first-party, and the matcher is asserted to catch a planted URL. What cannot be asserted is
+      a tag that loads AFTER a grant, because there is no tag loader in this build: A-MEAS-04 owns
+      tag-loader.tsx and its own acceptance line is ''tags inject only after a consent grant in the same page
+      session''. So ''zero requests before consent''is today a claim about a document that has nothing to
+      request from anywhere (ADR 0002), worth asserting now because it is the fence A-MEAS-04''s loader is
+      dropped inside — on the day it lands, the two states that must stay silent are already under test.
+      A-MEAS-04 calls mayLoadClientTag(target, document.cookie) and adds no second decision.'
+    - 'NOTE: DEFERRED to A-MEAS-03 — the dispatch TRANSPORT. public.analytics_dispatch and
+      analytics_dispatch_destination land here because this unit''s acceptance lines name their states
+      (''cancelled_consent_withdrawn'') and their reason column (reason=''consent_denied''), and
+      A-MEAS-03''s own file list contains no migration. What this unit deliberately did NOT add is a column
+      with no producer: no event_id, no payload, no attempt counter, no per-destination idempotency index, no
+      `failed` state — which is the reason A-MEAS-01 gives for keeping the shared event_id out of its own
+      allowlist. A-MEAS-03 adds them with the code that writes them, adds its own enum value, and relaxes the
+      two reason/state bijection CHECKs deliberately rather than writing a row that quietly disagrees with the
+      state beside it.'
+    - 'NOTE: scoped — the consent RECORD names no visitor, and the limitation is stated rather than implied. ADR
+      0066 creates analytics.visitor AT consent, inside ingestCollectBatch, which is ''the ONE place the
+      server decides who owns an identifier''— so at the instant the banner is answered there is no visitor
+      row, and minting one in the consent endpoint would be a second identifier-minting site. A nullable
+      visitor_id was the alternative and is worse: NULL for the common case (a first grant), so mostly empty and
+      mostly useless, while costing a foreign key into a table the retention pass purges every 90 days — the
+      contradiction 0024 and 0056 both refuse. The consequence: nothing says WHICH visitor made which decision,
+      so this table cannot answer ''show me my consent record''. What it does answer is how many grants,
+      denials and withdrawals happened, under which wording version, at which instants — which is what
+      distinguishes a deliberate denial from a banner nobody answered (A-FIRST-05 hands that question to this
+      unit in so many words) and what A-FIRST-10 publishes as a data-quality figure. The operative state the
+      gate reads is four boolean columns on analytics.session instead.'
+    - 'NOTE: scoped — a withdrawal reaches only the visitor the request presents. The endpoint matches the
+      visitor cookie and never mints one, so a device whose consent cookie survived its visitor cookie has
+      nothing identified to cancel; the withdrawal is still recorded as evidence and the counts returned say
+      which case it was rather than leaving a caller to infer it. The bound is narrow in practice: a dispatch
+      exists only for a session and a session only for a visitor row, and after a withdrawal the consent cookie
+      grants nothing, so /api/collect takes the pre-consent path and creates no further session for that device.'
+    - 'NOTE: three defects in this unit''s own work, each found by a control rather than by review. (1)
+      gateConsent returned `{ permitted: false, missing: [] }` for an UNKNOWN target under a full grant — it
+      filtered CONSENT_MODE_SIGNALS by the state, so nothing was missing. The pair is incoherent and worse than
+      incoherent: `missing.length === 0` is the branch a caller writes instead of reading `permitted`, and under
+      it an unknown target was PERMITTED. Found by the case written for the unknown-target refusal on its first
+      run; the invariant (missing is empty exactly when permitted) is now asserted over every target and every
+      state, and gate case 155d restores the defect. (2) The first vacuity fixture for the monotonicity property
+      emptied the generator''s `before` state, and the suite PASSED: a target needing one signal still flips
+      when that signal is the one added, so about an eighth of the pairs disagreed and the measured floor was
+      comfortably met. A fixture that leaves the property able to examine something is not a vacuity fixture —
+      gate case 155e now makes the two states IDENTICAL, and 155e(ii) raises the floor instead, so both halves
+      of brief rule 22 have been seen to fire. (3) Two gate fixtures reported ''exited zero; nothing was
+      rejected''about scans that were working: the destination-host one planted
+      `"https://www.google"+"-analytics.com/mp/collect"`, which is what the BROWSER concatenates at runtime, so
+      the host never appeared in the string the generator emits; and the not-found-guard one appended a
+      character to `end if;`, which is invalid PL/pgSQL the static test has no opinion about. Both are the
+      fixture being wrong rather than the rule, which is why a known-bad fixture has to be seen to fail BY NAME.'
+    - 'NOTE: two more defects, both caught by a gate rather than by a test. (4) `pnpm invisibles` refused
+      packages/shared/src/analytics/analytics-consent.test.ts for a literal U+FEFF: `biome check --write`
+      rewrites a \uXXXX escape inside a regex literal into the LITERAL character, and the top of the Arabic
+      Presentation Forms-B block is the byte-order mark. Rewriting it as new RegExp(''[\\u0600-…]'') did not
+      help either — Biome''s useRegexLiterals turned it back into a literal — so both the Arabic-script and
+      the control-character tests are now comparisons on codePointAt, which neither rule has an opinion about
+      and which a reader can look up. (5) `pnpm sqlstate` refused the new repository for holding a second
+      literal of ZP002: a code is an identity, and the registry asked for ZP002''s translator list to name
+      both modules. The better answer was for only one of them to hold the code, so the repository imports
+      CONSENT_SQLSTATE.wordingHashMismatch from C-CRM-03''s module instead.'
+    - 'NOTE: edits to other units''files that this unit''s schema change REQUIRED, reported because the
+      convention is to repair nothing beyond that. (a) packages/db/src/repositories/analytics.ts and
+      apps/web/app/api/collect/ingest.ts: CollectIngestInput gains consentSignals and the session INSERT and the
+      stitched-session UPDATE write the four columns, because a gate over columns no writer fills is a gate that
+      suppresses everything. The route passes grantedConsentSignals(cookieHeader) — the same parse
+      analyticsStorageGranted already makes, not a second read. (b) packages/db/src/analytics.itest.ts: the
+      keep_indefinitely exemption list gains ''consent_record''and the 400-day retention case''s count
+      goes from 400*5 to 400*6, which is the same edit A-FIRST-05 had to make for pre_consent_landing. (c)
+      packages/fixtures/src/consent.itest.ts: four cases that enumerate the consent_purpose TABLE now read
+      CONSENT_PURPOSE_VOCABULARY, and the non-send-gating list gains ''analytics_measurement''. (d)
+      packages/shared/src/schemas/consent.ts gains ANALYTICS_CONSENT_PURPOSE and CONSENT_PURPOSE_VOCABULARY —
+      the latter DERIVED from CONSENT_PURPOSES — rather than a fifth member of CONSENT_PURPOSES: adding one
+      there made the H03 matrix demand a seeded sms/analytics_measurement consent row, a row that could not mean
+      anything, since analytics consent has no channel and no contact. That failure is why the two constants are
+      separate. (e) apps/web/app/_document/shell.tsx renders the banner and its bootstrap. (f)
+      packages/harness/src/ports.ts gains the analytics-consent band. (g) apps/web/src/routes/registry.ts gains
+      the endpoint, which registry.test.ts required BY NAME: a route the registry does not know about is
+      absent from the sitemap, carries no hreflang and is never screenshotted, and none of those three is a
+      build error on its own. The entries are also held in sorted path order, so the first placement failed
+      a second case. Nothing else in any other unit''s file was touched.'
+    - 'NOTE: a pre-existing, environmental failure this unit did NOT repair, with the proof the brief asks for.
+      apps/web/app/api/collect/collect.itest.ts fails 17 of 31 cases on a database created in OCTOBER, every
+      failure being ZY061 — ''no partition of analytics.event covers 2026-09-29 …''. Migration 0096 ends
+      with `select analytics.ensure_partitions()`, which creates the current month and three ahead, so a
+      database built today has 2026-10 through 2027-01 while the suite''s fixtures land on seeded business
+      days from 2026-09. PROVED in both directions without touching the tree: a bare INSERT naming ONLY
+      0096''s columns — no column, trigger or table from 0125 — is refused with the identical message, and
+      after `select analytics.ensure_partitions(''2026-05-01''::date, 5)` the same suite passes 31 of 31
+      including this unit''s consentSignals wiring. It is a function of the calendar rather than of any code,
+      and it will fail for every agent who builds a fresh database in a month after the one the fixtures were
+      written in.'
+    - 'NOTE: allocations. USED — migration 0125 (SCHEMA_VERSION raised to 125, with a ledger paragraph in
+      packages/db/src/index.ts opening ''// 125 is 0125_analytics_consent.sql''), private SQLSTATEs ZY311
+      and ZY312, gate block `// 155a-155z.` (26 checks, inserted after block 151 and before the harness blocks
+      79/88/89/90), ADR number 0076, and the test port band { start: 17_900, width: 300 } as `analytics-consent`
+      — which was A-MEAS-01''s allocation first and was released unused by it, so it is reused rather than a
+      new number. FREE — ZY313 through ZY320, all eight: nothing else here raises from the database, and an
+      entry for a code no migration raises is refused by `pnpm sqlstate`. No new OPEN-QUESTIONS id was taken:
+      the banner copy is filed under C-CRM-03''s Y9-consent-wording, whose wording is exactly this question,
+      and the purpose label under Y9-consent-purpose — a second id for one open decision would have put two
+      questions on the Unconfirmed Assumptions panel where somebody has to answer one. The consent cookie''s
+      Max-Age is VISITOR_COOKIE_MAX_AGE_SECONDS, imported rather than chosen, because that constant is already
+      derived from analytics.raw_retention_days() with a test holding the two equal: consent that outlived every
+      measurement it permitted would be consent for nothing (brief rule 15). No new `pnpm verify` step was
+      added, so gate case 29''s array is unchanged.'
     files:
     - packages/core/src/analytics/consent-gate.ts
-    - apps/web/app/(public)/_components/consent-banner.tsx
-    - packages/db/src/repositories/consent.ts
     - packages/core/src/analytics/consent-gate.test.ts
+    - packages/core/src/analytics/index.ts
+    - packages/shared/src/analytics/analytics-consent.ts
+    - packages/shared/src/analytics/analytics-consent.test.ts
+    - packages/shared/src/schemas/consent.ts
+    - packages/shared/src/index.ts
+    - packages/db/migrations/0125_analytics_consent.sql
+    - packages/db/src/schema/analytics.ts
+    - packages/db/src/schema/analytics-dispatch.ts
+    - packages/db/src/schema/index.ts
+    - packages/db/src/repositories/analytics-consent.ts
+    - packages/db/src/repositories/analytics.ts
+    - packages/db/src/analytics-consent.test.ts
+    - packages/db/src/analytics.itest.ts
+    - packages/db/src/sqlstate-registry.ts
+    - packages/db/src/index.ts
+    - packages/fixtures/src/analytics-consent.itest.ts
+    - packages/fixtures/src/consent-gate-arch.test.ts
+    - packages/fixtures/src/consent.itest.ts
+    - packages/harness/src/ports.ts
+    - apps/web/app/(public)/_components/consent-banner.tsx
+    - apps/web/app/api/v1/consent/analytics/route.ts
+    - apps/web/app/api/v1/consent/analytics/handler.ts
+    - apps/web/app/api/collect/ingest.ts
+    - apps/web/app/_document/shell.tsx
+    - apps/web/src/routes/registry.ts
+    - apps/web/src/consent-bootstrap.test.ts
+    - apps/web/src/analytics-consent.itest.ts
+    - scripts/test-gates.mjs
+    - docs/adr/0076-one-consent-gate-asked-in-two-places-and-enforced-by-the-database.md
+    - docs/adr/README.md
   - id: A-MEAS-03
     order: 116
     title: analytics_dispatch consumer with GA4 MP and Meta CAPI behind fakes
@@ -13730,6 +13917,22 @@ units:
       fake writes a visible local outbox row instead of returning bare success'
     - packages/analytics is added to .dependency-cruiser.cjs and scripts/test-boundaries.mjs proves the
       new rule rejects an illegal import by rule name (ADR 0003)
+    - 'NOTE: handed over by A-MEAS-02 — the dispatch TABLE already exists. Migration 0125 creates
+      public.analytics_dispatch and public.analytics_dispatch_destination, because A-MEAS-02''s acceptance
+      lines name their states (''cancelled_consent_withdrawn'') and their reason column
+      (reason=''consent_denied''), and this entry''s own file list contains no migration. What is there:
+      session_id (FK to analytics.session, on delete cascade), destination (FK to the requirement table),
+      funnel_stage (0096''s analytics.funnel_step_name), state, reason, decided_at, transmitted_at, the CHECKs
+      that tie transmitted_at to the sent state, and the ZY312 trigger that refuses a row reaching queued or
+      sent while the session lacks a signal its destination requires — for every role including the owner, on
+      INSERT and on UPDATE. What is deliberately NOT there, because a column with no producer is
+      indistinguishable from one whose producer stopped working: event_id, the payload, an attempt counter, a
+      per-destination idempotency index and a `failed` state. This unit adds them, adds its enum value with
+      `alter type ... add value`, and relaxes analytics_dispatch_reason_iff_refused and its two siblings
+      deliberately rather than writing a row that disagrees with the state beside it. The gate itself is not
+      this unit''s to re-answer: call enqueueAnalyticsDispatch
+      (packages/db/src/repositories/analytics-consent.ts), which asks dispatch_consent_gap — the same function
+      the trigger asks — and writes either a queued row or the visible suppression. ADR 0076.'
     files:
     - packages/analytics/package.json
     - packages/analytics/src/port.ts
@@ -13760,6 +13963,19 @@ units:
       events are still recorded, asserted in Playwright
     - 'intercepting the outbound tag request asserts the payload carries only A-MEAS-01 category codes:
       no service name, no price string, no free text in dataLayer'
+    - 'NOTE: handed over by A-MEAS-02 — the gate the tag loader must call, and the interception spec it must
+      finish. mayLoadClientTag(target, document.cookie) in packages/core/src/analytics/consent-gate.ts is the
+      ONE decision about whether a tag may load; the targets are ''analytics_tag''and
+      ''advertising_tag'', and `packages/fixtures/src/consent-gate-arch.test.ts` asserts that no setting key
+      and no environment variable can reach that estate, so a loader that read a flag would break it. Do not
+      read the `data-consent` attribute the banner''s bootstrap sets: it exists so the CSS can hide the banner
+      before first paint, and a loader reading it would be a second authority (ADR 0076).
+      apps/web/src/analytics-consent.itest.ts already intercepts every request made while loading /, /ar and
+      /treatments in three consent states and asserts the four tag hosts absent, with the controls that keep it
+      honest; what A-MEAS-02 could not assert is the state that needs a loader — a tag that DOES load after a
+      grant, and none before it in the same page session. Add that case to that file or beside it, and the band
+      `analytics-consent` { start: 17_900, width: 300 } in packages/harness/src/ports.ts is the server it runs
+      against.'
     files:
     - apps/web/app/(public)/_components/tag-loader.tsx
     - packages/ui/src/analytics/web-vitals.ts

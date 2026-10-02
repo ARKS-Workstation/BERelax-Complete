@@ -11,6 +11,7 @@ import { ThemeProvider } from '@berelax/ui/theme-provider'
 import type { Metadata, Viewport } from 'next'
 import type { ReactNode } from 'react'
 import { fontVariables } from '../_fonts/index.ts'
+import { ConsentBanner, consentBootstrapScript } from '../(public)/_components/consent-banner.tsx'
 
 /**
  * The document's fallback title and description — and the address it deliberately no longer carries.
@@ -106,6 +107,23 @@ export function DocumentShell({ locale, children }: { locale: Locale; children: 
           // biome-ignore lint/security/noDangerouslySetInnerHtml: a constant from motionBootstrapScript(), never user input, and it has to be inline to run before paint
           dangerouslySetInnerHTML={{ __html: motionBootstrapScript() }}
         />
+        {/*
+          The third, and the only one of the three whose lateness would cost a REQUEST rather than a frame.
+
+          A-MEAS-02's claim is that no third-party tag loads before a recorded consent. A banner that
+          hydrates decides that after the first paint and after whatever the page has already begun
+          fetching, so the decision has to be here — before paint, in the document — for the same reason
+          the theme's is. It also keeps `build/budgets.json`'s shared-layout budget true: a string is not a
+          client module, and that budget names the only two modules every route may ship.
+
+          It reads the consent cookie and does nothing else with it: whether a tag may load is
+          `mayLoadClientTag`'s answer, in `packages/core/src/analytics/consent-gate.ts`, because a second
+          consent decision in a second place is the defect that unit is shaped to prevent.
+        */}
+        <script
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: a constant from consentBootstrapScript(), never user input, and it has to be inline to run before paint
+          dangerouslySetInnerHTML={{ __html: consentBootstrapScript() }}
+        />
       </head>
       <body>
         {/*
@@ -121,6 +139,16 @@ export function DocumentShell({ locale, children }: { locale: Locale; children: 
         <ThemeProvider>
           <DirectionProvider locale={locale}>{children}</DirectionProvider>
         </ThemeProvider>
+        {/*
+          The banner, LAST in the document and outside the providers.
+
+          Last because it is `position: fixed` chrome rather than content, so it belongs after the page in
+          reading order. Outside the providers because it needs neither: it has no theme state of its own
+          and its direction comes from `<html dir>`, which every rule in `arabic.css` is written against.
+          Putting it inside `DirectionProvider` would make a server component with no interactivity a child
+          of a client boundary for nothing.
+        */}
+        <ConsentBanner locale={locale} />
       </body>
     </html>
   )

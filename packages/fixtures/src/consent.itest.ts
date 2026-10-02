@@ -46,6 +46,7 @@ import {
 } from '@berelax/messaging'
 import {
   CONSENT_CAPTURE_SOURCES,
+  CONSENT_PURPOSE_VOCABULARY,
   CONSENT_PURPOSES,
   SEND_GATING_CONSENT_PURPOSES,
 } from '@berelax/shared'
@@ -790,9 +791,14 @@ describe('an ambiguous log resolves to unknown, end to end', () => {
 })
 
 describe('the vocabulary the database holds is the one the contract declares', () => {
-  it('seeds exactly the four purposes, in order, all flagged provisional', async () => {
+  it('seeds exactly the purposes the vocabulary declares, in order, all flagged provisional', async () => {
     const purposes = await readConsentPurposes(sql)
-    expect(purposes.map((row) => row.purpose)).toEqual([...CONSENT_PURPOSES])
+    // `CONSENT_PURPOSE_VOCABULARY` and not `CONSENT_PURPOSES`: this case is about the `consent_purpose`
+    // TABLE, which migration 0125 gave a fifth row — `analytics_measurement`, whose subject is a web
+    // visitor with no channel rather than a contact. The cases below that ARE about a contact's consent
+    // per channel keep the four.
+    expect(purposes.length).toBe(CONSENT_PURPOSE_VOCABULARY.length)
+    expect(purposes.map((row) => row.purpose)).toEqual([...CONSENT_PURPOSE_VOCABULARY])
     for (const row of purposes) {
       expect(row.isProvisional, row.purpose).toBe(true)
       expect(row.openQuestionId, row.purpose).toBe('Y9-consent-purpose')
@@ -806,20 +812,27 @@ describe('the vocabulary the database holds is the one the contract declares', (
       ...SEND_GATING_CONSENT_PURPOSES,
     ])
     // Both directions, so "is_send_gating" is neither all-true nor all-false in the table.
+    // `analytics_measurement` joined the list with A-MEAS-02 (migration 0125): measuring a website is a
+    // lawful basis for measuring and not permission to message anybody, so a send path that accepted it
+    // would be reading a consent record that was never about messaging.
     expect(purposes.filter((row) => !row.isSendGating).map((row) => row.purpose)).toEqual([
       'clinical_processing',
       'photography',
+      'analytics_measurement',
     ])
   })
 
   it('puts every provisional purpose and wording version on the Unconfirmed Assumptions panel', async () => {
     const rows = await unconfirmedAssumptionRows(sql)
     const purposes = rows.filter((row) => row.source === 'consent_purpose')
-    expect(purposes.map((row) => row.reference).sort()).toEqual([...CONSENT_PURPOSES].sort())
+    // The TABLE's vocabulary, which migration 0125 extended — see the first case in this describe.
+    expect(purposes.map((row) => row.reference).sort()).toEqual(
+      [...CONSENT_PURPOSE_VOCABULARY].sort(),
+    )
     for (const row of purposes) expect(row.openQuestionId).toBe('Y9-consent-purpose')
 
     const wording = rows.filter((row) => row.source === 'consent_wording')
-    expect(wording.length).toBeGreaterThanOrEqual(CONSENT_PURPOSES.length)
+    expect(wording.length).toBeGreaterThanOrEqual(CONSENT_PURPOSE_VOCABULARY.length)
     for (const row of wording) {
       expect(row.openQuestionId).toBe(CONSENT_WORDING_OPEN_QUESTION)
       expect(row.reference).toMatch(/ v\d+$/)
@@ -837,13 +850,16 @@ describe('the vocabulary the database holds is the one the contract declares', (
       const listed = await unconfirmedAssumptionRows(tx)
       return listed.filter((row) => row.source === 'consent_purpose').length
     })
-    expect(remaining).toBe(CONSENT_PURPOSES.length - 1)
+    expect(remaining).toBe(CONSENT_PURPOSE_VOCABULARY.length - 1)
   })
 
   it('seeds the drafted wording with a visible draft marker in BOTH languages', async () => {
     // Rule 15. A plausible consent statement in this table is indistinguishable from approved legal copy,
     // so the marker is in the text a reader sees and not only in a flag a query reads.
-    for (const purpose of CONSENT_PURPOSES) {
+    // Every purpose in the TABLE's vocabulary, which includes the analytics banner's own statement:
+    // migration 0125 publishes it with the same marker, and a loop over the four would have skipped the
+    // one statement a visitor actually reads on a public page.
+    for (const purpose of CONSENT_PURPOSE_VOCABULARY) {
       const [row] = await sql<{ text_en: string; text_ar: string }[]>`
         select text_en, text_ar from consent_wording where purpose = ${purpose} and version = 1
       `

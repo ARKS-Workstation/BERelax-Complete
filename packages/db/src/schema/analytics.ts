@@ -4,6 +4,7 @@ import {
   bigint,
   boolean,
   check,
+  customType,
   date,
   index,
   integer,
@@ -141,6 +142,25 @@ export const session = analyticsSchema.table(
      * though it typechecks perfectly here.
      */
     tradingDateBasis: text('trading_date_basis').notNull(),
+    /**
+     * The four Consent Mode v2 signals this session's consent cookie claimed (migration 0125, A-MEAS-02).
+     *
+     * The column names ARE the external vocabulary, prefixed: the signal names are Google's and not ours,
+     * so a different spelling here would produce a store whose consent state could not be handed to the
+     * thing it gates. `SESSION_CONSENT_COLUMNS` in `packages/core/src/analytics/consent-gate.ts` is the
+     * one place a signal meets a column, and `packages/fixtures/src/analytics-consent.itest.ts` holds
+     * those four names against the columns the database actually has.
+     *
+     * An eighth thing the mirror cannot say: every one of them is `default false` in the migration, and
+     * that default is the fail-closed direction. A writer that forgets them suppresses every outbound
+     * dispatch and writes a visible suppression row; a default of true would permit one for a visitor who
+     * never answered. `.notNull()` without `.default()` here is deliberate — a Drizzle default would
+     * invite an insert that omits them, and nothing in this build inserts a session through Drizzle.
+     */
+    consentAdStorage: boolean('consent_ad_storage').notNull(),
+    consentAdUserData: boolean('consent_ad_user_data').notNull(),
+    consentAdPersonalization: boolean('consent_ad_personalization').notNull(),
+    consentAnalyticsStorage: boolean('consent_analytics_storage').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
   },
   (t) => [
@@ -411,5 +431,83 @@ export const preConsentLanding = analyticsSchema.table(
     ),
     check('pre_consent_landing_path_is_a_path', sql`${t.path} like '/%'`),
     check('pre_consent_landing_counted_at_least_one', sql`${t.landings} >= 1`),
+  ],
+)
+
+/** The wording hash. Same representation as `consent.wordingHash` and the ciphertext columns in 0008. */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType: () => 'bytea',
+})
+
+/**
+ * The three kinds of analytics consent record (migration 0125, A-MEAS-02).
+ *
+ * `withdrawn` is a kind rather than an edit, for 0056's reason: a column that could be cleared is a column
+ * an UPDATE can un-clear. "Never asked" is the ABSENCE of a row and is never stored — the gate treats it
+ * exactly like a denial, which is the same instruction and not the same fact.
+ */
+export const consentDecision = analyticsSchema.enum('consent_decision', [
+  'granted',
+  'denied',
+  'withdrawn',
+])
+
+/**
+ * The analytics consent record (migration 0125, A-MEAS-02; docs/04 §8).
+ *
+ * Four things the mirror cannot say, and each of them will mislead a caller who writes from these
+ * definitions rather than reading 0125:
+ *
+ *   1. **It holds no identifier and names no visitor, deliberately.** There is no `visitorId` column to
+ *      forget: the visitor row is created AT consent by `ingestCollectBatch` — "the ONE place the server
+ *      decides who owns an identifier" — and does not exist yet when the banner is answered, so a column
+ *      here would be a second identifier-minting site. The consequence is stated out loud in 0125's
+ *      header: nothing says which visitor made which decision, and the operative state the gate reads is
+ *      on `session` instead.
+ *   2. **It is append-only.** UPDATE and DELETE raise `ZY311` for every role, the owner and
+ *      `berelax_retention` included. A `db.update(consentRecord)` typechecks perfectly and is refused by
+ *      the server.
+ *   3. **The wording snapshot is checked by 0056's own trigger**, attached to this table rather than
+ *      copied: `assert_consent_wording_hash()` raises `ZP002` when `wordingHash` disagrees with the
+ *      referenced version's generated `contentHash`.
+ *   4. **Its `retention_policy` row says `keep_indefinitely`**, which is honest because the row holds no
+ *      identifier — and load-bearing, because `analytics.run_retention` raises `ZY062` for a base table in
+ *      this schema with no row at all.
+ */
+export const consentRecord = analyticsSchema.table(
+  'consent_record',
+  {
+    consentRecordId: uuid('consent_record_id').primaryKey().default(sql`public.uuid_generate_v7()`),
+    decision: consentDecision('decision').notNull(),
+    consentAdStorage: boolean('consent_ad_storage').notNull(),
+    consentAdUserData: boolean('consent_ad_user_data').notNull(),
+    consentAdPersonalization: boolean('consent_ad_personalization').notNull(),
+    consentAnalyticsStorage: boolean('consent_analytics_storage').notNull(),
+    /**
+     * NOT NULL on both, which is where this table is STRICTER than `public.consent`. That one lets a
+     * withdrawal carry no wording, because the realistic withdrawal is somebody telling the receptionist
+     * to stop texting them. Every decision here is made by clicking a control on a page that was rendering
+     * specific words, so there is always a version.
+     */
+    consentWordingId: uuid('consent_wording_id').notNull(),
+    wordingHash: bytea('wording_hash').notNull(),
+    /** When the visitor decided. Supplied, never defaulted; `createdAt` is when the row landed. */
+    decidedAt: timestamp('decided_at', { withTimezone: true }).notNull(),
+    captureLocale: text('capture_locale').notNull(),
+    captureSurface: text('capture_surface').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    check(
+      'consent_record_grant_grants_something',
+      sql`${t.decision} <> 'granted' or ${t.consentAdStorage} or ${t.consentAdUserData} or ${t.consentAdPersonalization} or ${t.consentAnalyticsStorage}`,
+    ),
+    check(
+      'consent_record_refusal_grants_nothing',
+      sql`${t.decision} = 'granted' or not (${t.consentAdStorage} or ${t.consentAdUserData} or ${t.consentAdPersonalization} or ${t.consentAnalyticsStorage})`,
+    ),
+    check('consent_record_locale_known', sql`${t.captureLocale} in ('en', 'ar')`),
+    check('consent_record_surface_known', sql`${t.captureSurface} in ('consent_banner')`),
+    index('consent_record_decided_idx').on(t.decidedAt.desc()),
   ],
 )
