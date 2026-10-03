@@ -13,6 +13,13 @@ artifacts/screens/
 artifacts/coverage/
 artifacts/media-outbox/
 playwright-report/
+
+# Lighthouse CI's output: the reports a collection wrote and the Lighthouse-native budgets file
+# `scripts/check-performance-layers.mjs --emit-native` derives from `lighthouse/budget.json`. The native
+# file is EMITTED and not committed on purpose — a committed copy would be a second statement of the
+# declaration's figures, and the symptom of a second statement is a CI job passing on the one nobody
+# meant (W-SITE-11).
+.lighthouseci/
 test-results/
 .turbo/
 .claude/worktrees/

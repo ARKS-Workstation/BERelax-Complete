@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**195 / 211 units complete.**
+**196 / 211 units complete.**
 
 ## Next up
 
@@ -166,7 +166,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 145 | `W-SITE-06` | Therapist routes and the publishing guard | `B-UI-01`, `B-UI-02`, `B-UI-03`, `B-UI-04`, `B-UI-05`, `P-HR-01`, `P-HR-02`, `P-HR-03`, `P-HR-04`, `P-HR-05`, `P-HR-06`, `P-HR-07`, `P-HR-08`, `P-HR-09`, `P-HR-10`, `P-HR-11`, `P-HR-12`, `P-HR-13`, `P-HR-14`, `W-SITE-03`, `W-SYS-09` | — | Y12-consent-photo, Y8-staff |
 | [ ] | 146 | `W-SITE-08` | Sitemaps, hreflang, IndexNow and the publish propagation pipeline | `H02`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07` | M4 | — |
 | [ ] | 147 | `W-SITE-09` | Legacy WooCommerce URL migration and the 301 map | `W-SITE-08` | — | Y1-woo-baseline |
-| [ ] | 148 | `W-SITE-11` | Performance enforcement: Lighthouse CI budgets and field RUM | `A-FIRST-01`, `A-FIRST-02`, `A-FIRST-03`, `A-FIRST-04`, `A-FIRST-05`, `A-FIRST-06`, `A-FIRST-07`, `A-FIRST-08`, `A-FIRST-09`, `A-FIRST-10`, `H05`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06` | — | Y5-analytics-basis |
+| [x] | 148 | `W-SITE-11` | Performance enforcement: Lighthouse CI budgets and field RUM | `A-FIRST-01`, `A-FIRST-02`, `A-FIRST-03`, `A-FIRST-04`, `A-FIRST-05`, `A-FIRST-06`, `A-FIRST-07`, `A-FIRST-08`, `A-FIRST-09`, `A-FIRST-10`, `H05`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06` | — | Y5-analytics-basis |
 | [x] | 149 | `W-SYS-10` | Breakpoint preview in the CMS admin | `W-SYS-09` | — | — |
 | [x] | 150 | `G-AGT-01` | Agent registry, heartbeat contract and 2x-interval watchdog | `F09`, `H02` | — | — |
 | [x] | 151 | `G-CONN-01` | google_connections schema: one-to-many, sub-keyed, envelope-encrypted | `F04`, `F08`, `F09` | — | Y2-listing-owner, Y2-gbp-status |

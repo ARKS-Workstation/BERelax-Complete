@@ -4,7 +4,7 @@
 
 # ADR index
 
-102 records, generated from the front matter of each one. Every column below is read
+103 records, generated from the front matter of each one. Every column below is read
 out of the record it describes, so a row cannot be wrong without the record being wrong — which is
 the whole reason this file is not maintained by hand. For the argument behind any of them, read
 [README.md](README.md) and then the record.
@@ -113,3 +113,4 @@ the whole reason this file is not maintained by hand. For the argument behind an
 | [0110](0110-discreet-is-a-narrow-privacy-claim-and-the-mcc-gate-is-three-layers.md) | "discreet" is a NARROW privacy claim, and the MCC gate is three layers with no invented value | accepted | 2026-10-03 | Y-PAY-10 | docs/01 decisions — none; this is the go-live-shaped consequence of |
 | [0120](0120-an-unsound-figure-is-a-refusal-and-dependence-on-a-check-is-derived.md) | an unsound figure is a refusal, and which checks gate a figure is DERIVED | accepted | 2026-10-03 | R-REP-07 | docs/01 decisions — none; this is the mechanism behind docs/02 §4's reporting schema and |
 | [0121](0121-role-scoped-means-the-scope-is-in-the-query-and-a-headline-tile-is-a-fold.md) | role-scoped means the scope is in the QUERY, and a headline tile is a FOLD | accepted | 2026-10-03 | R-REP-08 | docs/01 decisions — none; this is the mechanism behind docs/03's reporting set and docs/06 |
+| [0122](0122-a-performance-budget-is-one-declaration-and-an-unmeasured-figure-is-absent.md) | a performance budget is ONE declaration, and an unmeasured figure is absent rather than invented | accepted | 2026-10-03 | W-SITE-11 | docs/01 decisions — none; this is the mechanism behind docs/08 §8's "three independent |

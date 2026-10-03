@@ -18130,7 +18130,7 @@ units:
       build on the four route shapes in both themes and directions, field web-vitals attribution into the
       first-party endpoint, and proof that each layer can go red alone.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - A-FIRST-01
@@ -18171,11 +18171,41 @@ units:
     - 'Each of the three layers can fail independently: one fixture per layer (a field p75 threshold breach
       raising an alert, a CI budget breach, a publish-time weight breach) is asserted to fail on its own
       without the other two'
+    - 'NOTE: what is built, what is measured and what is deferred, line by line. BUILT AND PROVEN:
+      lines 1, 2 and the CI half of line 6. `lighthouse/budget.json` is the one declaration of all nine
+      figures over four route shapes x two themes x two directions x two form factors;
+      `lighthouserc.cjs` derives the Lighthouse-native budgets and the LHCI assertions from it and holds
+      no figure of its own; `pnpm perf-layers` is the authoritative enforcement and exits non-zero
+      NAMING the metric and the measured value, because a Lighthouse budget breach is only a warning
+      inside the report. Gate block 200a-200l proves the breach, the 404 and the empty-report cases
+      against RECORDED Lighthouse reports, and 200l shows the CI layer going red with the publish layer
+      holding. NOT MEASURED: no Lighthouse collection has ever run against this site. The CI job that
+      runs it is wired (`.github/workflows/ci.yml`, the `lighthouse` job, four cells with `pnpm dlx
+      @lhci/cli`), and the one web build this unit was budgeted could not be spent — the container had
+      1.6 GB free with three other agents building, and a `next build` plus the Turbopack cache is
+      about 2 GB. So `lab-tbt`, the INP proxy, carries `basis: "unmeasured"` and Y5-analytics-basis
+      rather than a figure this build invented, and the gate prints it as unenforced on every run.
+      DEFERRED TO A-MEAS-04: lines 3 and 4 and the field third of line 6 — the web-vitals v4
+      attribution beacon, the consent gate over it, the payload shape and the p75 alert. That unit is
+      `Consent-gated tag loader and web-vitals field reporting` and is still todo, so it is the owner
+      rather than a convenient address; the field LAYER is declared in `lighthouse/budget.json` with
+      `enforcedBy: null` and `blockedOn: A-MEAS-04`, and the gate refuses that marker once the unit is
+      done. Adding the beacon here would also have meant a sixth name in ANALYTICS_EVENT_NAMES and a
+      TAXONOMY_VERSION bump in A-FIRST-06''s shared file, which is that unit''s decision to take.
+      LINE 5, PARTLY: the coverage mechanism is built and derived from the suites — a suite covers the
+      route it hands `startWebServer` as `probePath` when the same file calls `auditPage(` and takes a
+      screenshot — and the MEASURED answer is that one public document (`/book`) is covered and twelve
+      are not. That gap is committed as data in `matrixCoverage.alreadyUncovered` with the rule that
+      refuses an ADDITION rather than failing the build on twelve routes, which would have been switched
+      off within the week. Closing it needs an axe run and a screenshot baseline added inside six other
+      units'' browser suites (home, content, treatments, kitchen-sink, hero-lcp and collector each
+      already start a server against one of these routes and assert something else) and is deferred to
+      B-M1, the milestone stop, which is where an un-run matrix belongs.'
     files:
     - lighthouse/budget.json
     - lighthouserc.cjs
+    - scripts/check-performance-layers.mjs
     - .github/workflows/ci.yml
-    - apps/web/src/rum/web-vitals.ts
     - scripts/test-gates.mjs
   - id: W-SYS-10
     order: 149

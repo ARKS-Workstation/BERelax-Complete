@@ -343,6 +343,15 @@ jobs:
       - name: Byte budgets
         run: pnpm budgets
 
+      # W-SITE-11's static performance gate: the Lighthouse budget held to covering the four route
+      # shapes, both themes, both directions and both form factors, the rc file held to deriving every
+      # figure from it, and every budget that is declared and NOT enforced reported out loud. It needs
+      # no browser and no collection, which is why it is a step here and the measured half is a job of
+      # its own: a budget nothing holds to covering what it claims is decoration, and that claim is
+      # checkable on every commit for the cost of two file reads.
+      - name: Performance budget coherence and layer coverage
+        run: pnpm perf-layers
+
       # Before the gate suite, not after: if a gate is missing from this workflow, saying so is cheaper than
       # discovering it 40 minutes later, and the check itself is a single file read.
       - name: Every verify gate is registered
@@ -350,6 +359,97 @@ jobs:
 
       - name: Gates fire
         run: pnpm gates:test
+
+  # The MEASURED half of W-SITE-11's CI layer. A job of its own rather than a step in `verify`, for the
+  # reason that job's own `Build the web application` step makes clear: Lighthouse needs the built
+  # application serving on a port, and a browser driving it twice per cell. The static half runs in
+  # `verify` on every commit; this is what turns the figures into a measurement.
+  #
+  # `pnpm dlx @lhci/cli` rather than a dependency, deliberately. Lighthouse and the LHCI client are tens
+  # of megabytes of tooling that nothing in this repository imports, and `pnpm install` runs in every
+  # agent's worktree: a dependency here would be paid for on every machine to be used on one. It reaches
+  # the network, which is why this job is CI-only — the same argument `pnpm audit:online` makes, and
+  # `scripts/check-gate-registry.mjs` carries both as declared CI-only steps.
+  #
+  # The enforcement is `pnpm perf-layers --reports`, not LHCI's own assertions: a Lighthouse budget
+  # breach is a WARNING inside the report rather than a non-zero exit, three of the nine declared
+  # budgets cannot be expressed as a Lighthouse budget at all, and the script is what refuses a report
+  # of a page that answered 404 — which Lighthouse scores nearly perfectly.
+  lighthouse:
+    name: lighthouse
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: berelax
+          POSTGRES_PASSWORD: berelax
+          POSTGRES_DB: berelax_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U berelax -d berelax_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install psql client
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
+
+      # The catalogue routes prerender from the database (W-SITE-05), so the build needs a migrated and
+      # seeded one. The same three steps the verify job runs, in the same order.
+      - name: Apply migrations to the test database
+        run: pnpm db:apply
+
+      - name: Seed the catalogue and the premises row
+        run: pnpm seed
+
+      - name: Build the web application
+        run: pnpm --filter @berelax/web build
+
+      - name: Start the built application
+        run: |
+          pnpm --filter @berelax/web exec next start --port 3000 &
+          for _ in $(seq 1 60); do
+            curl -sf http://127.0.0.1:3000/ >/dev/null && break
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:3000/ >/dev/null
+
+      # Four cells: two form factors x two themes. The directions are URLs and are inside each run, so
+      # four invocations cover the whole matrix the budget declares. The native budgets file is EMITTED
+      # from the declaration rather than committed, so the two cannot drift.
+      - name: Collect Lighthouse reports across the matrix
+        run: |
+          set -eu
+          for factor in mobile desktop; do
+            for theme in light dark; do
+              LHCI_FORM_FACTOR="$factor" node scripts/check-performance-layers.mjs \
+                --emit-native .lighthouseci/budget.native.json
+              LHCI_FORM_FACTOR="$factor" LHCI_THEME="$theme" \
+                pnpm dlx @lhci/cli@0.14.x collect --config=lighthouserc.cjs
+            done
+          done
+
+      # The authoritative enforcement. Exits non-zero naming the metric and the measured value.
+      - name: Every measured figure is within its budget
+        run: pnpm perf-layers --reports .lighthouseci
 
   # The half of container scanning that needs an image, which is why it is a job of its own and not a step
   # in `verify`. H-HARD-02 deferred it to W-SYS-06 because there was no Dockerfile to scan; there is one

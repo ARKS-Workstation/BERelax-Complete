@@ -61528,6 +61528,318 @@ export function chargebackNetEffectFils(`,
   )
 }
 
+// 200a-200z. (W-SITE-11) The performance layers: the budget shown to be able to stop covering what it
+//            claims, the rc file shown to be able to acquire a figure of its own, the unmeasured budget
+//            shown to be able to acquire an invented one, and the Lighthouse job shown to FAIL on a
+//            breach and on a 404 rather than scoring an error page.
+//
+//            Every mutation below leaves a CI job that runs green. A route shape dropped, a theme cell
+//            duplicated, a threshold written into the rc file, a figure given to the metric nobody
+//            measured: each reads as a tidy-up, and each is a budget that no longer bites.
+//
+//            200a to 200h are static and take about a second each. 200i onwards feed the enforcement a
+//            recorded Lighthouse report; none of them needs a browser, a build or a database, which is
+//            the point — `build/budgets.json` records that Lighthouse CI did not exist in this
+//            repository, and a gate that needed a collection to prove itself would be a gate nobody
+//            could run.
+{
+  const PERF_DECL = 'lighthouse/budget.json'
+  const PERF_RC = 'lighthouserc.cjs'
+  const WEIGHT_TEST = 'packages/core/src/publication/weight.test.ts'
+  const LHR_FIXTURE = 'artifacts/__gate_fixture__lhr.report.json'
+  const perf = (args = []) => ['exec', 'node', 'scripts/check-performance-layers.mjs', ...args]
+  const weightUnit = ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', WEIGHT_TEST]
+
+  /**
+   * One recorded Lighthouse report. Every figure is inside its budget unless `overrides` says otherwise,
+   * which is what makes a single breached figure the only difference between a passing fixture and a
+   * failing one.
+   */
+  const lhr = (overrides = {}) => {
+    const kib = (n) => Math.round(n * 1024)
+    const totals = { total: 1200, script: 80, stylesheet: 18, lcp: 1500, status: 200, ...overrides }
+    return JSON.stringify({
+      requestedUrl: 'http://127.0.0.1:3000/',
+      finalDisplayedUrl: 'http://127.0.0.1:3000/',
+      configSettings: { formFactor: 'mobile' },
+      audits: {
+        'resource-summary': {
+          details: {
+            items: [
+              { resourceType: 'total', transferSize: kib(totals.total), requestCount: 5 },
+              { resourceType: 'script', transferSize: kib(totals.script), requestCount: 3 },
+              { resourceType: 'stylesheet', transferSize: kib(totals.stylesheet), requestCount: 1 },
+              { resourceType: 'third-party', transferSize: 0, requestCount: 0 },
+            ],
+          },
+        },
+        'largest-contentful-paint': { numericValue: totals.lcp },
+        'cumulative-layout-shift': { numericValue: 0.01 },
+        'total-blocking-time': { numericValue: 120 },
+        'dom-size': { numericValue: 900 },
+        'network-requests': {
+          details: {
+            items: [
+              {
+                resourceType: 'Document',
+                statusCode: totals.status,
+                networkEndTime: 200,
+                url: 'http://127.0.0.1:3000/',
+              },
+              { resourceType: 'Script', statusCode: 200, networkEndTime: 500, url: 'x' },
+              { resourceType: 'Image', statusCode: 200, networkEndTime: 900, url: 'y' },
+            ],
+          },
+        },
+      },
+    })
+  }
+
+  // The controls for the whole block. Every case asserts a BROKEN tree is caught, which says nothing
+  // unless the committed tree passes — and the second control is the one that matters here, because an
+  // enforcement that rejected every report would satisfy 200i, 200j and 200k at once.
+  {
+    const statik = run('pnpm', perf())
+    check(
+      'performance: the committed budget and rc file agree, the control for 200a to 200h',
+      !statik.failed,
+      `the static performance gate does not pass on the committed tree:\n${statik.output}`,
+    )
+    const measured = withFixture(LHR_FIXTURE, lhr(), () =>
+      run('pnpm', perf(['--reports', 'artifacts'])),
+    )
+    check(
+      'performance: a report inside every budget PASSES, the control for 200i to 200l',
+      !measured.failed,
+      `a Lighthouse report within every declared figure was rejected:\n${measured.output}`,
+    )
+  }
+
+  /*
+    200a. A route shape dropped from the budget.
+
+    The gallery route is the heaviest page the site serves — twelve images, docs/08 §8's cut order
+    reaches it fourth — and dropping it leaves three shapes budgeted, every figure intact and nothing
+    failing. The acceptance line names four.
+  */
+  checkRejectedBy(
+    'performance: 200a a budget that stopped covering one of the four route shapes is caught',
+    withEditedFile(
+      PERF_DECL,
+      (text) => replaceOnce(text, '      "id": "gallery",', '      "id": "gallery-disabled",'),
+      () => runExpectingFailure('pnpm', perf()),
+    ),
+    'budget-covers-every-required-route-shape',
+  )
+
+  /*
+    200b. The blockedOn marker taken off a route the registry does not serve.
+
+    It reads as cleaning up a stale marker. What it does is put `/therapists/[slug]` into the collection
+    while W-SITE-06 has not built it, so Lighthouse scores a 404 page — which scores nearly perfectly —
+    and the budget reports a pass over a route that does not exist.
+  */
+  checkRejectedBy(
+    'performance: 200b a budgeted route that is neither served nor blocked is caught',
+    withEditedFile(
+      PERF_DECL,
+      (text) => replaceOnce(text, '      "blockedOn": "W-SITE-06",\n', ''),
+      () => runExpectingFailure('pnpm', perf()),
+    ),
+    'budget-shape-is-served-or-blocked-on-a-live-unit',
+  )
+
+  /*
+    200c. A figure given to the metric nobody measured.
+
+    The mutation this unit exists against. Total blocking time is the INP proxy, the acceptance line
+    gives no number, and nothing in this repository has ever run Lighthouse against this site — so 200
+    is a plausible, round, completely invented target. It would either never fire or fire on correct
+    code, and the second is how a gate comes to be switched off (brief rule 15).
+  */
+  checkRejectedBy(
+    'performance: 200c an invented figure on an unmeasured budget is caught',
+    withEditedFile(
+      PERF_DECL,
+      (text) =>
+        replaceOnce(
+          text,
+          '      "metric": "total-blocking-time",\n      "unit": "ms",\n      "mobile": null,',
+          '      "metric": "total-blocking-time",\n      "unit": "ms",\n      "mobile": 200,',
+        ),
+      () => runExpectingFailure('pnpm', perf()),
+    ),
+    'budget-figure-has-a-stated-basis',
+  )
+
+  /*
+    200d. The dark theme cell given the light theme's Chrome flag.
+
+    Two cells, one measurement. The matrix still reports four runs per form factor, the job still takes
+    twice as long, and the dark page — which ships a different image ladder — is never measured at all.
+  */
+  checkRejectedBy(
+    'performance: 200d two theme cells measuring the same theme is caught',
+    withEditedFile(
+      PERF_DECL,
+      (text) =>
+        replaceOnce(
+          text,
+          '"theme": "dark",\n        "chromeFlag": "--blink-settings=preferredColorScheme=0"',
+          '"theme": "dark",\n        "chromeFlag": "--blink-settings=preferredColorScheme=1"',
+        ),
+      () => runExpectingFailure('pnpm', perf()),
+    ),
+    'budget-covers-both-themes-and-both-directions',
+  )
+
+  /*
+    200e. A threshold written into the rc file.
+
+    The shape of this whole unit's one design decision: `lighthouserc.cjs` holds no figure, because a
+    threshold in two places is a CI job that passes on the one nobody meant. The mutation is what the
+    obvious implementation looks like.
+  */
+  checkRejectedBy(
+    'performance: 200e a figure written into the Lighthouse config is caught',
+    withEditedFile(
+      PERF_RC,
+      (text) =>
+        replaceOnce(
+          text,
+          '      numberOfRuns: 1,',
+          '      numberOfRuns: 1,\n      maxWaitForLoad: 45000,',
+        ),
+      () => runExpectingFailure('pnpm', perf()),
+    ),
+    'lighthouserc-holds-no-figure-of-its-own',
+  )
+
+  /*
+    200f. The Arabic path prefix changed in the budget.
+
+    `/ar-AE` reads like a correction — it is the hreflang code — and `LOCALE_PREFIX` says `/ar`. Every
+    Arabic cell would then be collected against a URL the application does not serve, and a 404 scores
+    nearly perfectly: half the matrix would report a pass over an error page.
+  */
+  checkRejectedBy(
+    'performance: 200f a locale prefix that disagrees with the i18n module is caught',
+    withEditedFile(
+      PERF_DECL,
+      (text) => replaceOnce(text, '"pathPrefix": "/ar"', '"pathPrefix": "/ar-AE"'),
+      () => runExpectingFailure('pnpm', perf()),
+    ),
+    'budget-locale-prefix-matches-the-i18n-module',
+  )
+
+  /*
+    200g. The unbuilt field layer's owner removed.
+
+    docs/08 §8 says "any of the three failing is a red build". Two of the three are built; the field
+    layer is A-MEAS-04's. Taking the marker off leaves a declaration that claims three layers and names
+    an enforcement for two, which is the sentence this unit must not be able to make.
+  */
+  checkRejectedBy(
+    'performance: 200g an unenforced layer with no owning unit is caught',
+    withEditedFile(
+      PERF_DECL,
+      (text) => replaceOnce(text, '        "blockedOn": "A-MEAS-04",\n', ''),
+      () => runExpectingFailure('pnpm', perf()),
+    ),
+    'every-layer-names-its-enforcement-or-the-unit-that-owns-it',
+  )
+
+  /*
+    200h. A document taken off the already-uncovered baseline while still uncovered.
+
+    The baseline is the measured gap committed as data, and the rule it carries is that the list may only
+    SHRINK as routes become covered. Removing an entry without covering the route makes the gate report
+    the document as newly added — which is the direction that matters, because it is what stops the
+    baseline being widened to excuse the next one.
+  */
+  checkRejectedBy(
+    'performance: 200h a baseline entry removed while the route is still uncovered is caught',
+    withEditedFile(
+      PERF_DECL,
+      (text) => replaceOnce(text, '      "/pricing",\n', ''),
+      () => runExpectingFailure('pnpm', perf()),
+    ),
+    'a-new-public-document-is-covered-by-axe-and-a-baseline',
+  )
+
+  /*
+    200i. A deliberately heavy route: 400KB more image, and an entrance animation above the fold.
+
+    The acceptance line's own fixture. The extra image is the page's total transfer going past the mobile
+    budget; the above-fold entrance animation is the largest paint arriving late, which is the half a
+    byte count cannot see. Both figures are in ONE recorded report, and the enforcement must name the
+    metric and the measured value rather than exiting non-zero and leaving somebody to guess which.
+  */
+  checkRejectedBy(
+    'performance: 200i a heavy route makes the Lighthouse enforcement fail naming the breached budget',
+    withFixture(LHR_FIXTURE, lhr({ total: 1200 + 400, lcp: 2600 }), () =>
+      runExpectingFailure('pnpm', perf(['--reports', 'artifacts'])),
+    ),
+    'largest-contentful-paint measured 2600 ms, budget 2000 ms',
+  )
+
+  /*
+    200j. A target that answered 404.
+
+    Lighthouse scores an error page nearly perfectly: no images, no scripts, one tiny document, instant
+    paint. A job that passed on one would be the purest version of a gate that is not one (ADR 0003),
+    which is why the enforcement reads the document request's own status code rather than the scores.
+  */
+  checkRejectedBy(
+    'performance: 200j a Lighthouse report of a 404 page fails rather than passing vacuously',
+    withFixture(LHR_FIXTURE, lhr({ status: 404 }), () =>
+      runExpectingFailure('pnpm', perf(['--reports', 'artifacts'])),
+    ),
+    'report-is-of-a-document-that-answered-200',
+  )
+
+  /*
+    200k. No report at all.
+
+    The failure a collection that silently did nothing produces: zero breaches over zero evidence. The
+    enforcement exits non-zero rather than reporting a clean sweep, which is the same argument
+    `pnpm boundaries` cruising zero modules made for every floor in this file.
+  */
+  checkRejectedBy(
+    'performance: 200k an enforcement run with no report exits non-zero rather than reporting zero breaches',
+    runExpectingFailure('pnpm', perf(['--reports', 'artifacts/__gate_fixture__absent'])),
+    'report-exists-for-every-collected-target',
+  )
+
+  /*
+    200l. The CI layer and the publish layer go red INDEPENDENTLY.
+
+    docs/08 §8's claim is three layers, not one with three names. Two are built, and this case is what
+    says they are two: with a breaching Lighthouse report the CI layer fails and the publish layer's own
+    suite still passes, and the publish layer's refusals are reached by a figure the CI layer never
+    sees — the critical-path weight of a page, which is a sum over a build rather than a measurement
+    over a run. Neither module imports the other, which is the structural half.
+  */
+  {
+    const ciRed = withFixture(LHR_FIXTURE, lhr({ total: 2400 }), () =>
+      runExpectingFailure('pnpm', perf(['--reports', 'artifacts'])),
+    )
+    const publishStillGreen = run('pnpm', weightUnit)
+    check(
+      'performance: 200l the CI layer goes red while the publish layer holds',
+      ciRed.failed && !publishStillGreen.failed,
+      `ci failed=${ciRed.failed}, publish failed=${publishStillGreen.failed}:\n${ciRed.output}\n${publishStillGreen.output}`,
+    )
+    const script = readFileSync('scripts/check-performance-layers.mjs', 'utf8')
+    const weight = readFileSync('packages/core/src/publication/weight.ts', 'utf8')
+    check(
+      'performance: 200l the two built layers share no module, which is what makes them two',
+      !script.includes('publication/weight') && !weight.includes('check-performance-layers'),
+      'one enforcement layer reaches into the other, so a failure in one could mask or cause the other',
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -62424,6 +62736,12 @@ export function chargebackNetEffectFils(`,
     // claimed one code. A check nobody runs is the convention again with more steps.
     'pnpm sqlstate',
     'pnpm budgets',
+    // W-SITE-11's performance layers, beside the byte budgets because they are the same subject measured
+    // two ways: `pnpm budgets` is the files this build ships and `pnpm perf-layers` is the pages a reader
+    // waits for. Registered here because that is what makes dropping it from CI a failing build rather
+    // than the silent loss of the only gate that holds the Lighthouse budget to covering the four route
+    // shapes, both themes, both directions and both form factors.
+    'pnpm perf-layers',
     // The registry check registers itself. Not a cute trick: it is the one entry whose absence this array
     // could not otherwise reveal, since the check exists precisely to notice a verify step nobody listed
     // here, and a check that skipped itself would be the first thing to go missing unnoticed.
