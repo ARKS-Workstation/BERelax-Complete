@@ -1,0 +1,90 @@
+{
+  "$comment": [
+    "The runbook front-matter schema. H-HARD-06.",
+    "",
+    "This file is the ONE statement of the shape, and `scripts/check-runbooks.mjs` reads it rather than",
+    "restating it — a checker carrying its own copy of the field list is a second statement that drifts,",
+    "and the field it would stop requiring is whichever one somebody added last.",
+    "",
+    "It is deliberately NOT a JSON Schema document. Validating one needs a validator, this workspace has",
+    "no JSON Schema dependency, and adding one for eleven fields would put a supply-chain surface behind a",
+    "documentation gate. Instead each field names a `kind`, the checker implements the kinds, and a kind it",
+    "does not implement is REFUSED by name (`runbook-schema-construct-unimplemented`) rather than skipped",
+    "— so the schema cannot grow a rule that nothing enforces, which is the failure mode of a schema a",
+    "validator ignores a keyword in.",
+    "",
+    "The front-matter FORMAT is as narrow as the schema: one `key: value` per line between two `---` lines",
+    "at the very top of the file, no continuation lines, no nesting, lists comma-separated, an empty list",
+    "written `(none)`. Narrow because the parser is then the format, and a runbook that is almost valid",
+    "YAML is refused with the line number rather than parsed into something nobody meant."
+  ],
+  "format": {
+    "opener": "---",
+    "closer": "---",
+    "entry": "^([a-z_]+): (.+)$",
+    "emptyList": "(none)",
+    "listSeparator": ", "
+  },
+  "fields": {
+    "id": {
+      "required": true,
+      "kind": "slug",
+      "why": "Held equal to the file stem, so a renamed file cannot keep an id other documents cite."
+    },
+    "title": {
+      "required": true,
+      "kind": "text",
+      "minLength": 10,
+      "why": "What this runbook is for, in the words an index would show."
+    },
+    "unit": {
+      "required": true,
+      "kind": "unit-id",
+      "why": "Who wrote it, so a question about a step has somewhere to go."
+    },
+    "trigger_kind": {
+      "required": true,
+      "kind": "enum",
+      "values": ["alert", "manual", "scheduled", "external"],
+      "why": "A runbook with no trigger is a document nobody will ever open at the right moment. `alert` is the only kind that requires a non-empty `alerts` list, which is what makes an orphan runbook detectable rather than a matter of opinion."
+    },
+    "trigger": {
+      "required": true,
+      "kind": "text",
+      "minLength": 40,
+      "why": "What is true when somebody should be reading this. A sentence and not a label, because the reader is deciding whether they are in the right document."
+    },
+    "first_action_heading": {
+      "required": true,
+      "kind": "heading-slug",
+      "why": "The heading in THIS file holding the first thing to do. Checked against the file's own headings, which is the acceptance line's \"every heading a check references must exist\" — the front matter's claim is machine-checked rather than prose beside the document."
+    },
+    "first_action": {
+      "required": true,
+      "kind": "text",
+      "minLength": 40,
+      "why": "The first action in one sentence, readable before the document is. At 2am the first step is the only part that gets read properly."
+    },
+    "owner": {
+      "required": true,
+      "kind": "role",
+      "why": "An F07 role and never a person: no name of a person is in this repository (brief rule 10) and no contact detail is on file (`Y13-oncall`)."
+    },
+    "escalation": {
+      "required": true,
+      "kind": "text",
+      "minLength": 40,
+      "why": "What escalating means here. For most of these the honest answer is that there is nobody to escalate to, and saying so is the point — a field left blank reads like a field nobody filled in."
+    },
+    "alerts": {
+      "required": true,
+      "kind": "alert-id-list",
+      "why": "The alert ids this runbook answers, held against `ALERT_REGISTRY` in BOTH directions: an id here that the registry does not define, and an alert whose registry entry points at this file while this list omits it."
+    },
+    "env": {
+      "required": true,
+      "kind": "env-var-list",
+      "why": "The environment variables a reader is told to set or read, each held against `packages/config/src/env.ts`. Declared rather than only detected because a variable discussed in prose is still one somebody will go looking for."
+    }
+  }
+}

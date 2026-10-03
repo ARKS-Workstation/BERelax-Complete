@@ -1,3 +1,17 @@
+---
+id: alerting
+title: The alert ladder: what each alert means and what to do about it
+unit: H-HARD-05
+trigger_kind: alert
+trigger: One of the six conditions in the alert registry has become true and has been shown on an admin surface; every alert here clears by itself when the condition goes away.
+first_action_heading: confirm
+first_action: Find the section for the alert that fired and run its Confirm steps before deciding anything, because an alert is a measurement and not a stored row.
+owner: owner
+escalation: No alert here is delivered to a handset and no on-call address is on file (Y13-oncall), so escalation is somebody looking at the surface the alert is shown on; four exposures are not defended at all and are listed in UNDEFENDED_BY_DESIGN rather than here.
+alerts: customer_list_export, outbox_lag, send_backlog, job_failure_rate, repeated_auth_failure, overdue_blocking_obligation
+env: (none)
+---
+
 # Runbook — the alert ladder
 
 Every entry in `packages/shared/src/alerts/registry.ts` names a heading in this file, and

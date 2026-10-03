@@ -1,3 +1,17 @@
+---
+id: admin-access
+title: Admin access: the first credential, enrolment and revocation
+unit: W-SYS-11
+trigger_kind: manual
+trigger: A fresh deployment has no staff account and every sign-in is refused, or somebody's access has to be granted, checked or taken away.
+first_action_heading: 1-before-you-start
+first_action: Confirm you hold a psql connection as the owner role, because the application role cannot insert a credential at all.
+owner: owner
+escalation: There is no second administrator in this business, so a lost owner credential cannot be reset by anybody else; what escalation means here is the step-6 procedure for a disclosed TOTP seed, performed by the same person.
+alerts: repeated_auth_failure
+env: DATABASE_URL
+---
+
 # Runbook — admin access: the first credential, enrolment, and revocation
 
 **W-SYS-11. See [ADR 0039](../adr/0039-the-admin-session-is-an-opaque-token.md) for why none of this is

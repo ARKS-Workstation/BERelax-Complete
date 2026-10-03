@@ -23312,7 +23312,7 @@ units:
       a link and command checker, and a cross-check proving there is no alert without a runbook and no runbook
       without a trigger.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-MSG-01
@@ -23342,10 +23342,48 @@ units:
       rollback
     - the docs link and anchor checker passes across docs/runbooks
     files:
-    - docs/runbooks/
-    - scripts/check-runbooks.mjs
     - docs/runbooks/_schema.json
+    - docs/runbooks/database-failover.md
+    - docs/runbooks/messaging-outage.md
+    - docs/runbooks/payment-gateway-outage.md
+    - docs/runbooks/job-backlog.md
+    - docs/runbooks/google-invalid-grant.md
+    - docs/runbooks/cutover-rollback.md
+    - scripts/check-runbooks.mjs
     - scripts/test-gates.mjs
+    - docs/adr/0124-a-runbook-is-machine-checked-or-it-is-decoration.md
+    notes:
+    - 'NOTE: pnpm runbooks is the FOURTH LINK IN pnpm docs-set and not a new verify step, which is what
+      this unit''s dispatch asked for: H-HARD-09 built the documentation chain and a second entry point
+      reading the same directory is a second place for the set''s rules to live. So no case-29
+      registration and no new CI step were added — pnpm docs-set is already both. ADR 0124 records it.'
+    - 'NOTE: FRONT MATTER WAS ADDED TO THE FOUR RUNBOOKS THAT PREDATE THIS UNIT — admin-access.md
+      (W-SYS-11), alerting.md (H-HARD-05), google-offboarding.md (G-CONN-09) and key-rotation.md
+      (H-HARD-03) — because "each runbook carries front matter" is not satisfiable without it. The diff
+      against each of those four is PURE ADDITION: fourteen lines at the top and not one byte changed
+      below them, so no other unit''s prose was touched. The unit each file belongs to is recorded in
+      its own `unit:` field, so a question about a step still has its original owner.'
+    - 'NOTE: the front matter is a NARROW format with its own parser and NOT YAML. This workspace has no
+      JSON Schema or YAML dependency and one was not added for eleven fields; docs/runbooks/_schema.json
+      declares the fields and the checker READS it, refusing a `kind` it does not implement rather than
+      skipping it. ADR 0124 decision 2 gives the decisive reason, which is not the dependency.'
+    - 'NOTE: SIX OF THE EIGHT REQUIRED RUNBOOKS DESCRIBE AN ABSENCE, and say so in the document rather
+      than describing a procedure for a system that is not here. There is no standby, so
+      database-failover.md opens by saying so and routes the lost-database case to restore.md; there is
+      no live SMS, email, payment or Google account (every provider defaults to `fake`), so those three
+      runbooks name the failure classes from packages/providers/src/failure.ts and say that nothing in
+      this build can tell you whether an outage is the provider''s; and nothing decides a cutover, so
+      cutover-rollback.md lists what a rollback cannot undo instead. No RTO, no RPO and no provider
+      support contact is stated anywhere (Y13-rpo-rto, Y13-oncall).'
+    - 'NOTE: no migration, no private SQLSTATE, no port band and no ADR-locked schema change. Everything
+      reads files. Migration 0170, the band ZY911-ZY920 and the port band { start: 24_500, width: 300 }
+      are RELEASED UNUSED for this unit; SCHEMA_VERSION is untouched. Gate block 202a-202n, fifteen
+      cases, one per rule plus the clean-set control.'
+    - 'NOTE: a defect in this unit''s own checker, found by its own gate case 202j: the required-subject
+      list was checked against FILE STEMS while being a list of declared ids, which made
+      runbook-subject-missing unreachable from any fixture short of deleting a committed file. Fixed by
+      keying the subject lookup on the declared id, with the id-equals-stem rule holding the two
+      aligned.'
   - id: H-HARD-09
     order: 200
     title: Documentation set, processor register and bus-factor artefacts

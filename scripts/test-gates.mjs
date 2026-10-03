@@ -62081,6 +62081,232 @@ export function chargebackNetEffectFils(`,
   }
 }
 
+// 202a-202z. (H-HARD-06) The runbook set shown to be machine-checked rather than decorative. A runbook
+//            is read at 8pm on a Friday, which is the one moment when nobody is going to notice that the
+//            script a step names was renamed six months ago. Every failure mode of this document set is
+//            quiet — the sentence still reads correctly and the thing it names is gone — so each of the
+//            eight rules below is proved against a fixture runbook that makes exactly one of them fire.
+//
+//            The fixtures are real files in `docs/runbooks/`, not a fixture directory, deliberately: the
+//            set-wide rules (the eight required subjects, the floors, the alert cross-check) all fail at
+//            once against a directory holding one document, and a case whose output contains every rule
+//            proves nothing about the one it is named after.
+{
+  const RUNBOOKS = 'docs/runbooks'
+  const SCHEMA = `${RUNBOOKS}/_schema.json`
+  const FIXTURE = `${RUNBOOKS}/__gate_fixture__probe.md`
+  const gate = () => runExpectingFailure('pnpm', ['runbooks'])
+
+  /**
+   * A fixture runbook that passes every rule, so that each case below can break exactly one field.
+   *
+   * It is a function of its overrides rather than eleven copies of the block: the first version of this
+   * was eight hand-written front matters, and the field a later rule was added for was missing from
+   * three of them — which made three cases fail for the wrong reason and look like the new rule working.
+   */
+  const probe = (overrides = {}) => {
+    const fields = {
+      id: '__gate_fixture__probe',
+      title: 'A gate fixture runbook, removed in a finally',
+      unit: 'H-HARD-06',
+      trigger_kind: 'manual',
+      trigger:
+        'A gate case is proving that one rule of the runbook checker fires, and this document exists ' +
+        'for the length of that case.',
+      first_action_heading: 'what-to-do',
+      first_action:
+        'Nothing: this document is a known-bad fixture and is deleted in the finally of the case that ' +
+        'wrote it.',
+      owner: 'owner',
+      escalation:
+        'There is nothing to escalate, because this file does not survive the gate case that created ' +
+        'it (ADR 0003).',
+      alerts: '(none)',
+      env: '(none)',
+      ...overrides,
+    }
+    const body = ['', '# A gate fixture runbook', '', '## What to do', '', 'Nothing.', '']
+    return ['---', ...Object.entries(fields).map(([k, v]) => `${k}: ${v}`), '---', ...body].join(
+      '\n',
+    )
+  }
+
+  // 202a. The acceptance line, word for word: a fixture runbook naming a missing script fails the gate.
+  //
+  //       `pnpm restore-everything` is not a script in package.json and never has been. A procedure
+  //       naming a command is worth exactly as much as the command, and this is the rule the set needs
+  //       most — every other failure in a runbook is at least visible to a reader.
+  checkRejectedBy(
+    'a runbook naming a pnpm script that does not exist fails the gate',
+    withFixture(
+      FIXTURE,
+      probe().replace('Nothing.', 'Run `pnpm restore-everything` and wait.'),
+      gate,
+    ),
+    'runbook-command-missing',
+  )
+
+  // 202b. And the same claim for a PATH, which is the half a command check misses: a step that says
+  //       "read scripts/whatever.mjs" is a reference nothing resolves, and `pnpm docs-set`'s link checker
+  //       cannot see it because it is a code span and not a link.
+  checkRejectedBy(
+    'a runbook naming a repository path that does not exist fails the gate',
+    withFixture(
+      FIXTURE,
+      probe().replace('Nothing.', 'The procedure is in `scripts/no-such-procedure.mjs`.'),
+      gate,
+    ),
+    'runbook-path-missing',
+  )
+
+  // 202c. The schema test: a missing field fails, which is the acceptance line's "a schema test fails on
+  //       any missing field". `escalation` is removed because it is the field most likely to be left out
+  //       in practice — for most of these runbooks the honest answer is that there is nobody to escalate
+  //       to, and a blank field reads exactly like one nobody filled in.
+  checkRejectedBy(
+    'a runbook with no escalation field fails the schema test',
+    withFixture(
+      FIXTURE,
+      probe()
+        .split('\n')
+        .filter((line) => !line.startsWith('escalation: '))
+        .join('\n'),
+      gate,
+    ),
+    'runbook-front-matter-field-missing',
+  )
+
+  // 202d. No front matter at all is its own rule, because a document with none has no declared trigger
+  //       and a runbook with no trigger is one nobody opens at the right moment.
+  checkRejectedBy(
+    'a runbook with no front matter at all fails the gate',
+    withFixture(FIXTURE, '# A document that is not a runbook\n\nProse.\n', gate),
+    'runbook-front-matter-missing',
+  )
+
+  // 202e. The owner is an F07 ROLE and never a person (brief rule 10). `ROLES` is imported from
+  //       `packages/core`, so a role added to the matrix is admissible here on the same commit and a
+  //       plausible-looking name is not.
+  checkRejectedBy(
+    'a runbook whose owner is not an F07 role fails the gate',
+    withFixture(FIXTURE, probe({ owner: 'the duty manager' }), gate),
+    'runbook-front-matter-field-invalid',
+  )
+
+  // 202f. The acceptance line's "every heading a check references must exist", pointed at the one
+  //       heading a reader is sent to before they have read anything. The front matter's claim is
+  //       machine-checked rather than prose beside the document.
+  checkRejectedBy(
+    'a runbook whose first_action_heading names no heading in its own file fails the gate',
+    withFixture(FIXTURE, probe({ first_action_heading: 'a-heading-nobody-wrote' }), gate),
+    'runbook-first-action-heading-missing',
+  )
+
+  // 202g. The orphan-runbook direction: a runbook that says it is triggered by an alert and names none.
+  //       This is what makes "no runbook without a trigger" checkable rather than a matter of opinion —
+  //       every runbook has a `trigger` sentence by schema, and this is the one kind of trigger that can
+  //       be verified against something outside the document.
+  checkRejectedBy(
+    'a runbook triggered by an alert that names no alert is an orphan',
+    withFixture(FIXTURE, probe({ trigger_kind: 'alert' }), gate),
+    'runbook-orphan',
+  )
+
+  // 202h. An alert id the registry does not define: a procedure for a condition that cannot occur.
+  checkRejectedBy(
+    'a runbook naming an alert ALERT_REGISTRY does not define fails the gate',
+    withFixture(FIXTURE, probe({ trigger_kind: 'alert', alerts: 'the_freezer_is_warm' }), gate),
+    'runbook-alert-unknown',
+  )
+
+  // 202i. The other direction of the cross-check, and the one `pnpm alerts` cannot make: an alert whose
+  //       registry entry points at a runbook heading while that runbook's own list has stopped
+  //       mentioning it. The heading still resolves, so the cheap gate stays green, and the document has
+  //       quietly become about something else.
+  checkRejectedBy(
+    'an alert whose runbook no longer lists it is an orphan alert',
+    withEditedFile(
+      `${RUNBOOKS}/alerting.md`,
+      (text) => replaceOnce(text, 'alerts: customer_list_export, ', 'alerts: '),
+      gate,
+    ),
+    'runbook-alert-orphan',
+  )
+
+  // 202j. The eight subjects, by name. `id` is changed rather than the file renamed, because the rule is
+  //       about the SET containing a runbook for each subject and the id is what binds the two — and the
+  //       id/stem rule firing as well is the stronger statement rather than a defect in the case.
+  checkRejectedBy(
+    'a declared subject with no runbook fails the gate by name',
+    withEditedFile(
+      `${RUNBOOKS}/cutover-rollback.md`,
+      (text) => replaceOnce(text, 'id: cutover-rollback', 'id: something-else'),
+      gate,
+    ),
+    'runbook-subject-missing',
+  )
+
+  // 202k. The schema is READ and not restated, in both directions. This is the case that keeps
+  //       `_schema.json` from being documentation: adding a required field makes every runbook fail on
+  //       the same commit, and declaring a `kind` the checker does not implement is refused rather than
+  //       skipped — which is the failure mode of a schema a validator ignores a keyword in.
+  checkRejectedBy(
+    'a field added to the schema is required of every runbook immediately',
+    withEditedFile(
+      SCHEMA,
+      (text) =>
+        replaceOnce(
+          text,
+          '    "id": {\n      "required": true,\n      "kind": "slug",',
+          '    "aftermath": {\n      "required": true,\n      "kind": "text",\n      "minLength": 10,\n' +
+            '      "why": "A gate fixture."\n    },\n    "id": {\n      "required": true,\n      ' +
+            '"kind": "slug",',
+        ),
+      gate,
+    ),
+    'runbook-front-matter-field-missing',
+  )
+  checkRejectedBy(
+    'a schema kind the checker does not implement is refused rather than skipped',
+    withEditedFile(
+      SCHEMA,
+      (text) => replaceOnce(text, '"kind": "slug",', '"kind": "a-kind-nothing-implements",'),
+      gate,
+    ),
+    'runbook-schema-construct-unimplemented',
+  )
+
+  // 202l. An environment variable the application never reads. A step telling somebody to set one is a
+  //       step that appears to work: the shell accepts it, nothing complains, and the setting has no
+  //       effect at all.
+  checkRejectedBy(
+    'a runbook naming an environment variable env.ts does not declare fails the gate',
+    withFixture(FIXTURE, probe({ env: 'BERELAX_MAINTENANCE_MODE' }), gate),
+    'runbook-env-undeclared',
+  )
+
+  // 202m. The floors. Every rule above is a comparison, and a comparison against an empty list passes —
+  //       so the checker refuses to report success over a directory with no runbooks in it rather than
+  //       printing that every runbook is correct. `build/` is used because it holds no `.md` at all,
+  //       which is exactly what a directory walk that has stopped matching looks like from the inside.
+  checkRejectedBy(
+    'the runbook checker refuses to report success over a directory with no runbooks in it',
+    runExpectingFailure('pnpm', ['runbooks', '--dir', 'build']),
+    'runbook-examined-nothing',
+  )
+
+  // 202n. And it passes on the real set, which is the control for all thirteen cases above: a checker
+  //       that rejected everything would satisfy every `checkRejectedBy` here and nothing else.
+  {
+    const clean = run('pnpm', ['runbooks'])
+    check(
+      'the runbook checker passes on the committed set',
+      !clean.failed && clean.output.includes('declared subjects covered'),
+      clean.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

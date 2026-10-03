@@ -4,7 +4,7 @@
 
 # ADR index
 
-104 records, generated from the front matter of each one. Every column below is read
+105 records, generated from the front matter of each one. Every column below is read
 out of the record it describes, so a row cannot be wrong without the record being wrong — which is
 the whole reason this file is not maintained by hand. For the argument behind any of them, read
 [README.md](README.md) and then the record.
@@ -115,3 +115,4 @@ the whole reason this file is not maintained by hand. For the argument behind an
 | [0112](0112-a-sitemap-is-refused-rather-than-served-lopsided-and-a-ping-is-never-reported-unsent.md) | A lopsided sitemap is REFUSED rather than served, and a ping is never reported that was not sent | accepted | 2026-10-03 | W-SITE-08 | docs/01 decisions — none; this is the propagation-shaped consequence of |
 | [0113](0113-a-301-map-is-a-function-and-the-proxy-resolves-it-from-a-committed-module.md) | A 301 map is a FUNCTION with no gaps and no loops, and the proxy resolves it from a committed module | accepted | 2026-10-03 | W-SITE-09 | docs/01 decisions — none; this is the relaunch-shaped consequence of migration 0029's |
 | [0123](0123-a-restore-drill-reads-rows-back-and-staleness-is-a-prefix-not-a-calendar.md) | A restore drill restores into a database made from nothing and READS ROWS BACK, and its evidence goes stale by prefix and not by calendar | accepted | 2026-10-03 | H-HARD-04 | docs/01 decisions — none; this is ADR 0002 applied to disaster recovery, ADR 0034 |
+| [0124](0124-a-runbook-is-machine-checked-or-it-is-decoration.md) | A runbook is machine-checked or it is decoration, and its front matter is a narrow format rather than YAML | accepted | 2026-10-03 | H-HARD-06 | docs/01 decisions — none; this extends H-HARD-09's documentation chain (`pnpm docs-set`) |
