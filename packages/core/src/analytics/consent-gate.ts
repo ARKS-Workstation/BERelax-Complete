@@ -1,8 +1,16 @@
+/*
+ * `@berelax/shared/analytics/consent-signal` and NOT the barrel, changed by A-MEAS-04 for a measured
+ * reason. A-MEAS-04's tag loader calls `mayLoadClientTag` in the browser — which is this module's own
+ * documented client-tag call site — and the barrel imports zod and every schema in the package, so the
+ * loader's chunk carried 106,765 bytes against a budget of a few. `consent-signal.ts` imports nothing,
+ * which is why it can be reached directly. Nothing else about this module changes: the three names are
+ * the same three, from the same file the barrel re-exports them from.
+ */
 import {
   CONSENT_MODE_SIGNALS,
   type ConsentModeSignal,
   grantedConsentSignals,
-} from '@berelax/shared'
+} from '@berelax/shared/analytics/consent-signal'
 
 /**
  * The consent gate (A-MEAS-02): one decision, asked in two places, with one answer.

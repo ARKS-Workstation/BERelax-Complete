@@ -106,12 +106,25 @@ describe('the declared attribute vocabulary', () => {
     const declarable = ANALYTICS_EVENT_NAMES.filter((name) =>
       DECLARED_EVENT_PAGE_FIELDS.every((field) => field in shapeOf(name)),
     )
-    // Both directions, enumerated: `page_view` is declarable by this rule and is excluded by having no
-    // payload field of its own; `whatsapp_ref_shown` is the one the rule excludes.
+    /*
+      Both directions, enumerated: `page_view` is declarable by this rule and is excluded by having no
+      payload field of its own; `whatsapp_ref_shown` is the one the rule excludes.
+
+      `web_vitals` (A-MEAS-04) is admitted by this rule and is excluded by the OTHER one, which is worth
+      stating because the two are easy to confuse. It carries `path`, so the page-field rule has nothing
+      against it — but its own schema has six fields the collector does not supply (`metric`, `value`,
+      `breakpoint`, `locale`, `direction`, `identity`), so `scripts/check-event-attributes.mjs` requires
+      six `data-track-*` attributes on any element declaring it and refuses a partial declaration by name.
+      Nothing in this build declares it: it is produced by a `PerformanceObserver` through the collector's
+      imperative door, which is the same door `whatsapp_ref_shown` uses for the same reason — the event
+      is not a thing anybody clicked.
+    */
     expect([...declarable].sort()).toEqual(
-      ['cta_click', 'page_view', 'price_viewed', 'service_viewed'].sort(),
+      ['cta_click', 'page_view', 'price_viewed', 'service_viewed', 'web_vitals'].sort(),
     )
     expect(declarable).not.toContain('whatsapp_ref_shown')
+    // And the field count that is the real exclusion, so the sentence above is a claim rather than prose.
+    expect(declaredPayloadFields(shapeOf('web_vitals')).length).toBeGreaterThanOrEqual(6)
   })
 
   it('states the double-fire window as the acceptance lines figure and nothing else', () => {

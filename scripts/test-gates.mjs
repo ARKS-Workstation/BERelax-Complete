@@ -61128,6 +61128,238 @@ export function chargebackNetEffectFils(`,
   )
 }
 
+// 193a-193z. (A-MEAS-04) The tag loader and the field metrics: every way a tag could come to load without
+//            a grant, every way an identity could come to carry a name, and every way a figure could come
+//            to flatter.
+//
+//            Two families, and they fail in opposite directions. The consent half fails OPEN and in
+//            silence: a loader that read the banner's attribute instead of re-asking the gate would agree
+//            with it on every page anybody tested, and would disagree on the day the attribute was set
+//            from somewhere else. The measurement half fails FLATTERING: CLS summed instead of windowed,
+//            INP taken as the maximum, a report sent twice — each of those produces a number, each number
+//            is wrong in the direction nobody questions, and none of them errors.
+//
+//            The third family is one case and it is the unit's own privacy rule: an attribution identity
+//            that carries an id. ADR 0115 exists because every library in this space answers "what was
+//            slow" with a CSS selector, and on a treatment page a selector carries a service name and a
+//            price. 193a and 193b are the two halves of it — the pattern that refuses one, and the
+//            function that cannot build one.
+//
+//            Every case here runs a unit suite, so the whole block is fast and needs no database.
+{
+  const TAXONOMY = 'packages/shared/src/analytics/taxonomy.ts'
+  const TAXONOMY_SUITE = 'packages/shared/src/analytics/taxonomy.test.ts'
+  // The zod-free leaf the browser reads. The identity pattern lives HERE and not in the taxonomy, which
+  // is the whole of `dimensions.ts`'s reason for existing — see its header and the 106,765 bytes.
+  const DIMENSIONS = 'packages/shared/src/analytics/dimensions.ts'
+  const VITALS = 'packages/ui/src/analytics/web-vitals.ts'
+  const VITALS_SUITE = 'packages/ui/src/analytics/web-vitals.test.ts'
+  const LOADER = 'apps/web/app/(public)/_components/tag-loader.tsx'
+  const LOADER_SUITE = 'apps/web/src/tag-loader.test.ts'
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+
+  // The control for the whole block. Every case asserts that a BROKEN tree is caught, and that says
+  // nothing unless the committed tree passes.
+  {
+    const committed = run('pnpm', unit(VITALS_SUITE))
+    check(
+      'tags: the committed web-vitals suite passes, which is the control for 193a, 193b, 193e to 193g',
+      !committed.failed,
+      `the web-vitals suite does not pass on the committed tree:\n${committed.output}`,
+    )
+    const loader = run('pnpm', unit(LOADER_SUITE))
+    check(
+      'tags: the committed tag-loader suite passes, which is the control for 193c and 193d',
+      !loader.failed,
+      `the tag-loader suite does not pass on the committed tree:\n${loader.output}`,
+    )
+  }
+
+  /*
+    193a. The identity pattern widened to admit a class.
+
+    One character — a dot in a character class — and every assertion about the identities this build
+    PRODUCES still passes, because this build does not produce one with a class in it. What changes is
+    what the server accepts: `/api/collect` is a write path exposed to the internet, so the pattern is
+    the refusal that covers every client and not only this one's code.
+  */
+  checkRejectedBy(
+    'tags: 193a an identity pattern that would accept a class is caught',
+    withEditedFile(
+      DIMENSIONS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  /^[a-z][a-z0-9-]*(?::nth-of-type\\(\\d+\\))?(?:>[a-z][a-z0-9-]*(?::nth-of-type\\(\\d+\\))?)*(?:\\[data-track=[a-z_]+\\])?$/',
+          '  /^[a-z][a-z0-9.-]*(?::nth-of-type\\(\\d+\\))?(?:>[a-z][a-z0-9.-]*(?::nth-of-type\\(\\d+\\))?)*(?:\\[data-track=[a-z_]+\\])?$/',
+        ),
+      () => runExpectingFailure('pnpm', unit(VITALS_SUITE)),
+    ),
+    'refuses an identity ADR 0115 forbids',
+  )
+
+  /*
+    193b. The identity built from the element's id.
+
+    The mutation a developer debugging a slow page would write, and it is an improvement in every sense
+    except the one that matters: `#deep-tissue-60` is a far better answer to "which element" than
+    `section:nth-of-type(2)>h2`, and it is a service name in the raw event store.
+  */
+  checkRejectedBy(
+    'tags: 193b an attribution identity built from the element id is caught',
+    withEditedFile(
+      VITALS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  const identity = `${steps.toReversed().join('>')}${suffix}`",
+          '  const own = (element as unknown as { id?: string }).id\n' +
+            "  const identity = `${steps.toReversed().join('>')}${own ? `#${own}` : ''}${suffix}`",
+        ),
+      () => runExpectingFailure('pnpm', unit(VITALS_SUITE)),
+    ),
+    'cannot carry an id, a class or any text, because it is given none',
+  )
+
+  /*
+    193c. The loader short-circuiting on the banner's attribute.
+
+    This is ADR 0076's whole subject, and the mutation looks like an optimisation: the attribute is right
+    there on `<html>`, it was set before first paint, and reading it saves parsing a cookie. It is a
+    SECOND authority on consent — the attribute exists so the CSS can hide the banner, and the day it is
+    set from somewhere else the loader and the dispatch writer disagree about one visitor.
+  */
+  checkRejectedBy(
+    'tags: 193c a loader that reads the banner attribute instead of asking the gate is caught',
+    withEditedFile(
+      LOADER,
+      (text) =>
+        replaceOnce(
+          text,
+          '    const decision = mayLoadClientTag(tag.target, host.cookie())',
+          "    const quick = document.documentElement.getAttribute('data-consent')\n" +
+            '    const decision =\n' +
+            "      quick !== null && quick !== ''\n" +
+            '        ? { target: tag.target, permitted: true, missing: [], reason: null }\n' +
+            '        : mayLoadClientTag(tag.target, host.cookie())',
+        ),
+      () => runExpectingFailure('pnpm', unit(LOADER_SUITE)),
+    ),
+    'calls the one gate and nothing that could answer the same question',
+  )
+
+  /*
+    193d. The gate's answer ignored.
+
+    The refusal branch dropped, so every declared tag loads for every visitor. It is the one case in this
+    block whose effect a person could notice — a pixel firing for somebody who refused — and it is here
+    because the EVIDENCE is in somebody else's advertising account rather than in this repository, weeks
+    later, with no commit to point at.
+  */
+  checkRejectedBy(
+    'tags: 193d a loader that injects whatever the gate answered is caught',
+    withEditedFile(
+      LOADER,
+      (text) =>
+        replaceOnce(
+          text,
+          '    if (!decision.permitted) {\n      refused.push(tag.id)\n      continue\n    }\n',
+          '    if (!decision.permitted) refused.push(tag.id)\n',
+        ),
+      () => runExpectingFailure('pnpm', unit(LOADER_SUITE)),
+    ),
+    'refuses every tag when there is no cookie at all',
+  )
+
+  /*
+    193e. CLS summed instead of windowed.
+
+    A total is the obvious implementation and it is a bigger number than the metric, which makes it look
+    conservative. It is not: it makes a page that shifts a little on every scroll worse than one that
+    throws its content around once, which is the opposite of what a reader experiences — and it makes
+    this build's figure incomparable with one measured by any other tool, which is the whole value of
+    using the published metric name.
+  */
+  checkRejectedBy(
+    'tags: 193e a CLS that totals every shift rather than windowing them is caught',
+    withEditedFile(
+      VITALS,
+      (text) =>
+        replaceOnce(
+          text,
+          '    const continues =\n      largestInWindow !== null &&',
+          '    const continues =\n      true ||',
+        ),
+      () => runExpectingFailure('pnpm', unit(VITALS_SUITE)),
+    ),
+    'starts a new window after a gap, and reports the larger of the two',
+  )
+
+  /*
+    193f. INP taken as the maximum.
+
+    The maximum is what a reader of the code would assume INP is, and on a busy page it is the figure one
+    unlucky interaction decides. The published algorithm walks down the ranking as the interaction count
+    grows for exactly that reason, and a build reporting the maximum would read as a slower page than it
+    is — which is the one direction of error that gets investigated and then dismissed.
+  */
+  checkRejectedBy(
+    'tags: 193f an INP taken as the slowest interaction rather than the percentile is caught',
+    withEditedFile(
+      VITALS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const index = Math.min(kept.length - 1, Math.floor(Math.max(0, interactionCount) / 50))',
+          '  const index = 0',
+        ),
+      () => runExpectingFailure('pnpm', unit(VITALS_SUITE)),
+    ),
+    'moves down the ranking as the interaction count grows',
+  )
+
+  /*
+    193g. The once-per-page guard removed.
+
+    `visibilitychange` and `pagehide` both fire on a real navigation, so every figure on the dashboard
+    doubles while every single measurement stays correct. Nothing errors, every row validates, and the
+    only symptom is a count that is twice what it should be — which is invisible without a second source
+    to compare it against.
+  */
+  checkRejectedBy(
+    'tags: 193g a reporter that reports twice per page view is caught',
+    withEditedFile(
+      VITALS,
+      (text) => replaceOnce(text, '    if (reported) return\n    reported = true\n', ''),
+      () => runExpectingFailure('pnpm', unit(VITALS_SUITE)),
+    ),
+    'reports every metric it observed, once, and flushes',
+  )
+
+  /*
+    193h. A sixth event added to the taxonomy with the version left alone.
+
+    Raw events are stamped with the taxonomy version and kept 90 days; the rollups are kept for ever. So a
+    rollup built before an event existed and one built after are distinguishable by exactly one number,
+    and leaving it alone is how a reader of an old rollup comes to believe it was computed under the
+    vocabulary they are reading it with.
+  */
+  checkRejectedBy(
+    'tags: 193h a taxonomy that grew an event without bumping its version is caught',
+    withEditedFile(
+      TAXONOMY,
+      (text) =>
+        replaceOnce(
+          text,
+          'export const ANALYTICS_TAXONOMY_VERSION = 2',
+          'export const ANALYTICS_TAXONOMY_VERSION = 1',
+        ),
+      () => runExpectingFailure('pnpm', unit(TAXONOMY_SUITE)),
+    ),
+    'holds exactly these six names, in this order, at this version',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

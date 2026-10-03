@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./analytics/consent-gate": "./src/analytics/consent-gate.ts",
     "./phone": "./src/identity/normalise-phone.ts"
   },
   "dependencies": {

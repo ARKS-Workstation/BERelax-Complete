@@ -14397,7 +14397,7 @@ units:
       v4 attribution — LCP element identity, CLS sources, INP target — to /api/collect segmented by route,
       breakpoint, locale and direction, with /book measured as its own route.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - A-FIRST-06
@@ -14424,11 +14424,75 @@ units:
       grant, and none before it in the same page session. Add that case to that file or beside it, and the band
       `analytics-consent` { start: 17_900, width: 300 } in packages/harness/src/ports.ts is the server it runs
       against.'
+    - 'NOTE: CLIENT_TAGS is EMPTY and that is the honest state, not an omission. No GA4 measurement id, no
+      container id and no Meta pixel id has been issued to this business, and no analytics destination host
+      appears anywhere in this repository (DECLARED_ADAPTERS in scripts/check-egress-guard.mjs is still
+      empty). A plausible-looking G-XXXXXXX would be indistinguishable from a configured one (brief rule
+      15): the tag would load, it would fail silently, and the dashboard would read as configured. So the
+      MECHANISM ships and the catalogue is a prop; Y5-client-tags records the missing ids and
+      tag-loader.test.ts asserts the array is empty, so the day somebody adds one is the day that row is
+      answered in the same commit.'
+    - 'NOTE: the /tag-loader fixture route (both locales) exists because of that emptiness. An interception
+      spec run against a real page would assert "no tag loaded" about a page with no tag declared, which
+      holds for ever including on the day the gate breaks (ADR 0003). The fixture declares ONE tag whose
+      src is a site-relative path nothing serves, and apps/web/src/tags-and-vitals.itest.ts intercepts and
+      fulfils it — so "a tag loaded after a grant" is a real request through the real loader and no vendor
+      host is named. The test port band { start: 23_600, width: 300 } is USED, as tags-and-vitals.'
+    - 'NOTE: the browser does NOT validate. webVitalsEvent builds the payload and /api/collect refuses a
+      bad one, which is the collector''s own documented position (A-FIRST-06) and is measured rather than
+      stylistic: the first build put these two client modules at 106,765 bytes because the reporter
+      imported parseAnalyticsEvent and breakpointFor from @berelax/shared, and the modules behind them
+      import zod at module scope. packages/shared/src/analytics/dimensions.ts is the fix — a leaf that
+      imports NOTHING, holding the dimension vocabulary MOVED out of collect.ts and taxonomy.ts and
+      re-exported by both, reached by its own subpath. 4,861 bytes after, budgeted at 6,144 in
+      build/budgets.json. consent-gate.ts''s import of @berelax/shared was changed to the zod-free
+      consent-signal leaf for the same reason: the tag loader calls mayLoadClientTag in the browser, which
+      is that module''s own documented client-tag call site.'
+    - 'NOTE: the taxonomy grew its SIXTH event, web_vitals, which taxonomy.ts''s own header anticipated as
+      "a deliberate committed diff with a schema". ANALYTICS_TAXONOMY_VERSION is 2, because raw events are
+      stamped with it and the rollups are kept for ever. It maps to NO funnel stage (COLLECTED_EVENT_FUNNEL)
+      — how fast a page was is not a step a visitor took — and attributes.test.ts''s declarable enumeration
+      was widened in the same commit: web_vitals carries `path` so the page-field rule admits it, and it is
+      excluded in practice by needing six data-track attributes no element carries.'
+    - 'NOTE: INP is asserted per route on the two FIXTURE routes and not on /book, and the reason is a
+      measurement one. A PerformanceObserver reports an `event` entry only past a 40 ms duration threshold
+      (web-vitals v4''s own figure), so an INP exists on a page where an interaction is slow — the fixture
+      makes one deliberately slow with an inline script. Forcing one on /book would mean making a real
+      booking form slow, and a case that clicked a fast control would pass or fail on how busy the machine
+      was (brief rule 23). What IS asserted for /book is that it is measured and that every row carries the
+      path, which is what makes "distinctly from other routes" a group-by rather than a second event name.'
+    - 'NOTE: the Lighthouse CI half of the first acceptance line is NOT built. "the Lighthouse CI budget on
+      home, a treatment route and /book still passes with tags enabled" needs Lighthouse CI, which does not
+      exist in this repository and is W-SITE-11''s to add — build/budgets.json''s collector entry already
+      records that absence for A-FIRST-06''s own LCP claim. What replaces it here is a measured client-js
+      budget over the two new modules, and the loader touching no network until the `load` event, which is
+      the same by-construction argument the collector makes. Deferred to W-SITE-11.'
+    - 'NOTE: migration 0161 is released unused — no row is added; the sixth event is a value in the closed
+      taxonomy and analytics.event already stores it. SQLSTATE ZY821-ZY830 is released unregistered: no
+      migration here raises one. ADR 0115 is USED, for the attribution identity.'
     files:
     - apps/web/app/(public)/_components/tag-loader.tsx
+    - apps/web/app/_analytics/web-vitals.client.tsx
+    - apps/web/app/_analytics/tag-loader-fixture.tsx
+    - apps/web/app/(en)/(dev)/tag-loader/page.tsx
+    - apps/web/app/(ar)/ar/tag-loader/page.tsx
+    - apps/web/app/_book/booking-page.tsx
     - packages/ui/src/analytics/web-vitals.ts
-    - apps/web/e2e/tags-and-vitals.spec.ts
-    - budget.json
+    - packages/ui/src/analytics/web-vitals.test.ts
+    - packages/ui/src/analytics/index.ts
+    - packages/ui/src/analytics/collector.island.tsx
+    - packages/shared/src/analytics/dimensions.ts
+    - packages/shared/src/analytics/taxonomy.ts
+    - packages/shared/src/analytics/collect.ts
+    - packages/core/src/analytics/funnel.ts
+    - packages/core/src/analytics/consent-gate.ts
+    - packages/harness/src/ports.ts
+    - apps/web/src/tag-loader.test.ts
+    - apps/web/src/tags-and-vitals.itest.ts
+    - apps/web/src/routes/registry.ts
+    - build/budgets.json
+    - docs/adr/0115-an-attribution-identity-is-a-structural-path-and-never-a-selector.md
+    - scripts/test-gates.mjs
   - id: A-MEAS-05
     order: 118
     title: 'Offline conversion loop: corrected values, no-show void, past event_time'
@@ -14483,12 +14547,18 @@ units:
       built and proved against a real PostgreSQL by supplying the session the way A-FIRST-08 will. The
       ''how-heard fallback'' named in this entry''s summary is the same deferral: this schema has no
       how-heard column, and inventing one would be a second statement of attribution.'
-    - 'NOTE: deferred to A-MEAS-04 — the correction of a conversion announced at BOOKING time. The ledger''s
-      invoice_correction statement (an estimate pushed on the booking, corrected to the invoice gross) is
-      built and proved in packages/core/src/analytics/conversion-value.test.ts, and is not reachable end to
-      end because nothing in this build announces a conversion at booking time yet, so there is no earlier
-      figure on file to correct. The discounted-invoice acceptance line is satisfied where it is decided
-      instead: the repository reads invoice.gross_total and never appointment.gross_price_fils.'
+    - 'NOTE: re-pointed by A-MEAS-04 to B-M1 — the correction of a conversion announced at BOOKING time.
+      The ledger''s invoice_correction statement (an estimate pushed on the booking, corrected to the
+      invoice gross) is built and proved in packages/core/src/analytics/conversion-value.test.ts, and is
+      still not reachable end to end. A-MEAS-04 built the half that was missing — TagLoader takes
+      conversions as branded EgressPayloads and pushes them onto the data layer through A-MEAS-01''s guard
+      — and the path remains blocked on Y5-client-tags rather than on a unit: CLIENT_TAGS is empty because
+      no measurement id, container id or pixel id has been issued and no destination host exists in this
+      repository, so there is nothing for a booking-time conversion to be announced TO. That is a
+      configuration nobody owns, which is why this is handed to B-M1 — the milestone that either closes an
+      unreachable path or records it as a stop — and not to a unit that would not build it either. The
+      discounted-invoice acceptance line is satisfied where it is decided instead: the repository reads
+      invoice.gross_total and never appointment.gross_price_fils.'
     - 'NOTE: deferred to A-FIRST-09 — DEFERRAL SATISFIED: its suites build real documents and payments
       inside a transaction they ROLL BACK, which removes exactly what they wrote and needs no declaration
       in suite-table-declarations.ts — the answer to the difficulty this note records. The deferral as it

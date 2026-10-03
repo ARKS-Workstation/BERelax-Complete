@@ -1728,6 +1728,33 @@ export const ROUTES = [
       'it reads the row, and a corrected opening time reaches it by revalidation.',
   },
   {
+    id: 'tag-loader',
+    path: '/tag-loader',
+    kind: 'document',
+    rendering: 'dynamic',
+    locales: LOCALES,
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      "A-MEAS-04's tag-loader and web-vitals fixture: one declared client tag, gated by the single " +
+      'consent gate, with a control to press and a paragraph to shift so the reporter has an interaction ' +
+      'and a layout shift to attribute. A development surface like the kitchen sink, the hero demo and ' +
+      'the collector fixture, so noindex and in no sitemap - and in the registry anyway, because a route ' +
+      'the registry does not know about is the failure this file exists to prevent. In both locales ' +
+      'because a document route served in one would publish an hreflang set pointing at a 404, and ' +
+      'because the Arabic document is the only real source of the `rtl` direction every web-vitals row ' +
+      'carries. It exists because CLIENT_TAGS is EMPTY: no measurement id, container id or pixel id has ' +
+      'been issued to this business and no analytics host appears anywhere in this repository, so an ' +
+      'interception spec run against a real page would assert "no tag loaded" about a page with no tag ' +
+      'declared - which is the vacuous pass ADR 0003 is about. The tag here is first-party and nothing ' +
+      'serves it; the suite intercepts the request. Dynamic so the route is never folded into another ' +
+      "entry, because the route's own client-JS budget is measured off its client-reference manifest. It " +
+      'reads nothing, writes nothing and shows no customer name, no price string and no service name: ' +
+      'the conversion it puts on the data layer is built through A-MEAS-01s egress guard, which maps a ' +
+      'catalogue reference to an opaque category code and cannot be handed a name.',
+  },
+  {
     id: 'till',
     path: '/till',
     kind: 'handler',

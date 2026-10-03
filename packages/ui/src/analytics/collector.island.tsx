@@ -142,6 +142,24 @@ export function trackCollectorEvent(event: AnalyticsEvent): TrackOutcome {
   return sharedCollector().track(event)
 }
 
+/**
+ * Posts what is queued, now, whether or not `load` has fired.
+ *
+ * Added by A-MEAS-04, which needs it for a reason that could not be solved by listener order. The web
+ * vitals are not final until the page is being hidden — a later, larger element replaces the LCP, and INP
+ * is a percentile over interactions that have not happened yet — so they are tracked inside a
+ * `visibilitychange` handler. This island registers its own flush on the same event when it mounts, and
+ * it mounts first, so by the time the vitals are queued this document's flush for that event has already
+ * run. Relying on the `pagehide` flush that follows works in every browser that fires both and loses the
+ * batch in one that fires only `pagehide`.
+ *
+ * `force` is already the contract for "the page is going away" — see {@link flush} — so this exposes the
+ * existing one rather than adding a second flush with its own rules.
+ */
+export function flushCollector(): void {
+  flush(true)
+}
+
 export interface CollectorIslandProps {
   /**
    * The path of the route rendering this island, as the router resolves it — `/book`, `/ar/book`.

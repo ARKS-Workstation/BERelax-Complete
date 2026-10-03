@@ -1,5 +1,5 @@
 {
-  "note": "Byte budgets for everything shipped to a browser or embedded in a document. A `derivative` budget is built with sharp at check time from the real original, because no derivative is committed. A `client-js` budget is read out of the real `next build`, so it needs `pnpm --filter @berelax/web build` first \u2014 CI runs that before this step and scripts/test-gates.mjs asserts the ordering. A `video` budget measures whatever the hero video job last wrote into the fake storage outbox, and always checks that its number is the one the pipeline itself enforces \u2014 so a budget with nothing to measure still fails when the two disagree.",
+  "note": "Byte budgets for everything shipped to a browser or embedded in a document. A `derivative` budget is built with sharp at check time from the real original, because no derivative is committed. A `client-js` budget is read out of the real `next build`, so it needs `pnpm --filter @berelax/web build` first — CI runs that before this step and scripts/test-gates.mjs asserts the ordering. A `video` budget measures whatever the hero video job last wrote into the fake storage outbox, and always checks that its number is the one the pipeline itself enforces — so a budget with nothing to measure still fails when the two disagree.",
   "budgets": [
     {
       "id": "tokens-css",
@@ -54,7 +54,7 @@
       "kind": "file",
       "path": "packages/pdf/fixtures/receipt-ar.pdf",
       "maxBytes": 83968,
-      "why": "The form issued most often \u2014 every walk-in gets one \u2014 and the shortest. The floor is the embedded fonts, so this budget is really a fence around the document furniture."
+      "why": "The form issued most often — every walk-in gets one — and the shortest. The floor is the embedded fonts, so this budget is really a fence around the document furniture."
     },
     {
       "id": "shared-layout-client-js",
@@ -66,7 +66,7 @@
         "packages/ui/src/primitives/direction.tsx",
         "packages/ui/src/theme/theme-provider.tsx"
       ],
-      "why": "docs/08 \u00a77: the motion library lives in \"\u22642 code-split islands, never in the shared layout\". This is the shared layout, measured \u2014 the chunks every route in the application loads before any page of its own. Two things make \"zero bytes attributable to motion\" checkable rather than asserted. The allow-list catches a motion island, or anything else, becoming a client reference the whole site pays for: a new name here fails by rule name. And the number catches what a module list cannot see, because a library imported *inside* an allowed module is bundled into that module's chunk and appears nowhere as a module of its own \u2014 motion v12 is 32-36KB gzip, and this budget has under 3.5KB of room. The two modules that are allowed are the theme and the direction provider, both of which exist because localStorage and Radix portals cannot be read on the server."
+      "why": "docs/08 §7: the motion library lives in \"≤2 code-split islands, never in the shared layout\". This is the shared layout, measured — the chunks every route in the application loads before any page of its own. Two things make \"zero bytes attributable to motion\" checkable rather than asserted. The allow-list catches a motion island, or anything else, becoming a client reference the whole site pays for: a new name here fails by rule name. And the number catches what a module list cannot see, because a library imported *inside* an allowed module is bundled into that module's chunk and appears nowhere as a module of its own — motion v12 is 32-36KB gzip, and this budget has under 3.5KB of room. The two modules that are allowed are the theme and the direction provider, both of which exist because localStorage and Radix portals cannot be read on the server."
     },
     {
       "id": "motion-islands",
@@ -77,7 +77,7 @@
         "packages/ui/src/motion/header-condense.tsx",
         "packages/ui/src/motion/reveal.tsx"
       ],
-      "why": "docs/08 \u00a77 budgets each island at \"roughly 32-36KB gzip (UNVERIFIED)\" for the motion library, and W-SYS-04 caps an island at 40KB gzip. Measured over the chunk that *defines* the islands rather than the chunk group loaded with them, because Turbopack gives every client module on a route the same chunk list and a shared list cannot be divided between its modules. Both islands land in one chunk today, so this one number is the stronger reading of \"each island\": if the pair is inside the per-island budget, either alone is. The wider question \u2014 a library joining an island's import graph and being put in a chunk of its own \u2014 is the kitchen-sink route budget below, and neither measurement replaces the other.",
+      "why": "docs/08 §7 budgets each island at \"roughly 32-36KB gzip (UNVERIFIED)\" for the motion library, and W-SYS-04 caps an island at 40KB gzip. Measured over the chunk that *defines* the islands rather than the chunk group loaded with them, because Turbopack gives every client module on a route the same chunk list and a shared list cannot be divided between its modules. Both islands land in one chunk today, so this one number is the stronger reading of \"each island\": if the pair is inside the per-island budget, either alone is. The wider question — a library joining an island's import graph and being put in a chunk of its own — is the kitchen-sink route budget below, and neither measurement replaces the other.",
       "maxBytes": 40960
     },
     {
@@ -87,7 +87,7 @@
       "scope": "route",
       "entry": "app/(en)/(dev)/kitchen-sink/page",
       "maxBytes": 53248,
-      "why": "Everything the route with the most client code on it loads beyond the shared layout: the Radix dialog, popover and select (about 31KB gzip of the total, and W-SYS-09's note about the primitives barrel is why they are on this route at all), Next's own dynamic-import helpers, and the motion islands at under a kilobyte. It is the number that moves when a library arrives anywhere in an island's graph rather than in the island's own chunk, which is exactly what a `motion` import would do \u2014 32-36KB gzip against about 7KB of headroom. docs/08 \u00a78 budgets first-party JS on the home route at 110KB gzip; the home route ships none of this, and this dev surface is deliberately the worst case on the site."
+      "why": "Everything the route with the most client code on it loads beyond the shared layout: the Radix dialog, popover and select (about 31KB gzip of the total, and W-SYS-09's note about the primitives barrel is why they are on this route at all), Next's own dynamic-import helpers, and the motion islands at under a kilobyte. It is the number that moves when a library arrives anywhere in an island's graph rather than in the island's own chunk, which is exactly what a `motion` import would do — 32-36KB gzip against about 7KB of headroom. docs/08 §8 budgets first-party JS on the home route at 110KB gzip; the home route ships none of this, and this dev surface is deliberately the worst case on the site."
     },
     {
       "id": "hero-attach-island",
@@ -96,7 +96,7 @@
       "scope": "modules",
       "modules": ["packages/ui/src/media/attach-video.island.tsx"],
       "maxBytes": 2048,
-      "why": "docs/08 \u00a76 budgets \"a ~1.4KB island\" to attach the hero video after LCP, and W-SYS-07's acceptance holds it to \u22642KB gzip. Measured over the chunk that DEFINES the module, the same narrow reading as the two motion islands above \u2014 Turbopack gives every client module on a route the same chunk list, so a chunk list cannot be divided between the modules that share it. The number is what makes the design checkable rather than asserted: the whole point of this island is that the hero costs ~0ms LCP and a kilobyte or two of deferred JavaScript, and an island that quietly grew a library would still work, still pass every behavioural test, and cost what the video hero was supposed to save. `[missing-client-module]` is the vacuity guard in the other direction: a budget over a module no route ships measures zero bytes and passes forever, which is exactly how a check stops being one (ADR 0003)."
+      "why": "docs/08 §6 budgets \"a ~1.4KB island\" to attach the hero video after LCP, and W-SYS-07's acceptance holds it to ≤2KB gzip. Measured over the chunk that DEFINES the module, the same narrow reading as the two motion islands above — Turbopack gives every client module on a route the same chunk list, so a chunk list cannot be divided between the modules that share it. The number is what makes the design checkable rather than asserted: the whole point of this island is that the hero costs ~0ms LCP and a kilobyte or two of deferred JavaScript, and an island that quietly grew a library would still work, still pass every behavioural test, and cost what the video hero was supposed to save. `[missing-client-module]` is the vacuity guard in the other direction: a budget over a module no route ships measures zero bytes and passes forever, which is exactly how a check stops being one (ADR 0003)."
     },
     {
       "id": "collector-client-js",
@@ -106,7 +106,20 @@
       "modules": ["packages/ui/src/analytics/collector.island.tsx"],
       "entry": "app/(en)/(dev)/collector/page",
       "maxBytes": 3072,
-      "why": "A-FIRST-06's acceptance line: the collector adds no more than 3KB gzipped to the public bundle. It ships to every visitor of every route that declares a tracked element, which today is /book and the fixture route, and it is the one thing on this site whose weight buys the reader nothing \u2014 a measurement SDK is pure overhead to the person waiting for the page, so the budget is the discipline that keeps it from becoming a tag manager. Measured over the chunk that DEFINES the island, the same narrow reading as the two motion islands and the hero attach island: Turbopack gives every client module on a route the same chunk list, so a chunk list cannot be divided between the modules that share it, and the defining chunk is where the island and the three React-free modules it statically imports (collector.ts, attributes.ts, use-track.ts) are bundled. `entry` narrows it to the fixture route, which is the one route that ships the collector and nothing else: on /book the same defining chunk also holds the slot picker and the details step, so the unnarrowed number was 5,928 bytes of which 4,127 belonged to the booking flow \u2014 a budget that moved when the collector became more popular rather than when it grew. `[missing-client-module]` is the vacuity guard in the other direction \u2014 a budget over a module no route ships measures zero bytes and passes forever, which is exactly how a check stops being one (ADR 0003). The second half of the acceptance line, that the collector is not in the LCP critical request chain, is NOT a byte count: it is enforced by construction \u2014 the island touches no network until the `load` event \u2014 and asserted in apps/web/e2e/collector.itest.ts, because Lighthouse CI does not exist in this repository and is W-SITE-11's to add."
+      "why": "A-FIRST-06's acceptance line: the collector adds no more than 3KB gzipped to the public bundle. It ships to every visitor of every route that declares a tracked element, which today is /book and the fixture route, and it is the one thing on this site whose weight buys the reader nothing — a measurement SDK is pure overhead to the person waiting for the page, so the budget is the discipline that keeps it from becoming a tag manager. Measured over the chunk that DEFINES the island, the same narrow reading as the two motion islands and the hero attach island: Turbopack gives every client module on a route the same chunk list, so a chunk list cannot be divided between the modules that share it, and the defining chunk is where the island and the three React-free modules it statically imports (collector.ts, attributes.ts, use-track.ts) are bundled. `entry` narrows it to the fixture route, which is the one route that ships the collector and nothing else: on /book the same defining chunk also holds the slot picker and the details step, so the unnarrowed number was 5,928 bytes of which 4,127 belonged to the booking flow — a budget that moved when the collector became more popular rather than when it grew. `[missing-client-module]` is the vacuity guard in the other direction — a budget over a module no route ships measures zero bytes and passes forever, which is exactly how a check stops being one (ADR 0003). The second half of the acceptance line, that the collector is not in the LCP critical request chain, is NOT a byte count: it is enforced by construction — the island touches no network until the `load` event — and asserted in apps/web/e2e/collector.itest.ts, because Lighthouse CI does not exist in this repository and is W-SITE-11's to add."
+    },
+    {
+      "id": "tag-loader-client-js",
+      "label": "The tag loader and the web-vitals reporter",
+      "kind": "client-js",
+      "scope": "modules",
+      "modules": [
+        "apps/web/app/(public)/_components/tag-loader.tsx",
+        "apps/web/app/_analytics/web-vitals.client.tsx"
+      ],
+      "entry": "app/(en)/(dev)/tag-loader/page",
+      "maxBytes": 6144,
+      "why": "A-MEAS-04's two client modules: the consent-gated tag loader and the web-vitals reporter's client boundary. MEASURED at 4,861 bytes on the fixture route, so this budget has about 1.2KB of room — a live fence rather than a round number. Both modules ship to every visitor of every route that mounts them, which today is /book and this fixture, and like the collector beside them they buy the reader nothing: a tag loader is overhead to the person waiting for the page, and the discipline is what keeps it from becoming a tag manager. The number is the whole reason this entry exists, because the first build measured 106,765 bytes. The reporter imported `parseAnalyticsEvent` and `breakpointFor` from `@berelax/shared`, and the two modules behind them import zod at module scope — so the defining chunk carried zod and every schema in the package. It is the same defect A-FIRST-06 paid 98KB for. The fix was `packages/shared/src/analytics/dimensions.ts`, a leaf that imports NOTHING and holds the dimension vocabulary both of them need, reached by its own subpath; the browser validates nothing, which is the collector's own documented position — the refusal lives at /api/collect, where it covers every client rather than only this build's code. `entry` narrows it to the fixture route for A-FIRST-06's reason: on /book the same defining chunk also holds the booking flow's islands, so an unnarrowed number would move when these modules became more popular rather than when they grew. `[missing-client-module]` is the vacuity guard in the other direction — a budget over a module no route ships measures zero bytes and passes forever (ADR 0003). The Lighthouse CI half of the acceptance line is NOT this: Lighthouse CI does not exist in this repository and is W-SITE-11's to add."
     },
     {
       "id": "gallery-page",
@@ -126,7 +139,7 @@
       "width": 1080,
       "format": "avif",
       "maxBytes": 97280,
-      "why": "docs/08 \u00a78: the LCP element on a phone. 95KB is affordable only because this photography is soft and low-detail; a high-contrast replacement needs 140-180KB for the same perceptual quality, and the first thing that tells us is this number. The other three heroes are measured in packages/fixtures/src/media-derivatives.itest.ts; one hero here keeps `pnpm budgets` to two encodes."
+      "why": "docs/08 §8: the LCP element on a phone. 95KB is affordable only because this photography is soft and low-detail; a high-contrast replacement needs 140-180KB for the same perceptual quality, and the first thing that tells us is this number. The other three heroes are measured in packages/fixtures/src/media-derivatives.itest.ts; one hero here keeps `pnpm budgets` to two encodes."
     },
     {
       "id": "hero-video-mobile",
@@ -134,7 +147,7 @@
       "kind": "video",
       "crop": "mobile",
       "maxBytes": 358400,
-      "why": "docs/08 \u00a78: \"Hero video (deferred, gated) \u2264350KB\" on a phone, where the budget bites and where docs/08 \u00a78's cut order drops video to the still first. It is enforced in two places on purpose. Here it is a CI failure with the measured number \u2014 the second of docs/08 \u00a78's three enforcement layers. In the job it is not: the job refuses only at the 2MB hard stop, because a job that refused at the budget would make the hard stop a rule that can never fire, and docs/08 \u00a78's cut order is the documented route back under budget rather than a gate."
+      "why": "docs/08 §8: \"Hero video (deferred, gated) ≤350KB\" on a phone, where the budget bites and where docs/08 §8's cut order drops video to the still first. It is enforced in two places on purpose. Here it is a CI failure with the measured number — the second of docs/08 §8's three enforcement layers. In the job it is not: the job refuses only at the 2MB hard stop, because a job that refused at the budget would make the hard stop a rule that can never fire, and docs/08 §8's cut order is the documented route back under budget rather than a gate."
     },
     {
       "id": "hero-video-desktop",
@@ -142,7 +155,7 @@
       "kind": "video",
       "crop": "desktop",
       "maxBytes": 1258291,
-      "why": "docs/08 \u00a78: \"\u22641.2MB \u2014 hard stop 2MB\". 1.2 \u00d7 1048576 rounded, matching the KiB basis of every other budget in this file. The heaviest single thing the site serves, and the only one that is deferred until after LCP \u2014 docs/08 \u00a76 puts its LCP cost at 0ms because the element has no src until LCP is final, which is what makes a megabyte of decoration affordable at all."
+      "why": "docs/08 §8: \"≤1.2MB — hard stop 2MB\". 1.2 × 1048576 rounded, matching the KiB basis of every other budget in this file. The heaviest single thing the site serves, and the only one that is deferred until after LCP — docs/08 §6 puts its LCP cost at 0ms because the element has no src until LCP is final, which is what makes a megabyte of decoration affordable at all."
     },
     {
       "id": "hero-avif-desktop",
@@ -153,7 +166,7 @@
       "width": 2560,
       "format": "avif",
       "maxBytes": 174080,
-      "why": "docs/08 \u00a78, the heaviest single derivative the site serves. The worst of the four heroes already uses about 90% of this, so it is a live budget rather than a round number."
+      "why": "docs/08 §8, the heaviest single derivative the site serves. The worst of the four heroes already uses about 90% of this, so it is a live budget rather than a round number."
     }
   ]
 }

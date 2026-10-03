@@ -36,7 +36,45 @@ import { z } from 'zod'
 // `../app-error.ts` and not the barrel: the barrel re-exports this module, so importing it from here
 // would close a cycle `no-circular` refuses. That is why AppError is a leaf module at all.
 import { AppError } from '../app-error.ts'
+// `./dimensions.ts` is the zod-free LEAF and the import runs one way only: it imports nothing at all, so
+// nothing closes a cycle `no-circular` would refuse. Every value here is read from there rather than
+// restated — a second list of band names, metric names or writing directions is the defect this whole
+// file is about — and the leaf exists because a browser reads them and this module imports zod. See its
+// header for the 106,765 bytes that found it.
+import {
+  ANALYTICS_BREAKPOINTS,
+  ANALYTICS_WRITING_DIRECTIONS,
+  type AnalyticsBreakpoint,
+  WEB_VITALS_IDENTITY_MAX,
+  WEB_VITALS_IDENTITY_PATTERN,
+  WEB_VITALS_MAX_VALUE,
+  WEB_VITALS_METRICS,
+} from './dimensions.ts'
+
+/**
+ * The web-vitals shape, re-exported from the leaf it lives in.
+ *
+ * Re-exported rather than restated so `@berelax/shared`'s barrel keeps naming them and there is one
+ * statement of each. `CLS_VALUE_SCALE` is not here because nothing in this module applies the scale —
+ * `webVitalsValueOf` in `@berelax/ui` does, and it reads the leaf directly.
+ */
+export {
+  ANALYTICS_WRITING_DIRECTIONS,
+  type AnalyticsWritingDirection,
+  CLS_VALUE_SCALE,
+  WEB_VITALS_IDENTITY_MAX,
+  WEB_VITALS_IDENTITY_PATTERN,
+  WEB_VITALS_MAX_VALUE,
+  WEB_VITALS_METRICS,
+  type WebVitalsMetric,
+} from './dimensions.ts'
+
 import { treatmentKeySchema, treatmentStyleSchema } from '../schemas/catalogue.ts'
+// The two locales this build serves, read from the consent record's own list rather than written again.
+// The name is `CONSENT_LOCALES` because the consent record is where the pair first had to be stated in
+// `shared`; it is the only such list here, and a `WEB_VITALS_LOCALES` beside it would be the second
+// statement of a fact that drifts.
+import { CONSENT_LOCALES } from '../schemas/consent.ts'
 import { whatsappRefCodeSchema } from '../whatsapp-ref.ts'
 
 /**
@@ -51,7 +89,15 @@ import { whatsappRefCodeSchema } from '../whatsapp-ref.ts'
  * Bumping it is a deliberate committed diff, exactly as adding a name to {@link ANALYTICS_EVENT_NAMES}
  * is: `taxonomy.test.ts` pins both against literals written out in the test.
  */
-export const ANALYTICS_TAXONOMY_VERSION = 1
+export const ANALYTICS_TAXONOMY_VERSION = 2
+
+/*
+ * Version 2 is A-MEAS-04 adding `web_vitals`, which is the sixth event and the "deliberate committed diff
+ * with a schema" the note below anticipated. The bump is not decoration: raw events are stamped with this
+ * number and kept 90 days while the rollups are kept for ever, so a rollup built before the sixth event
+ * existed is distinguishable from one built after — which is the one thing a reader of an old rollup
+ * cannot otherwise detect.
+ */
 
 /**
  * The funnel, in order, ending at money. docs/03 §6 draws it:
@@ -225,10 +271,17 @@ const serviceRefShape = {
  * ## Why the set is closed at five
  *
  * docs/03 §6 warns that "every interaction" is unbounded and that the volume discipline is what keeps
- * the event table from becoming the largest object in the database. Each of these five is named by a
+ * the event table from becoming the largest object in the database. Each of the first five is named by a
  * document: `page_view` by docs/02 §4 in so many words, the three middle stages by the funnel drawing
  * in docs/03 §6, and `whatsapp_ref_shown` by ADR 0018's requirement that ref-capture rate be reported —
- * a rate needs a denominator, and this is it. A sixth is a deliberate committed diff with a schema.
+ * a rate needs a denominator, and this is it.
+ *
+ * The SIXTH is `web_vitals` (A-MEAS-04), and it is the deliberate committed diff with a schema that this
+ * note anticipated. It is bounded differently from the other five and that is what makes it affordable:
+ * at most one row per metric per page view, five metrics, and the browser emits each one once — so it is
+ * a constant per page and not a count of interactions. It maps to NO funnel stage
+ * (`COLLECTED_EVENT_FUNNEL` in `@berelax/core`), because how fast a page was is not a step a visitor
+ * took.
  */
 const pageViewPayloadSchema = z.strictObject({
   path: pathSchema,
@@ -262,6 +315,62 @@ const whatsappRefShownPayloadSchema = z.strictObject({
   refCode: whatsappRefCodeSchema,
 })
 
+const webVitalsIdentitySchema = z
+  .string()
+  .min(1)
+  .max(WEB_VITALS_IDENTITY_MAX)
+  .refine((value) => WEB_VITALS_IDENTITY_PATTERN.test(value), {
+    message:
+      'A web-vitals attribution identity is a structural path only: tag names, :nth-of-type positions ' +
+      'and at most one [data-track=<event>]. An id, a class or any text could carry a service name or a ' +
+      'price (ADR 0115).',
+  })
+
+/**
+ * The breakpoint, validated against the band names the envelope already uses.
+ *
+ * `z.custom` rather than `z.enum`, because {@link ANALYTICS_BREAKPOINTS} is a `readonly AnalyticsBreakpoint[]`
+ * and `z.enum` needs a tuple — and converting it to one here would be the second list this file refuses.
+ * The predicate keeps the inferred type exact.
+ */
+const analyticsBreakpointSchema = z.custom<AnalyticsBreakpoint>(
+  (value) =>
+    typeof value === 'string' && (ANALYTICS_BREAKPOINTS as readonly string[]).includes(value),
+  { message: 'Not a breakpoint band this build declares.' },
+)
+
+/**
+ * One field metric, with the four dimensions that make it answerable.
+ *
+ * `path` is the ROUTE and it is why `/book` is measurable as its own route without a second event name:
+ * the acceptance line asks that *"INP rows exist for /book distinctly from other routes"*, and a path on
+ * every row is what makes that a `group by` rather than a new column. The other three — breakpoint,
+ * locale, direction — are the three things that change what was laid out, and an INP figure without them
+ * is an average over two different pages.
+ *
+ * There is deliberately **no rating**. "good / needs improvement / poor" is a threshold, the thresholds
+ * are published figures this build did not choose, and a classification stored on the row would be a
+ * second statement of them that an updated threshold could not correct: the rows are kept and the
+ * thresholds move. The dashboard classifies; the collector measures.
+ */
+const webVitalsPayloadSchema = z.strictObject({
+  path: pathSchema,
+  metric: z.enum(WEB_VITALS_METRICS),
+  /** Whole milliseconds, or thousandths for CLS. See {@link WEB_VITALS_MAX_VALUE}. */
+  value: z.number().int().min(0).max(WEB_VITALS_MAX_VALUE),
+  breakpoint: analyticsBreakpointSchema,
+  locale: z.enum(CONSENT_LOCALES),
+  direction: z.enum(ANALYTICS_WRITING_DIRECTIONS),
+  /**
+   * The element the metric is attributed to, or null when the browser offered none.
+   *
+   * Null and not an empty string: TTFB is attributed to no element at all, and a browser with no
+   * attribution support reports a figure with no identity — which is a different fact from an element
+   * whose identity is blank.
+   */
+  identity: webVitalsIdentitySchema.nullable(),
+})
+
 /** The closed set of collected event names. A tuple, so {@link AnalyticsEventName} is derived from it. */
 export const ANALYTICS_EVENT_NAMES = [
   'page_view',
@@ -269,6 +378,7 @@ export const ANALYTICS_EVENT_NAMES = [
   'price_viewed',
   'cta_click',
   'whatsapp_ref_shown',
+  'web_vitals',
 ] as const
 
 export type AnalyticsEventName = (typeof ANALYTICS_EVENT_NAMES)[number]
@@ -291,6 +401,7 @@ export const ANALYTICS_EVENT_SCHEMAS = {
   price_viewed: priceViewedPayloadSchema,
   cta_click: ctaClickPayloadSchema,
   whatsapp_ref_shown: whatsappRefShownPayloadSchema,
+  web_vitals: webVitalsPayloadSchema,
 } as const satisfies Readonly<Record<AnalyticsEventName, z.ZodType>>
 
 /** The validated payload of one named event, derived from that event's own schema. */
