@@ -1,0 +1,1221 @@
+{
+  "runVersion": 1,
+  "mode": "dry_run",
+  "startedAtIso": "2026-10-03T14:46:52.172Z",
+  "finishedAtIso": "2026-10-03T14:46:56.982Z",
+  "measuredOverMs": 4810,
+  "coversEveryStep": false,
+  "measuredOn": "agent_container",
+  "steps": [
+    {
+      "id": "preflight-go-no-go",
+      "performed": true,
+      "durationMs": 3768,
+      "skippedReason": null,
+      "exitCode": 1
+    },
+    {
+      "id": "preflight-freeze",
+      "performed": true,
+      "durationMs": 393,
+      "skippedReason": null,
+      "exitCode": 0
+    },
+    {
+      "id": "preflight-schema-is-newest",
+      "performed": true,
+      "durationMs": 258,
+      "skippedReason": null,
+      "exitCode": 0
+    },
+    {
+      "id": "stop-the-worker",
+      "performed": false,
+      "durationMs": null,
+      "skippedReason": "an operator performs this step; nothing in this repository can. See docs/runbooks/cutover.md",
+      "exitCode": null
+    },
+    {
+      "id": "backup-before-anything",
+      "performed": false,
+      "durationMs": null,
+      "skippedReason": "an operator performs this step; nothing in this repository can. See docs/runbooks/cutover.md",
+      "exitCode": null
+    },
+    {
+      "id": "final-import",
+      "performed": false,
+      "durationMs": null,
+      "skippedReason": "this step writes, and this is a dry run",
+      "exitCode": null
+    },
+    {
+      "id": "post-import-reconciliation",
+      "performed": false,
+      "durationMs": null,
+      "skippedReason": "this step writes, and this is a dry run",
+      "exitCode": null
+    },
+    {
+      "id": "post-import-invariants",
+      "performed": false,
+      "durationMs": null,
+      "skippedReason": "this step writes, and this is a dry run",
+      "exitCode": null
+    },
+    {
+      "id": "record-the-decision",
+      "performed": false,
+      "durationMs": null,
+      "skippedReason": "an operator performs this step; nothing in this repository can. See docs/runbooks/cutover.md",
+      "exitCode": null
+    },
+    {
+      "id": "start-the-worker",
+      "performed": false,
+      "durationMs": null,
+      "skippedReason": "an operator performs this step; nothing in this repository can. See docs/runbooks/cutover.md",
+      "exitCode": null
+    },
+    {
+      "id": "open-for-business",
+      "performed": false,
+      "durationMs": null,
+      "skippedReason": "an operator performs this step; nothing in this repository can. See docs/runbooks/cutover.md",
+      "exitCode": null
+    }
+  ],
+  "tableChecksums": [
+    {
+      "table": "import_staging.import_probe_entity",
+      "before": "empty:import_staging.import_probe_entity",
+      "after": "empty:import_staging.import_probe_entity"
+    },
+    {
+      "table": "import_staging.import_provenance",
+      "before": "empty:import_staging.import_provenance",
+      "after": "empty:import_staging.import_provenance"
+    },
+    {
+      "table": "import_staging.import_row",
+      "before": "empty:import_staging.import_row",
+      "after": "empty:import_staging.import_row"
+    },
+    {
+      "table": "import_staging.import_run",
+      "before": "empty:import_staging.import_run",
+      "after": "empty:import_staging.import_run"
+    },
+    {
+      "table": "import_staging.import_sign_off",
+      "before": "empty:import_staging.import_sign_off",
+      "after": "empty:import_staging.import_sign_off"
+    },
+    {
+      "table": "public.account",
+      "before": "806b0037660ca4b7728607c60cb715ac",
+      "after": "806b0037660ca4b7728607c60cb715ac"
+    },
+    {
+      "table": "public.agent_alert",
+      "before": "empty:agent_alert",
+      "after": "empty:agent_alert"
+    },
+    {
+      "table": "public.agent_definition",
+      "before": "e3bad4fe621bc9f5fff085133abd93e8",
+      "after": "e3bad4fe621bc9f5fff085133abd93e8"
+    },
+    {
+      "table": "public.agent_heartbeat",
+      "before": "e81bed2970e254232592b45e104c4445",
+      "after": "e81bed2970e254232592b45e104c4445"
+    },
+    {
+      "table": "public.agent_run",
+      "before": "empty:agent_run",
+      "after": "empty:agent_run"
+    },
+    {
+      "table": "public.analytics_dispatch",
+      "before": "empty:analytics_dispatch",
+      "after": "empty:analytics_dispatch"
+    },
+    {
+      "table": "public.analytics_dispatch_destination",
+      "before": "1ad7f0a401af2d953d3e38d772dccc7f",
+      "after": "1ad7f0a401af2d953d3e38d772dccc7f"
+    },
+    {
+      "table": "public.analytics_dispatch_reconciliation",
+      "before": "empty:analytics_dispatch_reconciliation",
+      "after": "empty:analytics_dispatch_reconciliation"
+    },
+    {
+      "table": "public.analytics_dispatch_reconciliation_item",
+      "before": "empty:analytics_dispatch_reconciliation_item",
+      "after": "empty:analytics_dispatch_reconciliation_item"
+    },
+    {
+      "table": "public.app_setting",
+      "before": "1fc8c70f5d87164444fc4d96e10c8c9f",
+      "after": "1fc8c70f5d87164444fc4d96e10c8c9f"
+    },
+    {
+      "table": "public.app_setting_history",
+      "before": "caf3011ba9fca6be0c730baa38a23dc2",
+      "after": "caf3011ba9fca6be0c730baa38a23dc2"
+    },
+    {
+      "table": "public.appointment",
+      "before": "empty:appointment",
+      "after": "empty:appointment"
+    },
+    {
+      "table": "public.appointment_reassignment_flag",
+      "before": "empty:appointment_reassignment_flag",
+      "after": "empty:appointment_reassignment_flag"
+    },
+    {
+      "table": "public.appointment_status_history",
+      "before": "empty:appointment_status_history",
+      "after": "empty:appointment_status_history"
+    },
+    {
+      "table": "public.attendance_correction",
+      "before": "empty:attendance_correction",
+      "after": "empty:attendance_correction"
+    },
+    {
+      "table": "public.attendance_event",
+      "before": "empty:attendance_event",
+      "after": "empty:attendance_event"
+    },
+    {
+      "table": "public.attendance_grace_rule",
+      "before": "02134944a5ac050353c07e5f98aecd13",
+      "after": "02134944a5ac050353c07e5f98aecd13"
+    },
+    {
+      "table": "public.audit_event_2026_10",
+      "before": "e9d79db94b5038a5b68833599890550d",
+      "after": "e9d79db94b5038a5b68833599890550d"
+    },
+    {
+      "table": "public.audit_event_2026_11",
+      "before": "empty:audit_event_2026_11",
+      "after": "empty:audit_event_2026_11"
+    },
+    {
+      "table": "public.audit_event_2026_12",
+      "before": "empty:audit_event_2026_12",
+      "after": "empty:audit_event_2026_12"
+    },
+    {
+      "table": "public.audit_event_2027_01",
+      "before": "empty:audit_event_2027_01",
+      "after": "empty:audit_event_2027_01"
+    },
+    {
+      "table": "public.availability_epoch",
+      "before": "empty:availability_epoch",
+      "after": "empty:availability_epoch"
+    },
+    {
+      "table": "public.bill",
+      "before": "empty:bill",
+      "after": "empty:bill"
+    },
+    {
+      "table": "public.bill_line",
+      "before": "empty:bill_line",
+      "after": "empty:bill_line"
+    },
+    {
+      "table": "public.booking",
+      "before": "empty:booking",
+      "after": "empty:booking"
+    },
+    {
+      "table": "public.booking_attribution",
+      "before": "empty:booking_attribution",
+      "after": "empty:booking_attribution"
+    },
+    {
+      "table": "public.booking_idempotency",
+      "before": "empty:booking_idempotency",
+      "after": "empty:booking_idempotency"
+    },
+    {
+      "table": "public.booking_manage_grant",
+      "before": "empty:booking_manage_grant",
+      "after": "empty:booking_manage_grant"
+    },
+    {
+      "table": "public.booking_session",
+      "before": "empty:booking_session",
+      "after": "empty:booking_session"
+    },
+    {
+      "table": "public.booking_whatsapp_ref_capture",
+      "before": "empty:booking_whatsapp_ref_capture",
+      "after": "empty:booking_whatsapp_ref_capture"
+    },
+    {
+      "table": "public.business_day",
+      "before": "d58066fafaca162aa90a52f4f9cff400",
+      "after": "d58066fafaca162aa90a52f4f9cff400"
+    },
+    {
+      "table": "public.campaign",
+      "before": "empty:campaign",
+      "after": "empty:campaign"
+    },
+    {
+      "table": "public.campaign_recipient",
+      "before": "empty:campaign_recipient",
+      "after": "empty:campaign_recipient"
+    },
+    {
+      "table": "public.cash_drawer",
+      "before": "682c25cc4098db2cca4c1af60ff3ee0e",
+      "after": "682c25cc4098db2cca4c1af60ff3ee0e"
+    },
+    {
+      "table": "public.cash_drop",
+      "before": "empty:cash_drop",
+      "after": "empty:cash_drop"
+    },
+    {
+      "table": "public.cash_session",
+      "before": "empty:cash_session",
+      "after": "empty:cash_session"
+    },
+    {
+      "table": "public.cash_session_adjustment",
+      "before": "empty:cash_session_adjustment",
+      "after": "empty:cash_session_adjustment"
+    },
+    {
+      "table": "public.chargeback",
+      "before": "empty:chargeback",
+      "after": "empty:chargeback"
+    },
+    {
+      "table": "public.chart_of_accounts",
+      "before": "0edb9c67fe90878ecf0057f646cdfd28",
+      "after": "0edb9c67fe90878ecf0057f646cdfd28"
+    },
+    {
+      "table": "public.checkout_finalisation",
+      "before": "empty:checkout_finalisation",
+      "after": "empty:checkout_finalisation"
+    },
+    {
+      "table": "public.closed_period_labour_adjustment",
+      "before": "empty:closed_period_labour_adjustment",
+      "after": "empty:closed_period_labour_adjustment"
+    },
+    {
+      "table": "public.commission_line",
+      "before": "empty:commission_line",
+      "after": "empty:commission_line"
+    },
+    {
+      "table": "public.commission_rule",
+      "before": "empty:commission_rule",
+      "after": "empty:commission_rule"
+    },
+    {
+      "table": "public.commission_rule_band",
+      "before": "empty:commission_rule_band",
+      "after": "empty:commission_rule_band"
+    },
+    {
+      "table": "public.commission_run",
+      "before": "empty:commission_run",
+      "after": "empty:commission_run"
+    },
+    {
+      "table": "public.consent",
+      "before": "604ab2bf91ccf5964f0b53d7d1c01846",
+      "after": "604ab2bf91ccf5964f0b53d7d1c01846"
+    },
+    {
+      "table": "public.consent_purpose",
+      "before": "007fc3715b468f1b9cd7d0d1c38ccbba",
+      "after": "007fc3715b468f1b9cd7d0d1c38ccbba"
+    },
+    {
+      "table": "public.consent_wording",
+      "before": "2c4b562977b5b46c196414af6d7b5001",
+      "after": "2c4b562977b5b46c196414af6d7b5001"
+    },
+    {
+      "table": "public.credential_expiry_notice",
+      "before": "empty:credential_expiry_notice",
+      "after": "empty:credential_expiry_notice"
+    },
+    {
+      "table": "public.credit_note",
+      "before": "empty:credit_note",
+      "after": "empty:credit_note"
+    },
+    {
+      "table": "public.credit_note_line",
+      "before": "empty:credit_note_line",
+      "after": "empty:credit_note_line"
+    },
+    {
+      "table": "public.customer",
+      "before": "6faeff52e0097df70f0440658f205551",
+      "after": "6faeff52e0097df70f0440658f205551"
+    },
+    {
+      "table": "public.customer_acquisition_source",
+      "before": "6378487f91f83cdf673b851b5de40b6c",
+      "after": "6378487f91f83cdf673b851b5de40b6c"
+    },
+    {
+      "table": "public.customer_attribution",
+      "before": "empty:customer_attribution",
+      "after": "empty:customer_attribution"
+    },
+    {
+      "table": "public.customer_blocklist",
+      "before": "empty:customer_blocklist",
+      "after": "empty:customer_blocklist"
+    },
+    {
+      "table": "public.customer_lifecycle_state",
+      "before": "0e78f54169bfb0a8ff8eac0d264177ba",
+      "after": "0e78f54169bfb0a8ff8eac0d264177ba"
+    },
+    {
+      "table": "public.customer_pipeline_card",
+      "before": "empty:customer_pipeline_card",
+      "after": "empty:customer_pipeline_card"
+    },
+    {
+      "table": "public.customer_preference",
+      "before": "empty:customer_preference",
+      "after": "empty:customer_preference"
+    },
+    {
+      "table": "public.customer_segment",
+      "before": "empty:customer_segment",
+      "after": "empty:customer_segment"
+    },
+    {
+      "table": "public.customer_tag",
+      "before": "empty:customer_tag",
+      "after": "empty:customer_tag"
+    },
+    {
+      "table": "public.customer_therapist_do_not_pair",
+      "before": "empty:customer_therapist_do_not_pair",
+      "after": "empty:customer_therapist_do_not_pair"
+    },
+    {
+      "table": "public.deposit_movement",
+      "before": "empty:deposit_movement",
+      "after": "empty:deposit_movement"
+    },
+    {
+      "table": "public.document_series",
+      "before": "6f2ae6643d35fc053b8a14b778130569",
+      "after": "6f2ae6643d35fc053b8a14b778130569"
+    },
+    {
+      "table": "public.employee",
+      "before": "5583e2bbc34fd65e270a7a7199d75353",
+      "after": "5583e2bbc34fd65e270a7a7199d75353"
+    },
+    {
+      "table": "public.employee_bank_detail",
+      "before": "empty:employee_bank_detail",
+      "after": "empty:employee_bank_detail"
+    },
+    {
+      "table": "public.employee_document",
+      "before": "empty:employee_document",
+      "after": "empty:employee_document"
+    },
+    {
+      "table": "public.employee_language",
+      "before": "empty:employee_language",
+      "after": "empty:employee_language"
+    },
+    {
+      "table": "public.employee_skill",
+      "before": "f635a9cca50672c5e47e520f8ce43466",
+      "after": "f635a9cca50672c5e47e520f8ce43466"
+    },
+    {
+      "table": "public.employee_tip",
+      "before": "empty:employee_tip",
+      "after": "empty:employee_tip"
+    },
+    {
+      "table": "public.flow",
+      "before": "1462b090722c4132a2ccbe07414868de",
+      "after": "1462b090722c4132a2ccbe07414868de"
+    },
+    {
+      "table": "public.flow_definition",
+      "before": "bcbd39ee375b89d398a49cc5f2c92084",
+      "after": "bcbd39ee375b89d398a49cc5f2c92084"
+    },
+    {
+      "table": "public.flow_enrolment",
+      "before": "empty:flow_enrolment",
+      "after": "empty:flow_enrolment"
+    },
+    {
+      "table": "public.flow_node_effect",
+      "before": "empty:flow_node_effect",
+      "after": "empty:flow_node_effect"
+    },
+    {
+      "table": "public.flow_run",
+      "before": "empty:flow_run",
+      "after": "empty:flow_run"
+    },
+    {
+      "table": "public.flow_step_log",
+      "before": "empty:flow_step_log",
+      "after": "empty:flow_step_log"
+    },
+    {
+      "table": "public.frequency_ledger",
+      "before": "empty:frequency_ledger",
+      "after": "empty:frequency_ledger"
+    },
+    {
+      "table": "public.gateway_state_observation",
+      "before": "empty:gateway_state_observation",
+      "after": "empty:gateway_state_observation"
+    },
+    {
+      "table": "public.google_capabilities",
+      "before": "empty:google_capabilities",
+      "after": "empty:google_capabilities"
+    },
+    {
+      "table": "public.google_connection_events",
+      "before": "empty:google_connection_events",
+      "after": "empty:google_connection_events"
+    },
+    {
+      "table": "public.google_connections",
+      "before": "empty:google_connections",
+      "after": "empty:google_connections"
+    },
+    {
+      "table": "public.google_place_aggregate",
+      "before": "empty:google_place_aggregate",
+      "after": "empty:google_place_aggregate"
+    },
+    {
+      "table": "public.google_reauth_notice",
+      "before": "empty:google_reauth_notice",
+      "after": "empty:google_reauth_notice"
+    },
+    {
+      "table": "public.google_reviews",
+      "before": "empty:google_reviews",
+      "after": "empty:google_reviews"
+    },
+    {
+      "table": "public.gratuity_accrual",
+      "before": "empty:gratuity_accrual",
+      "after": "empty:gratuity_accrual"
+    },
+    {
+      "table": "public.gratuity_rule",
+      "before": "c674a731089bfdbb04a9f9dab4ad4f16",
+      "after": "c674a731089bfdbb04a9f9dab4ad4f16"
+    },
+    {
+      "table": "public.gratuity_settlement",
+      "before": "empty:gratuity_settlement",
+      "after": "empty:gratuity_settlement"
+    },
+    {
+      "table": "public.holiday_confirmation",
+      "before": "empty:holiday_confirmation",
+      "after": "empty:holiday_confirmation"
+    },
+    {
+      "table": "public.holiday_observance",
+      "before": "empty:holiday_observance",
+      "after": "empty:holiday_observance"
+    },
+    {
+      "table": "public.imported_appointment",
+      "before": "empty:imported_appointment",
+      "after": "empty:imported_appointment"
+    },
+    {
+      "table": "public.imported_contact",
+      "before": "empty:imported_contact",
+      "after": "empty:imported_contact"
+    },
+    {
+      "table": "public.imported_package_sale",
+      "before": "empty:imported_package_sale",
+      "after": "empty:imported_package_sale"
+    },
+    {
+      "table": "public.imported_staff_row",
+      "before": "empty:imported_staff_row",
+      "after": "empty:imported_staff_row"
+    },
+    {
+      "table": "public.incident",
+      "before": "empty:incident",
+      "after": "empty:incident"
+    },
+    {
+      "table": "public.incident_addendum",
+      "before": "empty:incident_addendum",
+      "after": "empty:incident_addendum"
+    },
+    {
+      "table": "public.incident_notification",
+      "before": "empty:incident_notification",
+      "after": "empty:incident_notification"
+    },
+    {
+      "table": "public.invoice",
+      "before": "empty:invoice",
+      "after": "empty:invoice"
+    },
+    {
+      "table": "public.invoice_appointment",
+      "before": "empty:invoice_appointment",
+      "after": "empty:invoice_appointment"
+    },
+    {
+      "table": "public.invoice_line",
+      "before": "empty:invoice_line",
+      "after": "empty:invoice_line"
+    },
+    {
+      "table": "public.journal_entry",
+      "before": "empty:journal_entry",
+      "after": "empty:journal_entry"
+    },
+    {
+      "table": "public.journal_line",
+      "before": "empty:journal_line",
+      "after": "empty:journal_line"
+    },
+    {
+      "table": "public.labour_cost_rule",
+      "before": "e60e8e3c9f804ffffa4954173390e750",
+      "after": "e60e8e3c9f804ffffa4954173390e750"
+    },
+    {
+      "table": "public.leave_approval",
+      "before": "empty:leave_approval",
+      "after": "empty:leave_approval"
+    },
+    {
+      "table": "public.leave_approval_cancellation",
+      "before": "empty:leave_approval_cancellation",
+      "after": "empty:leave_approval_cancellation"
+    },
+    {
+      "table": "public.leave_approval_delegation",
+      "before": "empty:leave_approval_delegation",
+      "after": "empty:leave_approval_delegation"
+    },
+    {
+      "table": "public.leave_approval_notice",
+      "before": "empty:leave_approval_notice",
+      "after": "empty:leave_approval_notice"
+    },
+    {
+      "table": "public.leave_conflict_override",
+      "before": "empty:leave_conflict_override",
+      "after": "empty:leave_conflict_override"
+    },
+    {
+      "table": "public.leave_coverage_lock",
+      "before": "empty:leave_coverage_lock",
+      "after": "empty:leave_coverage_lock"
+    },
+    {
+      "table": "public.leave_entitlement_rule",
+      "before": "6aef817c06bab85ba45bf3e3e09d7487",
+      "after": "6aef817c06bab85ba45bf3e3e09d7487"
+    },
+    {
+      "table": "public.leave_movement",
+      "before": "empty:leave_movement",
+      "after": "empty:leave_movement"
+    },
+    {
+      "table": "public.leave_request",
+      "before": "empty:leave_request",
+      "after": "empty:leave_request"
+    },
+    {
+      "table": "public.legal_entity",
+      "before": "3e1566b39145a4238bd8d0e65427a708",
+      "after": "3e1566b39145a4238bd8d0e65427a708"
+    },
+    {
+      "table": "public.legal_hold",
+      "before": "empty:legal_hold",
+      "after": "empty:legal_hold"
+    },
+    {
+      "table": "public.mandate_charge_attempt",
+      "before": "empty:mandate_charge_attempt",
+      "after": "empty:mandate_charge_attempt"
+    },
+    {
+      "table": "public.merge_record",
+      "before": "empty:merge_record",
+      "after": "empty:merge_record"
+    },
+    {
+      "table": "public.merge_record_table",
+      "before": "empty:merge_record_table",
+      "after": "empty:merge_record_table"
+    },
+    {
+      "table": "public.message",
+      "before": "empty:message",
+      "after": "empty:message"
+    },
+    {
+      "table": "public.message_delivery_receipt",
+      "before": "empty:message_delivery_receipt",
+      "after": "empty:message_delivery_receipt"
+    },
+    {
+      "table": "public.message_template",
+      "before": "3df89a388ef8e07973367292684147a8",
+      "after": "3df89a388ef8e07973367292684147a8"
+    },
+    {
+      "table": "public.message_template_variant",
+      "before": "46280c35d9306a70a3f2177ea4f712b1",
+      "after": "46280c35d9306a70a3f2177ea4f712b1"
+    },
+    {
+      "table": "public.messaging_control",
+      "before": "5aa40e3d7d2c09c8046dabe3d5d89971",
+      "after": "5aa40e3d7d2c09c8046dabe3d5d89971"
+    },
+    {
+      "table": "public.obligation",
+      "before": "036468c3e7545aade7d6137cd280880e",
+      "after": "036468c3e7545aade7d6137cd280880e"
+    },
+    {
+      "table": "public.obligation_evidence",
+      "before": "empty:obligation_evidence",
+      "after": "empty:obligation_evidence"
+    },
+    {
+      "table": "public.obligation_evidence_grant",
+      "before": "empty:obligation_evidence_grant",
+      "after": "empty:obligation_evidence_grant"
+    },
+    {
+      "table": "public.obligation_instance",
+      "before": "empty:obligation_instance",
+      "after": "empty:obligation_instance"
+    },
+    {
+      "table": "public.obligation_notice",
+      "before": "empty:obligation_notice",
+      "after": "empty:obligation_notice"
+    },
+    {
+      "table": "public.opening_balance_import",
+      "before": "empty:opening_balance_import",
+      "after": "empty:opening_balance_import"
+    },
+    {
+      "table": "public.optout_grant",
+      "before": "empty:optout_grant",
+      "after": "empty:optout_grant"
+    },
+    {
+      "table": "public.optout_verification_attempt",
+      "before": "empty:optout_verification_attempt",
+      "after": "empty:optout_verification_attempt"
+    },
+    {
+      "table": "public.otp_challenge",
+      "before": "empty:otp_challenge",
+      "after": "empty:otp_challenge"
+    },
+    {
+      "table": "public.otp_phone_lock",
+      "before": "empty:otp_phone_lock",
+      "after": "empty:otp_phone_lock"
+    },
+    {
+      "table": "public.outbox_delivery",
+      "before": "empty:outbox_delivery",
+      "after": "empty:outbox_delivery"
+    },
+    {
+      "table": "public.outbox_event",
+      "before": "empty:outbox_event",
+      "after": "empty:outbox_event"
+    },
+    {
+      "table": "public.package_balance",
+      "before": "empty:package_balance",
+      "after": "empty:package_balance"
+    },
+    {
+      "table": "public.package_redemption",
+      "before": "empty:package_redemption",
+      "after": "empty:package_redemption"
+    },
+    {
+      "table": "public.package_sale",
+      "before": "empty:package_sale",
+      "after": "empty:package_sale"
+    },
+    {
+      "table": "public.package_template",
+      "before": "53e1b0cfc2bd318d40ce2793a38a92d9",
+      "after": "53e1b0cfc2bd318d40ce2793a38a92d9"
+    },
+    {
+      "table": "public.package_template_line",
+      "before": "3003139adcc7d6dfdb32a3a908a5b4e3",
+      "after": "3003139adcc7d6dfdb32a3a908a5b4e3"
+    },
+    {
+      "table": "public.package_template_version",
+      "before": "e1f94426501d7c1852184c573a19f5b5",
+      "after": "e1f94426501d7c1852184c573a19f5b5"
+    },
+    {
+      "table": "public.parallel_run_decision",
+      "before": "empty:parallel_run_decision",
+      "after": "empty:parallel_run_decision"
+    },
+    {
+      "table": "public.parallel_run_paper_count",
+      "before": "empty:parallel_run_paper_count",
+      "after": "empty:parallel_run_paper_count"
+    },
+    {
+      "table": "public.parallel_run_reconciliation",
+      "before": "empty:parallel_run_reconciliation",
+      "after": "empty:parallel_run_reconciliation"
+    },
+    {
+      "table": "public.payment",
+      "before": "empty:payment",
+      "after": "empty:payment"
+    },
+    {
+      "table": "public.payment_intent",
+      "before": "empty:payment_intent",
+      "after": "empty:payment_intent"
+    },
+    {
+      "table": "public.payment_intent_transaction",
+      "before": "empty:payment_intent_transaction",
+      "after": "empty:payment_intent_transaction"
+    },
+    {
+      "table": "public.payment_mandate",
+      "before": "empty:payment_mandate",
+      "after": "empty:payment_mandate"
+    },
+    {
+      "table": "public.payment_mandate_revocation",
+      "before": "empty:payment_mandate_revocation",
+      "after": "empty:payment_mandate_revocation"
+    },
+    {
+      "table": "public.payment_reconciliation_run",
+      "before": "empty:payment_reconciliation_run",
+      "after": "empty:payment_reconciliation_run"
+    },
+    {
+      "table": "public.payment_webhook_event",
+      "before": "empty:payment_webhook_event",
+      "after": "empty:payment_webhook_event"
+    },
+    {
+      "table": "public.payment_webhook_handler_run",
+      "before": "empty:payment_webhook_handler_run",
+      "after": "empty:payment_webhook_handler_run"
+    },
+    {
+      "table": "public.payroll_deduction",
+      "before": "empty:payroll_deduction",
+      "after": "empty:payroll_deduction"
+    },
+    {
+      "table": "public.payroll_run",
+      "before": "empty:payroll_run",
+      "after": "empty:payroll_run"
+    },
+    {
+      "table": "public.payslip",
+      "before": "empty:payslip",
+      "after": "empty:payslip"
+    },
+    {
+      "table": "public.period_lock",
+      "before": "empty:period_lock",
+      "after": "empty:period_lock"
+    },
+    {
+      "table": "public.pipeline_stage",
+      "before": "2d868fd5c01a12938f2dc1cde1bc6968",
+      "after": "2d868fd5c01a12938f2dc1cde1bc6968"
+    },
+    {
+      "table": "public.pipeline_stage_transition",
+      "before": "empty:pipeline_stage_transition",
+      "after": "empty:pipeline_stage_transition"
+    },
+    {
+      "table": "public.premises",
+      "before": "243bd103a4ae4b4857d862bf67dd5dcf",
+      "after": "243bd103a4ae4b4857d862bf67dd5dcf"
+    },
+    {
+      "table": "public.premises_closure",
+      "before": "empty:premises_closure",
+      "after": "empty:premises_closure"
+    },
+    {
+      "table": "public.premises_hours",
+      "before": "f3ff54f2fed1b69513bec3bb5e4c31b6",
+      "after": "f3ff54f2fed1b69513bec3bb5e4c31b6"
+    },
+    {
+      "table": "public.premises_hours_override",
+      "before": "empty:premises_hours_override",
+      "after": "empty:premises_hours_override"
+    },
+    {
+      "table": "public.price_list",
+      "before": "empty:price_list",
+      "after": "empty:price_list"
+    },
+    {
+      "table": "public.price_on_request",
+      "before": "2f584b831314d858be743d1849434811",
+      "after": "2f584b831314d858be743d1849434811"
+    },
+    {
+      "table": "public.private_document",
+      "before": "empty:private_document",
+      "after": "empty:private_document"
+    },
+    {
+      "table": "public.private_document_fetch",
+      "before": "empty:private_document_fetch",
+      "after": "empty:private_document_fetch"
+    },
+    {
+      "table": "public.publication_approval",
+      "before": "empty:publication_approval",
+      "after": "empty:publication_approval"
+    },
+    {
+      "table": "public.publication_lint_pass",
+      "before": "empty:publication_lint_pass",
+      "after": "empty:publication_lint_pass"
+    },
+    {
+      "table": "public.publication_record",
+      "before": "empty:publication_record",
+      "after": "empty:publication_record"
+    },
+    {
+      "table": "public.publish_propagation",
+      "before": "empty:publish_propagation",
+      "after": "empty:publish_propagation"
+    },
+    {
+      "table": "public.rate_limit_window",
+      "before": "empty:rate_limit_window",
+      "after": "empty:rate_limit_window"
+    },
+    {
+      "table": "public.reconciliation_exception",
+      "before": "empty:reconciliation_exception",
+      "after": "empty:reconciliation_exception"
+    },
+    {
+      "table": "public.recurring_cost",
+      "before": "empty:recurring_cost",
+      "after": "empty:recurring_cost"
+    },
+    {
+      "table": "public.recurring_cost_alert",
+      "before": "empty:recurring_cost_alert",
+      "after": "empty:recurring_cost_alert"
+    },
+    {
+      "table": "public.recurring_cost_instance",
+      "before": "empty:recurring_cost_instance",
+      "after": "empty:recurring_cost_instance"
+    },
+    {
+      "table": "public.recurring_cost_match",
+      "before": "empty:recurring_cost_match",
+      "after": "empty:recurring_cost_match"
+    },
+    {
+      "table": "public.redirect_map",
+      "before": "empty:redirect_map",
+      "after": "empty:redirect_map"
+    },
+    {
+      "table": "public.refund",
+      "before": "empty:refund",
+      "after": "empty:refund"
+    },
+    {
+      "table": "public.regulatory_profile",
+      "before": "122667b781de5f652ac95d2d2c40ecff",
+      "after": "122667b781de5f652ac95d2d2c40ecff"
+    },
+    {
+      "table": "public.resource_block",
+      "before": "empty:resource_block",
+      "after": "empty:resource_block"
+    },
+    {
+      "table": "public.review_intake_email",
+      "before": "empty:review_intake_email",
+      "after": "empty:review_intake_email"
+    },
+    {
+      "table": "public.rights_export",
+      "before": "empty:rights_export",
+      "after": "empty:rights_export"
+    },
+    {
+      "table": "public.rights_request",
+      "before": "empty:rights_request",
+      "after": "empty:rights_request"
+    },
+    {
+      "table": "public.rights_resolution",
+      "before": "empty:rights_resolution",
+      "after": "empty:rights_resolution"
+    },
+    {
+      "table": "public.rights_resolution_class",
+      "before": "empty:rights_resolution_class",
+      "after": "empty:rights_resolution_class"
+    },
+    {
+      "table": "public.rooms",
+      "before": "68f76adf7e424a71c2c98e7da7fd0435",
+      "after": "68f76adf7e424a71c2c98e7da7fd0435"
+    },
+    {
+      "table": "public.rota_change_request",
+      "before": "empty:rota_change_request",
+      "after": "empty:rota_change_request"
+    },
+    {
+      "table": "public.rota_coverage_rule",
+      "before": "b205aef88265c55a057841a56c7617b1",
+      "after": "b205aef88265c55a057841a56c7617b1"
+    },
+    {
+      "table": "public.rota_publication_notice",
+      "before": "empty:rota_publication_notice",
+      "after": "empty:rota_publication_notice"
+    },
+    {
+      "table": "public.rota_version",
+      "before": "empty:rota_version",
+      "after": "empty:rota_version"
+    },
+    {
+      "table": "public.rota_version_assignment",
+      "before": "empty:rota_version_assignment",
+      "after": "empty:rota_version_assignment"
+    },
+    {
+      "table": "public.scheduled_step",
+      "before": "empty:scheduled_step",
+      "after": "empty:scheduled_step"
+    },
+    {
+      "table": "public.seo_gsc_daily",
+      "before": "empty:seo_gsc_daily",
+      "after": "empty:seo_gsc_daily"
+    },
+    {
+      "table": "public.seo_gsc_snapshot",
+      "before": "empty:seo_gsc_snapshot",
+      "after": "empty:seo_gsc_snapshot"
+    },
+    {
+      "table": "public.seo_suggestion",
+      "before": "empty:seo_suggestion",
+      "after": "empty:seo_suggestion"
+    },
+    {
+      "table": "public.seo_suggestion_candidate",
+      "before": "empty:seo_suggestion_candidate",
+      "after": "empty:seo_suggestion_candidate"
+    },
+    {
+      "table": "public.seo_url_inspection",
+      "before": "empty:seo_url_inspection",
+      "after": "empty:seo_url_inspection"
+    },
+    {
+      "table": "public.seo_url_inspection_run",
+      "before": "empty:seo_url_inspection_run",
+      "after": "empty:seo_url_inspection_run"
+    },
+    {
+      "table": "public.service",
+      "before": "c069ee784b0720f24acbfcbb2cb28c61",
+      "after": "c069ee784b0720f24acbfcbb2cb28c61"
+    },
+    {
+      "table": "public.service_resource_shape",
+      "before": "cb7ff8f60fd3df739ade70b67295f1cc",
+      "after": "cb7ff8f60fd3df739ade70b67295f1cc"
+    },
+    {
+      "table": "public.service_room_type_compat",
+      "before": "ab29f5ca950593f5cd49138f04cc97f7",
+      "after": "ab29f5ca950593f5cd49138f04cc97f7"
+    },
+    {
+      "table": "public.service_skill",
+      "before": "cddd8488bbad8c3ae54ef916228d9938",
+      "after": "cddd8488bbad8c3ae54ef916228d9938"
+    },
+    {
+      "table": "public.service_variant",
+      "before": "b8d8a1ed0a9ec9dfd1f32bc16ae060ef",
+      "after": "b8d8a1ed0a9ec9dfd1f32bc16ae060ef"
+    },
+    {
+      "table": "public.settlement_batch",
+      "before": "empty:settlement_batch",
+      "after": "empty:settlement_batch"
+    },
+    {
+      "table": "public.settlement_line",
+      "before": "empty:settlement_line",
+      "after": "empty:settlement_line"
+    },
+    {
+      "table": "public.settlement_variance",
+      "before": "empty:settlement_variance",
+      "after": "empty:settlement_variance"
+    },
+    {
+      "table": "public.shift",
+      "before": "empty:shift",
+      "after": "empty:shift"
+    },
+    {
+      "table": "public.shift_assignment",
+      "before": "empty:shift_assignment",
+      "after": "empty:shift_assignment"
+    },
+    {
+      "table": "public.staff_credential",
+      "before": "empty:staff_credential",
+      "after": "empty:staff_credential"
+    },
+    {
+      "table": "public.staff_session",
+      "before": "empty:staff_session",
+      "after": "empty:staff_session"
+    },
+    {
+      "table": "public.supplier",
+      "before": "7e8f6fb2d844d05ed400b0a21fbfe9b2",
+      "after": "7e8f6fb2d844d05ed400b0a21fbfe9b2"
+    },
+    {
+      "table": "public.supplier_tax_profile",
+      "before": "a7b3780c59b9412d802162af6577a192",
+      "after": "a7b3780c59b9412d802162af6577a192"
+    },
+    {
+      "table": "public.suppression",
+      "before": "0b0f5215537f8f3de6f61e69faeb0426",
+      "after": "0b0f5215537f8f3de6f61e69faeb0426"
+    },
+    {
+      "table": "public.tender_type",
+      "before": "397d127eb3673f7dfd4a3d2d23257680",
+      "after": "397d127eb3673f7dfd4a3d2d23257680"
+    },
+    {
+      "table": "public.timesheet_approval",
+      "before": "empty:timesheet_approval",
+      "after": "empty:timesheet_approval"
+    },
+    {
+      "table": "public.vat201_box",
+      "before": "c829d4670be04b5157fa5975c4727dcb",
+      "after": "c829d4670be04b5157fa5975c4727dcb"
+    },
+    {
+      "table": "public.vat201_box_mapping",
+      "before": "f63639314fe0418b5afefe7827c174ef",
+      "after": "f63639314fe0418b5afefe7827c174ef"
+    },
+    {
+      "table": "public.vat_return",
+      "before": "empty:vat_return",
+      "after": "empty:vat_return"
+    },
+    {
+      "table": "public.vat_return_finalisation",
+      "before": "empty:vat_return_finalisation",
+      "after": "empty:vat_return_finalisation"
+    },
+    {
+      "table": "public.vat_return_sign_off",
+      "before": "empty:vat_return_sign_off",
+      "after": "empty:vat_return_sign_off"
+    },
+    {
+      "table": "public.waitlist",
+      "before": "empty:waitlist",
+      "after": "empty:waitlist"
+    },
+    {
+      "table": "public.whatsapp_ref",
+      "before": "empty:whatsapp_ref",
+      "after": "empty:whatsapp_ref"
+    },
+    {
+      "table": "public.working_hours_rule",
+      "before": "a7ac83db35d17a86bd09e0d4c23e9554",
+      "after": "a7ac83db35d17a86bd09e0d4c23e9554"
+    },
+    {
+      "table": "public.wps_export",
+      "before": "empty:wps_export",
+      "after": "empty:wps_export"
+    }
+  ],
+  "digest": "655a1f40f3416891f0535840ff0d57be71660910d08c2945a124b29cd96d0390"
+}

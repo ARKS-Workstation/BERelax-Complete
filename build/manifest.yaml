@@ -24547,7 +24547,7 @@ units:
       gate, and a scripted cutover with a dry-run mode and a rollback that is honest about what cannot be
       reversed: issued tax invoices and sent messages.'
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - H-HARD-06
@@ -24561,6 +24561,7 @@ units:
     - Y10-consent
     - Y6-sender-ids
     - Y7-mcc
+    - Y13-cutover-date
     provisional: Every external item is recorded as uncleared so the check fails until the owner clears
       it. Nothing is assumed cleared, and the provisional values themselves block go-live where flagged.
     acceptance:
@@ -24577,6 +24578,57 @@ units:
     files:
     - scripts/go-no-go.mjs
     - docs/runbooks/cutover.md
-    - docs/runbooks/rollback.md
+    - docs/runbooks/cutover-rollback.md
     - scripts/cutover.mjs
+    - scripts/rollback.mjs
+    - scripts/freeze.mjs
+    - packages/core/src/release/go-no-go.ts
+    - packages/core/src/release/freeze.ts
+    - packages/core/src/release/cutover.ts
+    - packages/core/src/release/rollback.ts
+    - packages/fixtures/src/cutover-runbook.test.ts
+    - artifacts/release/freeze.json
+    - artifacts/cutover/dry-run-1.json
     - .github/workflows/freeze.yml
+    - 'NOTE: the declared `docs/runbooks/rollback.md` is `docs/runbooks/cutover-rollback.md`, which
+      H-HARD-06 wrote as one of its eight required subjects and which `scripts/check-runbooks.mjs`
+      names in REQUIRED_SUBJECTS by that stem. A second rollback runbook would have been a second
+      statement of what a rollback cannot undo, and the one that drifted would be the one somebody read
+      at 8pm on a Friday. This unit added the CONTENT test the acceptance line asks for instead
+      (`packages/fixtures/src/cutover-runbook.test.ts`), which holds that document to declaring all four
+      irreversible subjects and is paired with controls over a deliberately broken copy; the same rule
+      (`rollbackRunbookProblems`) is also applied at run time by `scripts/rollback.mjs`, which refuses
+      to export anything if the document has stopped declaring one.'
+    - 'NOTE: there is no `scripts/go-no-go.mjs` judgement to speak of and that is deliberate. Every
+      verdict, requirement list, closed set and rendering is in `packages/core/src/release/`, with a test
+      per rule, for `go-live-payments.mjs`''s stated reason: a judgement that lives in a script is a
+      judgement no test reaches. Three of the six requirements are answered by RUNNING the gate that
+      already owns them (`check-drill-age.mjs`, `go-live-security.mjs`, `check-dry-runs.mjs`) rather than
+      by re-deriving their thresholds, so the maximum drill age, the blocking severities and the minimum
+      of three recorded runs are each still stated once and each still has its own known-bad fixture.'
+    - 'NOTE: "no provisional setting flagged blocks_go_live left unconfirmed" is implemented WITHOUT a
+      new flag on `SettingDefinition`, and the reason is measured rather than stylistic: none of the
+      eighteen open questions behind the registry''s provisional settings names go-live in its Blocks
+      column, so a `blocksGoLive` field derived from that column would be an EMPTY set and the
+      requirement would clear by examining nothing (ADR 0002). docs/OPEN-QUESTIONS'' own rule is that
+      every provisional value is a strictest-safe assumption corrected with one audited settings change
+      at deploy-and-check time, so EVERY provisional setting blocks go-live: the requirement reads
+      `provisionalSettings()` from `@berelax/config` and the `app_setting` rows for those keys, and a key
+      with no row or with `is_provisional` true is unconfirmed and named with its open question. No
+      exemption list was invented; one would be a decision somebody records here.'
+    - 'NOTE: no migration, no SQLSTATE and no port band were needed. The freeze register and the cutover
+      record are FILES for the findings register''s reason (ADR 0125): a release gate that read database
+      state could not be re-run from the commit, and "was this build clear to ship on the 3rd?" is
+      answered by `git show` rather than by whatever rows the database holds today. The cutover decision
+      itself already has a table — `parallel_run_decision`, H-MIG-10 — and a second one would have been
+      a second place a decision nobody made could appear. Migrations 0171 and 0172, SQLSTATE bands
+      ZY941-950 and ZY951-960 and the port band at 24,800 are therefore RELEASED UNUSED.'
+    - 'NOTE: `pnpm go-no-go` and `pnpm cutover` are deliberately NOT in `pnpm verify` and not in CI.
+      The go/no-go check exits non-zero today and is supposed to: fifty external items are open, no
+      penetration test has been performed, no maximum drill age is configured, sixty-one provisional
+      settings are unconfirmed and `M3 Reachable` has no unit in the manifest declaring it at all. A
+      gate that fails every commit on a business fact nobody can fix in code is a gate somebody deletes,
+      which is `go-live-payments.mjs`''s and `go-live-security.mjs`''s stated argument. What IS in
+      `pnpm verify` is `pnpm freeze`, the freeze register''s integrity, registered in gate case 29 in
+      this same commit; the MERGE rule is `.github/workflows/freeze.yml`, because only a pull request
+      carries labels.'

@@ -1,0 +1,72 @@
+name: freeze
+
+# The code freeze, enforced on the only thing that can carry a label: a pull request.
+#
+# H-MIG-11. `artifacts/release/freeze.json` holds a state a PERSON set, with the F07 role that set it,
+# the instant and the reason. Nothing in this build declares a freeze and nothing here decides one —
+# this workflow READS the register and applies the one rule that follows from it: while the tree is
+# frozen, a change is merged only if it is labelled `launch-blocking`.
+#
+# ## Why a workflow of its own and not a step in `verify`
+#
+# A local commit has no labels, and neither does a push to a branch. A check that refused every local
+# commit for want of a pull request would be switched off within the week, which is the argument
+# `go-live-payments.mjs` makes about its own absence from `pnpm verify`. What IS in `pnpm verify` is
+# `pnpm freeze`, which checks the register's integrity — a frozen register naming no role, no instant or
+# no reason is a defect in the repository whatever the release position is.
+#
+# ## Why `labeled` and `unlabeled` are triggers
+#
+# Without them the check runs once, on the pull request that was opened before anybody labelled it, and
+# adding the label afterwards would leave the refusal showing. Those two events plus `synchronize` are
+# what make the gate's answer current rather than historical.
+#
+# ## Why the labels are passed as one comma-separated argument
+#
+# `--labels ''` is a pull request with no labels, which is a real state and is refused during a freeze.
+# OMITTING the flag is the absence of label information — a caller that did not look — and
+# `mergePermitted` refuses that by its own rule rather than folding it into the first case. The join
+# below always produces the flag, so a pull request with no labels reaches the script as the empty set
+# it is.
+#
+# There is deliberately no `workflow_dispatch`: outside a pull request `github.event.pull_request` is
+# absent, the join would produce an empty string, and a manual run would then be judged as *a change
+# with no labels* rather than as *no label information* — which is the one distinction this gate's
+# vocabulary exists to keep.
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+
+concurrency:
+  group: freeze-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  freeze:
+    name: freeze
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The register's integrity, first and separately: a refusal here is about the file rather than
+      # about this pull request, and the two should not arrive as one message.
+      - name: The freeze register is a record of a claim
+        run: node scripts/freeze.mjs --register-only
+
+      - name: This change may be merged
+        run: node scripts/freeze.mjs --labels "${{ join(github.event.pull_request.labels.*.name, ',') }}"

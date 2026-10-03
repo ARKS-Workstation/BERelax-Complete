@@ -10,6 +10,8 @@
  */
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, globSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 let failures = 0
 
@@ -65249,6 +65251,543 @@ export function chargebackNetEffectFils(`,
   }
 }
 
+// 205a-205z. (H-MIG-11) The go/no-go shown to be able to say NO about ONE named item, the freeze shown
+//            to be a claim nobody can make by accident, and the cutover rehearsal's "nothing changed"
+//            shown to be a comparison that can fail. Every one of the five things this unit builds is
+//            easy to build in a form that cannot fail — a checklist whose items are all TODO reads as
+//            thorough, a freeze nothing enforces reads as declared, a rehearsal that ran four read-only
+//            steps reads like a rehearsal of a cutover — so ADR 0003 is the acceptance line here rather
+//            than a convention behind it.
+{
+  const FREEZE_REGISTER = 'artifacts/release/freeze.json'
+  const FREEZE_FIXTURE = 'artifacts/release/__gate_fixture__freeze.json'
+  const FINDINGS_FIXTURE = 'artifacts/release/__gate_fixture__findings.json'
+  const CUTOVER_FIXTURE = 'artifacts/cutover/__gate_fixture__run.json'
+  const ROLLBACK_RUNBOOK = 'docs/runbooks/cutover-rollback.md'
+  const FREEZE_WORKFLOW = '.github/workflows/freeze.yml'
+
+  /** The six requirement ids, read out of the module rather than restated. */
+  const REQUIREMENTS = [
+    'external-items-cleared',
+    'milestones-demonstrated',
+    'restore-drill-current',
+    'security-findings-clear',
+    'three-clean-dry-runs',
+    'provisional-settings-confirmed',
+  ]
+
+  // The control for every `--findings` case below: the list this block names has to be the list the
+  // module declares, or each fixture would be judged against requirements it does not mention and every
+  // refusal would arrive for the wrong reason.
+  {
+    const declared = readFileSync('packages/core/src/release/go-no-go.ts', 'utf8')
+    const missing = REQUIREMENTS.filter((id) => !declared.includes(`id: '${id}'`))
+    check(
+      "this block's requirement ids are the ones GO_NO_GO_REQUIREMENTS declares",
+      missing.length === 0,
+      `not declared in packages/core/src/release/go-no-go.ts: ${missing.join(', ')}`,
+    )
+  }
+
+  const findingsFile = (overrides = {}, omit = []) =>
+    `${JSON.stringify(
+      REQUIREMENTS.filter((id) => !omit.includes(id)).map((id) => ({
+        id,
+        state: overrides[id]?.state ?? 'met',
+        detail: overrides[id]?.detail ?? `${id} cleared by a gate fixture`,
+      })),
+      null,
+      2,
+    )}\n`
+
+  const goNoGo = (args) => ['scripts/go-no-go.mjs', ...args]
+
+  // 205a. The real repository, with nothing stubbed. The whole unit turns on this exiting non-zero and
+  //       naming WHAT is unmet, and it is the one case no fixture can make: five of the six requirements
+  //       cannot be cleared here at all.
+  {
+    const refused = runExpectingFailure('node', goNoGo([]))
+    checkRejectedBy(
+      'the go/no-go check refuses this repository and names the rule',
+      refused,
+      'go-live-requirement-not-met',
+    )
+    check(
+      'and names the security engagement and the external items by id, not as a count',
+      refused.output.includes('security-findings-clear') &&
+        refused.output.includes('external-items-cleared'),
+      refused.output,
+    )
+    check(
+      'and prints a row for every one of the six requirements, met ones included',
+      REQUIREMENTS.every((id) => refused.output.includes(id)),
+      refused.output,
+    )
+  }
+
+  // 205b. The control that makes a NO informative: with every requirement met it says GO and exits
+  //       zero. Without this the script is indistinguishable from one that refuses everything, which is
+  //       the kind of gate that gets switched off rather than satisfied.
+  {
+    const cleared = withFixture(FINDINGS_FIXTURE, findingsFile(), () =>
+      run('node', goNoGo(['--findings', FINDINGS_FIXTURE])),
+    )
+    check(
+      'with every requirement met the check says go and exits zero',
+      !cleared.failed && String(cleared.output).includes('VERDICT: go'),
+      String(cleared.output),
+    )
+  }
+
+  // 205c. The acceptance line, exactly: one unmet item names THAT item and no other.
+  {
+    const one = withFixture(
+      FINDINGS_FIXTURE,
+      findingsFile({
+        'three-clean-dry-runs': { state: 'unmet', detail: 'only two runs are recorded' },
+      }),
+      () => runExpectingFailure('node', goNoGo(['--findings', FINDINGS_FIXTURE])),
+    )
+    checkRejectedBy('one unmet requirement is refused by name', one, 'go-live-requirement-not-met')
+    const problems = one.output.split('\n').filter((line) => line.includes('[go-live-requirement-'))
+    check(
+      'and it is the ONLY problem reported, naming that requirement',
+      problems.length === 1 && problems[0].includes('three-clean-dry-runs'),
+      `${problems.length} problem line(s):\n${problems.join('\n')}`,
+    )
+    check(
+      'and no other requirement id appears in any problem line',
+      REQUIREMENTS.filter((id) => id !== 'three-clean-dry-runs').every(
+        (id) => !problems[0].includes(id),
+      ),
+      problems.join('\n'),
+    )
+  }
+
+  // 205d. An UNKNOWN blocks, and says it was an absence rather than a refusal. The live instance is the
+  //       restore drill's maximum age, which is deliberately unconfigured (ADR 0123) — so without this
+  //       rule a release would clear on a comparison against nothing.
+  checkRejectedBy(
+    'a requirement no fact answers blocks, by its own rule',
+    withFixture(
+      FINDINGS_FIXTURE,
+      findingsFile({
+        'restore-drill-current': { state: 'unknown', detail: 'no maximum age is configured' },
+      }),
+      () => runExpectingFailure('node', goNoGo(['--findings', FINDINGS_FIXTURE])),
+    ),
+    'go-live-requirement-unanswered',
+  )
+
+  // 205e. A declared requirement the gatherer stopped producing. The regression nothing else can see: a
+  //       shorter examined set reads as a cleaner build.
+  checkRejectedBy(
+    'a declared requirement with no finding at all is refused by name',
+    withFixture(FINDINGS_FIXTURE, findingsFile({}, ['milestones-demonstrated']), () =>
+      runExpectingFailure('node', goNoGo(['--findings', FINDINGS_FIXTURE])),
+    ),
+    'go-no-go-requirement-not-examined',
+  )
+
+  // 205f. The floor (ADR 0002). Every verdict is a walk over two lists, and a walk over an empty one
+  //       objects to nothing — which for a release gate is a GO.
+  checkRejectedBy(
+    'a verdict over no findings at all is refused rather than reported as a go',
+    withFixture(FINDINGS_FIXTURE, '[]\n', () =>
+      runExpectingFailure('node', goNoGo(['--findings', FINDINGS_FIXTURE])),
+    ),
+    'go-no-go-examined-nothing',
+  )
+
+  // 205g. A finding for a requirement the list does not declare, which is how a renamed requirement
+  //       would come to be answered and unexamined at the same time.
+  checkRejectedBy(
+    'a finding for an undeclared requirement is refused by name',
+    withFixture(
+      FINDINGS_FIXTURE,
+      `${JSON.stringify([
+        ...JSON.parse(findingsFile()),
+        { id: 'invented-requirement', state: 'met', detail: 'cleared' },
+      ])}\n`,
+      () => runExpectingFailure('node', goNoGo(['--findings', FINDINGS_FIXTURE])),
+    ),
+    'go-no-go-finding-not-declared',
+  )
+
+  // --- the freeze ---------------------------------------------------------------------------------
+
+  const freeze = (over) =>
+    `${JSON.stringify(
+      {
+        registerVersion: 1,
+        state: 'frozen',
+        claim: {
+          declaredBy: 'owner',
+          declaredAtIso: '2097-04-18T06:00:00.000Z',
+          rationale: 'a gate fixture freeze, removed in a finally',
+        },
+        openQuestionId: null,
+        ...over,
+      },
+      null,
+      2,
+    )}\n`
+
+  const freezeArgs = (path, ...rest) => ['scripts/freeze.mjs', '--register', path, ...rest]
+
+  // 205h. The shipped register passes. The control for every refusal below, and the thing that makes
+  //       `pnpm freeze` safe to put in `pnpm verify`.
+  check(
+    'the shipped freeze register is a well-formed record of the absence of a freeze',
+    !run('pnpm', ['freeze']).failed,
+    run('pnpm', ['freeze']).output,
+  )
+
+  // 205i. The whole point of the register: a frozen tree nobody is behind. Without this the state is a
+  //       value that arrived from nowhere and anybody can lift.
+  checkRejectedBy(
+    'a frozen register with no claim behind it is refused by name',
+    withFixture(FREEZE_FIXTURE, freeze({ claim: null }), () =>
+      runExpectingFailure('node', freezeArgs(FREEZE_FIXTURE, '--register-only')),
+    ),
+    'freeze-declared-without-a-claimant',
+  )
+
+  // 205j. A claimant that is not an F07 role. A name typed into a JSON file is a string this build
+  //       invented (brief rule 10), and it is exactly what somebody declaring a freeze would type.
+  checkRejectedBy(
+    'a freeze declared by something that is not a role is refused by name',
+    withFixture(
+      FREEZE_FIXTURE,
+      freeze({
+        claim: {
+          declaredBy: 'the release manager',
+          declaredAtIso: '2097-04-18T06:00:00.000Z',
+          rationale: 'a gate fixture',
+        },
+      }),
+      () => runExpectingFailure('node', freezeArgs(FREEZE_FIXTURE, '--register-only')),
+    ),
+    'freeze-claimant-is-not-a-role',
+  )
+
+  // 205k. An open register that names no open question: the state that reads as "the freeze is over"
+  //       rather than as "nobody has declared one and here is what is missing" (brief rule 15).
+  checkRejectedBy(
+    'an open register naming no open question is refused by name',
+    withFixture(FREEZE_FIXTURE, freeze({ state: 'open', claim: null, openQuestionId: null }), () =>
+      runExpectingFailure('node', freezeArgs(FREEZE_FIXTURE, '--register-only')),
+    ),
+    'freeze-open-without-an-open-question',
+  )
+
+  // 205l. The merge rule, refusing. The acceptance line's "proven by a fixture the gate refuses".
+  {
+    const refused = withFixture(FREEZE_FIXTURE, freeze({}), () =>
+      runExpectingFailure('node', freezeArgs(FREEZE_FIXTURE, '--labels', 'bug,documentation')),
+    )
+    checkRejectedBy(
+      'a change not labelled launch-blocking is refused while the tree is frozen',
+      refused,
+      'merge-refused-while-the-tree-is-frozen',
+    )
+    check(
+      'and the refusal names the role and the instant somebody froze it at',
+      refused.output.includes('owner') && refused.output.includes('2097-04-18T06:00:00.000Z'),
+      refused.output,
+    )
+  }
+
+  // 205m. And permitting, which is what keeps it a rule rather than a stop. A gate that refuses every
+  //       merge during a freeze is a gate somebody deletes on the first launch-blocking fix.
+  {
+    const permitted = withFixture(FREEZE_FIXTURE, freeze({}), () =>
+      run('node', freezeArgs(FREEZE_FIXTURE, '--labels', 'bug,launch-blocking')),
+    )
+    check(
+      'a change labelled launch-blocking is permitted during a freeze',
+      !permitted.failed && String(permitted.output).includes('MERGE: permitted'),
+      String(permitted.output),
+    )
+  }
+
+  // 205n. ABSENT label information is a different refusal from a change with no labels, and this is the
+  //       case that keeps them apart: a workflow whose label expression broke would otherwise report
+  //       the strictest possible answer for a reason that has nothing to do with the change.
+  checkRejectedBy(
+    'a merge judged with no label information at all is refused by its own rule',
+    withFixture(FREEZE_FIXTURE, freeze({}), () =>
+      runExpectingFailure('node', freezeArgs(FREEZE_FIXTURE)),
+    ),
+    'freeze-merge-labels-not-supplied',
+  )
+
+  // 205o. The workflow has to pass the labels, or the rule above never runs with any. Asserted on the
+  //       expression because that is the part nothing else reads.
+  {
+    const workflow = readFileSync(FREEZE_WORKFLOW, 'utf8')
+    check(
+      'the freeze workflow runs the merge rule with the pull request’s own labels',
+      workflow.includes('scripts/freeze.mjs --labels') &&
+        workflow.includes("join(github.event.pull_request.labels.*.name, ',')"),
+      workflow,
+    )
+    check(
+      'and re-runs when a label is added or removed, so its answer is current',
+      /types:\s*\[[^\]]*labeled[^\]]*\]/.test(workflow) &&
+        /types:\s*\[[^\]]*unlabeled[^\]]*\]/.test(workflow),
+      workflow,
+    )
+  }
+
+  // --- the cutover rehearsal ----------------------------------------------------------------------
+
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  check(
+    'the cutover cases have a database to checksum, so they are run rather than skipped',
+    typeof dbUrl === 'string' && dbUrl.length > 0,
+    'neither TEST_DATABASE_URL nor DATABASE_URL is set; a checksum comparison nobody ran is not evidence',
+  )
+
+  if (typeof dbUrl === 'string' && dbUrl.length > 0) {
+    // 205p. The rehearsal's one claim, against the real database: it changed no table, and it examined
+    //       a non-zero number of them. The second half is the floor — "nothing changed" over an empty
+    //       table list is what a wrong schema filter looks like from the inside.
+    const rehearsal = runExpectingFailure('node', [
+      'scripts/cutover.mjs',
+      '--dry-run',
+      '--out',
+      CUTOVER_FIXTURE,
+    ])
+    try {
+      const examined = /tables checksummed: (\d+)/.exec(rehearsal.output)
+      check(
+        'the cutover dry run checksums a non-zero number of tables',
+        examined !== null && Number(examined[1]) > 50,
+        rehearsal.output.slice(-4000),
+      )
+      check(
+        'and changes none of them',
+        !rehearsal.output.includes('cutover-dry-run-changed-a-table'),
+        rehearsal.output.slice(-4000),
+      )
+      check(
+        'and records the window as a floor rather than as the cutover’s duration',
+        /window: \d+ ms over \d+ of 11 declared step\(s\)/.test(rehearsal.output) &&
+          rehearsal.output.includes('this is a FLOOR'),
+        rehearsal.output.slice(-4000),
+      )
+      // It exits non-zero because the go/no-go step refuses, which is today's correct answer and is
+      // asserted rather than tolerated: a rehearsal that reported success while the preflight said no
+      // would be the decoration this whole block is about.
+      checkRejectedBy(
+        'and refuses the run because its first preflight step refuses',
+        rehearsal,
+        'cutover-step-failed',
+      )
+
+      // 205q. A recorded run is RE-JUDGED by the same functions, so the gate and the run cannot come to
+      //       disagree about what a clean rehearsal means. Re-reading the artefact must reach the same
+      //       verdict it was written with.
+      const rejudged = runExpectingFailure('node', [
+        'scripts/cutover.mjs',
+        '--verify',
+        CUTOVER_FIXTURE,
+      ])
+      check(
+        'the recorded run re-judges to the same verdict it was written with',
+        rejudged.output.includes('cutover-step-failed') &&
+          !rejudged.output.includes('cutover-run-digest-mismatch'),
+        rejudged.output.slice(-3000),
+      )
+
+      // 205r. A figure edited by hand. BOTH rules must fire: the digest, and the rule the edit breaks —
+      //       the script reports the digest problem and goes on judging, because a hand edit has to be
+      //       visible as the thing it broke and not only as a broken hash.
+      {
+        const record = JSON.parse(readFileSync(CUTOVER_FIXTURE, 'utf8'))
+        const edited = structuredClone(record)
+        edited.tableChecksums[0].after = 'edited-by-hand'
+        const refused = withEditedFile(
+          CUTOVER_FIXTURE,
+          () => `${JSON.stringify(edited, null, 2)}\n`,
+          () => runExpectingFailure('node', ['scripts/cutover.mjs', '--verify', CUTOVER_FIXTURE]),
+        )
+        checkRejectedBy(
+          'a checksum edited by hand is refused as a changed table',
+          refused,
+          'cutover-dry-run-changed-a-table',
+        )
+        check(
+          'and as a broken digest, because recomputing it means running the sequence again',
+          refused.output.includes('cutover-run-digest-mismatch'),
+          refused.output.slice(-3000),
+        )
+        check(
+          'and names the table that moved rather than reporting that something changed',
+          refused.output.includes(record.tableChecksums[0].table),
+          refused.output.slice(-3000),
+        )
+      }
+
+      // 205s. A writing step recorded as performed in a dry run. The claim the checksums are evidence
+      //       for, asserted from the other side: a rehearsal that ran the import is not a rehearsal.
+      {
+        const record = JSON.parse(readFileSync(CUTOVER_FIXTURE, 'utf8'))
+        const edited = structuredClone(record)
+        const step = edited.steps.find((entry) => entry.id === 'final-import')
+        step.performed = true
+        step.durationMs = 1234
+        step.skippedReason = null
+        checkRejectedBy(
+          'a writing step performed during a dry run is refused by name',
+          withEditedFile(
+            CUTOVER_FIXTURE,
+            () => `${JSON.stringify(edited, null, 2)}\n`,
+            () => runExpectingFailure('node', ['scripts/cutover.mjs', '--verify', CUTOVER_FIXTURE]),
+          ),
+          'cutover-dry-run-performed-a-writing-step',
+        )
+      }
+
+      // 205t. The floor again, from the artefact side: a recorded run that checksummed nothing.
+      {
+        const record = JSON.parse(readFileSync(CUTOVER_FIXTURE, 'utf8'))
+        const edited = { ...record, tableChecksums: [] }
+        checkRejectedBy(
+          'a recorded run that checksummed no table is refused rather than read as clean',
+          withEditedFile(
+            CUTOVER_FIXTURE,
+            () => `${JSON.stringify(edited, null, 2)}\n`,
+            () => runExpectingFailure('node', ['scripts/cutover.mjs', '--verify', CUTOVER_FIXTURE]),
+          ),
+          'cutover-examined-no-tables',
+        )
+      }
+
+      // 205u. A declared step missing from the record. A sequence that stopped early produces a shorter
+      //       record, which reads exactly like a shorter sequence.
+      {
+        const record = JSON.parse(readFileSync(CUTOVER_FIXTURE, 'utf8'))
+        const edited = {
+          ...record,
+          steps: record.steps.filter((entry) => entry.id !== 'preflight-freeze'),
+        }
+        checkRejectedBy(
+          'a declared step absent from the record is refused by name',
+          withEditedFile(
+            CUTOVER_FIXTURE,
+            () => `${JSON.stringify(edited, null, 2)}\n`,
+            () => runExpectingFailure('node', ['scripts/cutover.mjs', '--verify', CUTOVER_FIXTURE]),
+          ),
+          'cutover-step-not-recorded',
+        )
+      }
+    } finally {
+      rmSync(CUTOVER_FIXTURE, { force: true })
+    }
+
+    // --- the rollback -----------------------------------------------------------------------------
+
+    // 205v. The rollback export's own claim, against the real database: it issues nothing but SELECTs,
+    //       and that is proved by checksums rather than asserted. "Without touching the ledger" is the
+    //       acceptance line and this is strictly stronger.
+    {
+      const out = join(tmpdir(), `berelax-gate-rollback-${process.pid}`)
+      try {
+        const clean = run('node', ['scripts/rollback.mjs', '--out', out])
+        check(
+          'the rollback export changes no table at all',
+          !clean.failed &&
+            /tables checksummed before and after: \d+; changed: 0/.test(String(clean.output)),
+          String(clean.output).slice(-3000),
+        )
+        check(
+          'and prints the four things a rollback cannot undo, from the runbook',
+          ['Issued tax documents', 'Messages that were sent', 'Audit rows', 'Erasures'].every(
+            (subject) => String(clean.output).includes(subject),
+          ),
+          String(clean.output).slice(-3000),
+        )
+      } finally {
+        rmSync(out, { recursive: true, force: true })
+      }
+    }
+
+    // 205w. An export destination inside this repository. A committed phone number cannot be rotated,
+    //       which is the whole reason `pnpm pii` exists, and a default path would eventually be one.
+    checkRejectedBy(
+      'an export destination inside this repository is refused',
+      runExpectingFailure('node', ['scripts/rollback.mjs', '--out', './logs']),
+      'is inside',
+    )
+  }
+
+  // 205x. The irreversible set is read from the runbook rather than restated in the script, so a runbook
+  //       that stops declaring one refuses the export. This is the pair to
+  //       `packages/fixtures/src/cutover-runbook.test.ts`, which asserts the document from the other side.
+  //
+  //       The anchor is the no-recall sentence rather than the credit-note one, and that is not a
+  //       preference: `credit note` appears TWICE in that document, so `replaceOnce` would refuse the
+  //       anchor — and a bare `String.replace` would have edited the first of the two and left the
+  //       phrase the rule looks for still in the file, which is brief rule 20's failure exactly.
+  checkRejectedBy(
+    'a rollback runbook that stops declaring an irreversible subject refuses the export',
+    withEditedFile(
+      ROLLBACK_RUNBOOK,
+      (text) => replaceOnce(text, 'There is no recall.', 'A recall can be requested.'),
+      () =>
+        runExpectingFailure('node', [
+          'scripts/rollback.mjs',
+          '--out',
+          join(tmpdir(), `berelax-gate-rollback-refused-${process.pid}`),
+        ]),
+    ),
+    'rollback-runbook-does-not-declare-an-irreversible-subject',
+  )
+
+  // 205y. And with no irreversible section at all, which is the floor: every subject check is a
+  //       substring search, and a search over a document whose section has gone finds the phrases
+  //       scattered in prose about something else.
+  checkRejectedBy(
+    'a rollback runbook with no irreversible section at all is refused by its own rule',
+    withEditedFile(
+      ROLLBACK_RUNBOOK,
+      (text) =>
+        replaceOnce(text, '## 3. What a rollback cannot undo', '## 3. Other considerations'),
+      () =>
+        runExpectingFailure('node', [
+          'scripts/rollback.mjs',
+          '--out',
+          join(tmpdir(), `berelax-gate-rollback-floor-${process.pid}`),
+        ]),
+    ),
+    'rollback-runbook-has-no-irreversible-section',
+  )
+
+  // 205z. The register ships OPEN and the gate that reads it is in `pnpm verify`; the two go-live checks
+  //       are not. Asserted because the arrangement is the decision: a check that exits non-zero on a
+  //       business fact nobody can fix in code is a check somebody deletes, and a check on the
+  //       repository's own integrity belongs on every commit.
+  {
+    const chain = JSON.parse(readFileSync('package.json', 'utf8')).scripts.verify
+    check(
+      'pnpm freeze is a verify step and pnpm go-no-go is deliberately not',
+      chain.includes('pnpm freeze') && !chain.includes('pnpm go-no-go'),
+      chain,
+    )
+    const register = JSON.parse(readFileSync(FREEZE_REGISTER, 'utf8'))
+    check(
+      'and the shipped register is open, with no claim and an open question naming what is missing',
+      register.state === 'open' &&
+        register.claim === null &&
+        typeof register.openQuestionId === 'string' &&
+        register.openQuestionId.length > 0,
+      JSON.stringify(register),
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -66118,6 +66657,12 @@ export function chargebackNetEffectFils(`,
     'pnpm headers',
     'pnpm drill-age',
     'pnpm findings',
+    // H-MIG-11's freeze register integrity, in the position `pnpm verify` runs it. Registered here
+    // because that is what makes dropping it from CI a failing build rather than the silent loss of the
+    // one check that holds a frozen tree to naming the role that froze it, the instant and the reason.
+    // The MERGE rule is in `.github/workflows/freeze.yml` and is not a `verify` step: only a pull
+    // request carries labels.
+    'pnpm freeze',
     'pnpm perf-budget',
     'pnpm egress',
     // And the SAQ-A scan beside it, for the same reason in the other direction: it is the one check that

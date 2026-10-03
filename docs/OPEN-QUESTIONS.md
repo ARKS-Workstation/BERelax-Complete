@@ -177,6 +177,7 @@ is flagged `provisional: true` in settings so it appears in the Unconfirmed Assu
 |---|---|---|
 | Y12-pilot | Staff pilot; report what the front desk complains about | Requires real staff on a real floor |
 | Y14-devices | Real-device testing: SMS arrival on a UAE handset, OTP autofill on real iOS, receipt printer | I can test logic, not a specific device |
+| Y13-cutover-date | **When does the business cut over, and therefore when does the code freeze start?** Opened by H-MIG-11, which built the freeze and the cutover sequence and declines to pick the date. `artifacts/release/freeze.json` ships `state: open` with `claim: null`, and nothing in this build will ever set it: there is no date arithmetic and no “frozen once the go/no-go passes”, because a mechanism that decided when to freeze would be deciding a date this build invented (brief rule 15). Declaring one is an edit to that file naming the F07 role, the instant and the reason — `scripts/freeze.mjs --register-only` (`pnpm freeze`, a `pnpm verify` step) refuses a frozen register missing any of the three, and refuses a claimant that is not a role. While it is frozen, `.github/workflows/freeze.yml` refuses any pull request not labelled `launch-blocking`. ADR 0127 records it | Choosing it is the owner’s decision about their own business, and the one external item every other external item has to be cleared before |
 
 ---
 

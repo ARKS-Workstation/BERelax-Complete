@@ -2,12 +2,11 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**209 / 211 units complete.**
+**210 / 211 units complete.**
 
 ## Next up
 
 1. **B-M1 — M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop**
-1. **H-MIG-11 — Freeze, go/no-go check and the cutover runbook with rollback**  — **needs owner input:** Y13-pentest, Y11-tax-agent, Y10-consent, Y6-sender-ids, Y7-mcc
 
 ## All units
 
@@ -223,7 +222,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 203 | `Y-PAY-08` | Refunds, partial refunds and chargebacks in the append-only journal | `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13`, `Y-PAY-04` | — | — |
 | [x] | 204 | `Y-PAY-09` | Settlement import and reconciliation to the fils | `M-VAT-01`, `M-VAT-02`, `M-VAT-03`, `M-VAT-04`, `M-VAT-05`, `M-VAT-06`, `M-VAT-07`, `M-VAT-08`, `M-VAT-09`, `M-VAT-10`, `M-VAT-11`, `M-VAT-12`, `M-VAT-13`, `Y-PAY-08` | — | — |
 | [x] | 205 | `Y-PAY-10` | Discreet statement descriptor, MCC gate and the payments go-live guard | `F09`, `W-SITE-01`, `W-SITE-02`, `W-SITE-03`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07`, `W-SITE-08`, `W-SITE-09`, `W-SITE-10`, `W-SITE-11`, `Y-PAY-09` | — | Y7-mcc |
-| [ ] | 206 | `H-MIG-11` | Freeze, go/no-go check and the cutover runbook with rollback | `H-HARD-06`, `H-HARD-09`, `H-HARD-10`, `H-MIG-10`, `Y-PAY-10` | — | Y13-pentest, Y11-tax-agent, Y10-consent, Y6-sender-ids, Y7-mcc |
+| [x] | 206 | `H-MIG-11` | Freeze, go/no-go check and the cutover runbook with rollback | `H-HARD-06`, `H-HARD-09`, `H-HARD-10`, `H-MIG-10`, `Y-PAY-10` | — | Y13-pentest, Y11-tax-agent, Y10-consent, Y6-sender-ids, Y7-mcc, Y13-cutover-date |
 
 ## Legend
 
