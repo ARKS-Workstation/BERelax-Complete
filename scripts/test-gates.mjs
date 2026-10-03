@@ -56742,6 +56742,275 @@ export function chargebackNetEffectFils(`,
   )
 }
 
+// 181a-181z. (A-FIRST-09) The funnel and the rollups: every way a figure could come to be higher than the
+//            truth, and every way a rollup could come to drift from the rows it was computed from.
+//
+// This unit's defects are all FIGURES, and almost every one of them is a figure that is too HIGH. That is
+// not a coincidence: a funnel exists to be shown to somebody, and the numbers that flatter are the ones
+// nobody questions. `booking_created ÷ landing` is more than double the real rate and is what every
+// advertising dashboard reports. A no-show left in the show-adjusted denominator makes the till look like
+// it loses bookings; one left OUT of the exclusion makes the diary look like it converts. A bot's landing
+// counted as a session inflates the denominator and flatters nothing — which is why the bot case is the one
+// that would be found, and why the others need a gate.
+//
+// The second kind is a rollup that drifts from the rows underneath it. A rollup that accumulates doubles
+// every figure on its second run; one keyed on a calendar date moves a night's trade across two dates; one
+// written for a day that has not closed publishes half a day as a whole one. None of the three errors.
+{
+  const COUNTS = 'packages/core/src/analytics/funnel-counts.ts'
+  const COUNTS_SUITE = 'packages/core/src/analytics/funnel-counts.test.ts'
+  const MIGRATION = 'packages/db/migrations/0150_analytics_rollups.sql'
+  const WRITER = 'packages/db/src/repositories/analytics-rollup.ts'
+  const PASS = 'apps/worker/src/jobs/analytics-rollup.ts'
+  const STATIC_SUITE = 'packages/db/src/analytics-rollup.test.ts'
+
+  const unitFails = (...files) =>
+    runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const brokenUnit = (file, find, into, ...suites) =>
+    withEditedFile(
+      file,
+      (source) => replaceOnce(source, find, into),
+      () => unitFails(...suites),
+    )
+
+  // 181a. Conversion taken from `booking_created` instead of `paid`. The figure every ad platform shows,
+  //       more than double the real one, and not revenue.
+  checkRejectedBy(
+    'funnel: conversion computed from booking_created rather than paid is caught',
+    brokenUnit(
+      COUNTS,
+      '  const paid = counts[TERMINAL_STAGE]\n  return rate(\n    paid.entered,\n    landing.entered,',
+      "  const paid = counts['booking_created']\n  return rate(\n    paid.entered,\n    landing.entered,",
+      COUNTS_SUITE,
+    ),
+    'NEVER booking_created over landing',
+  )
+
+  // 181b. The show-adjusted denominator left unadjusted. The no-shows stay in, and a spa that fills its
+  //       diary and gets people through the door reads as one that loses four bookings in ten.
+  checkRejectedBy(
+    'funnel: a show-adjusted rate that does not exclude the no-shows is caught',
+    brokenUnit(
+      COUNTS,
+      '    confirmed.entered - confirmed.excluded,',
+      '    confirmed.entered,',
+      COUNTS_SUITE,
+    ),
+    'excludes a no-show from the denominator',
+  )
+
+  // 181c. A fold that assigns instead of totalling. The read is grouped by origination as well as by
+  //       stage, so every stage arrives several times and the answer becomes whichever tuple sorted last
+  //       — a number that looks right and is a fraction of the truth.
+  checkRejectedBy(
+    'funnel: a count fold that overwrites rather than totals is caught',
+    brokenUnit(
+      COUNTS,
+      '      entered: current.entered + row.entered,',
+      '      entered: row.entered,',
+      COUNTS_SUITE,
+    ),
+    'TOTALS rows for one stage',
+  )
+
+  // 181d. A window with no landings answering 0% instead of "no figure". ADR 0002's rule applied to a
+  //       rate: 0% conversion on a day nobody visited reports a funnel failure that did not happen.
+  checkRejectedBy(
+    'funnel: a conversion rate of 0% for a day with no landing is caught',
+    brokenUnit(
+      COUNTS,
+      "  denominator <= 0\n    ? { kind: 'no_denominator', why }",
+      "  denominator < 0\n    ? { kind: 'no_denominator', why }",
+      COUNTS_SUITE,
+    ),
+    'no figure at all for a window with no landing',
+  )
+
+  // 181e. A stage missing from the empty counts, which makes the first read of it `undefined` rather than
+  //       zero. A missing stage and a stage with no arrivals are different facts, and only one of them is
+  //       a bucket that is empty for ever.
+  checkRejectedBy(
+    'funnel: an incomplete set of empty counts is caught',
+    brokenUnit(
+      COUNTS,
+      'Object.fromEntries(FUNNEL_STAGES.map((stage) => [stage, EMPTY_FUNNEL_STAGE_COUNT]))',
+      "Object.fromEntries(\n    FUNNEL_STAGES.filter((stage) => stage !== 'attended').map((stage) => [\n      stage,\n      EMPTY_FUNNEL_STAGE_COUNT,\n    ]),\n  )",
+      COUNTS_SUITE,
+    ),
+    'hold every stage of the taxonomy',
+  )
+
+  // 181f. ZY701 removed. A session that produced two bookings then contributes two `booking_created`
+  //       rows, and the funnel reports a conversion rate above the share of people who converted.
+  checkRejectedBy(
+    'rollup: a funnel step a session can reach twice is caught',
+    brokenUnit(
+      MIGRATION,
+      'create trigger funnel_step_one_per_session\n  before insert or update on analytics.funnel_step',
+      'create trigger funnel_step_one_per_session\n  before delete on analytics.funnel_step',
+      STATIC_SUITE,
+    ),
+    'before insert or update on analytics.funnel_step',
+  )
+
+  // 181g. ZY701's self-exclusion removed, so every UPDATE finds its own row and is refused. The symptom
+  //       is not a wrong figure: it is a re-materialisation that cannot correct anything.
+  checkRejectedBy(
+    'rollup: a one-step-per-session rule that refuses its own row is caught',
+    brokenUnit(
+      MIGRATION,
+      '     and f.funnel_step_id <> new.funnel_step_id',
+      '     and true',
+      STATIC_SUITE,
+    ),
+    'funnel_step_id <> new.funnel_step_id',
+  )
+
+  // 181h. ZY702 judging the day against `now()` instead of `clock_timestamp()`. `now()` is the
+  //       TRANSACTION's start, so a long backfill judges every day it touches against the instant the
+  //       backfill began — and the days it then accepts are exactly the ones that had not closed.
+  checkRejectedBy(
+    'rollup: a closed-day check read from the transaction clock is caught',
+    brokenUnit(
+      MIGRATION,
+      '  if clock_timestamp() >= v_closes_at then',
+      '  if now() >= v_closes_at then',
+      STATIC_SUITE,
+    ),
+    'clock_timestamp() >= v_closes_at',
+  )
+
+  // 181i. ZY702 declared on one of the three tables. A rule on `daily_traffic` says nothing about the
+  //       funnel or the revenue, and those two are the figures somebody is shown.
+  checkRejectedBy(
+    'rollup: a closed-day check missing from the revenue table is caught',
+    brokenUnit(
+      MIGRATION,
+      'create trigger daily_source_revenue_day_has_closed\n  before insert or update on analytics.daily_source_revenue',
+      'create trigger daily_source_revenue_day_has_closed\n  before delete on analytics.daily_source_revenue',
+      STATIC_SUITE,
+    ),
+    'before insert or update on analytics.daily_source_revenue',
+  )
+
+  // 181j. A third statement of "which trading date is this instant". The quiet one: it looks like an
+  //       improvement, and it disagrees with the two the database enforces on exactly the dates somebody
+  //       overrode the hours for — the days it matters most (ADR 0066).
+  checkRejectedBy(
+    'rollup: a second trading-date resolver in the migration is caught',
+    brokenUnit(
+      MIGRATION,
+      'begin;\n',
+      "begin;\n\ncreate function analytics.rollup_trading_date(p_at timestamptz) returns date\nlanguage sql immutable as $$ select (p_at - interval '11 hours')::date $$;\n",
+      STATIC_SUITE,
+    ),
+    'read off the basis 0116 stored',
+  )
+
+  // 181k. The gap cohort stopping being counted — read as `trading` for every session, so nine hours of
+  //       daytime browsing reads as trade and `Y5-funnel-gap-bucket` becomes unanswerable rather than
+  //       open.
+  checkRejectedBy(
+    'rollup: a gap cohort counted as daytime trade is caught',
+    brokenUnit(
+      WRITER,
+      "           count(*) filter (where s.trading_date_basis <> 'trading')::text as gap_entered",
+      '           0::text as gap_entered',
+      STATIC_SUITE,
+    ),
+    'is read off the basis 0116 stored',
+  )
+
+  // 181l. A rollup that accumulates. The delete before each insert is what makes two runs byte-identical;
+  //       without it the second run doubles every figure, and nothing errors.
+  checkRejectedBy(
+    'rollup: a recompute that accumulates rather than replacing is caught',
+    brokenUnit(
+      WRITER,
+      '  await sql`delete from analytics.daily_traffic where trading_date = ${input.tradingDate}::date`',
+      '  // the delete this rollup needs',
+      STATIC_SUITE,
+    ),
+    'replaces each rollup rather than accumulating',
+  )
+
+  // 181m. The terminal step taken from something other than the ledger. A funnel that counted its own
+  //       idea of paid agrees with the invoice until the first refund.
+  checkRejectedBy(
+    'rollup: a paid step not taken from the settled invoice is caught',
+    brokenUnit(
+      WRITER,
+      '       where st.outstanding_fils <= 0\n       group by a.session_id',
+      '       where true\n       group by a.session_id',
+      STATIC_SUITE,
+    ),
+    'reads the terminal stage from the LEDGER',
+  )
+
+  // 181n. A funnel vocabulary restated inside `packages/db`. The mapping is core's and is total by
+  //       compilation; a copy in SQL is the drift that makes an event collected and never counted.
+  checkRejectedBy(
+    'rollup: an event name written as a literal in packages/db is caught',
+    brokenUnit(
+      WRITER,
+      "       and (not m.entry_only or (e.properties ->> 'entry') = 'true')",
+      "       and (e.event_name = 'page_view' or not m.entry_only)",
+      STATIC_SUITE,
+    ),
+    'must not be a literal in packages/db',
+  )
+
+  // 181o. The pass's DELETE grant removed. The re-materialisation is then not expressible at all, and the
+  //       alternative a writer reaches for is accumulating — which is 181l from the other end.
+  checkRejectedBy(
+    'rollup: a funnel_step the pass may not replace is caught',
+    brokenUnit(
+      MIGRATION,
+      'grant delete on analytics.funnel_step to berelax_app;',
+      '-- no delete grant',
+      STATIC_SUITE,
+    ),
+    'DELETE on funnel_step alone',
+  )
+
+  // 181p. The expired-ref purge losing its grant, which is A-FIRST-07's deferral quietly undone: the
+  //       codes accumulate for ever and nothing says so, because the pass's own log line reports zero.
+  checkRejectedBy(
+    'rollup: a ref-code purge the pass may not perform is caught',
+    brokenUnit(
+      MIGRATION,
+      'grant delete on whatsapp_ref to berelax_app;',
+      '-- no delete grant',
+      STATIC_SUITE,
+    ),
+    'DELETE on whatsapp_ref',
+  )
+
+  // 181q. The pass moved after A-MEAS-07's reconciliation, which then compares against an internal side
+  //       this pass has not produced and reports every dispatch as a push with nothing behind it.
+  checkRejectedBy(
+    'rollup: a pass scheduled after the reconciliation it feeds is caught',
+    brokenUnit(PASS, "  cron: '35 2 * * *',", "  cron: '35 5 * * *',", STATIC_SUITE),
+    'before A-MEAS-05 uploads',
+  )
+
+  // 181r. The control the whole block rests on. Every case above breaks something and demands a named
+  //       failure; this one demands that the unbroken tree PASSES, so a suite that had come to fail for
+  //       its own reasons could not make the other seventeen report success.
+  {
+    const unit = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.config.ts',
+      COUNTS_SUITE,
+      STATIC_SUITE,
+    ])
+    check('rollup: and both suites pass on the real tree', !unit.failed, unit.output)
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

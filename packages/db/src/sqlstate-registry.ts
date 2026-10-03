@@ -2552,6 +2552,39 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['assert_last_touch_precedes_its_booking'],
     translators: ['packages/db/src/repositories/attribution.ts'],
   },
+  // ZY701-ZY702 are A-FIRST-09's, of the band ZY701-ZY710; ZY703 through ZY710 are left free and
+  // deliberately absent, because an entry for a code no migration raises is direction 3.
+  //
+  // ZY701 is about what the funnel's first bucket IS. It is a count of SESSIONS, which is what makes
+  // every rate below it meaningful, and `landing` is already one per session because the ingest
+  // overwrites the `entry` flag server-side (ADR 0066). The other seven stages had no such guard, and the
+  // ones that needed it are the domain steps: a session that produced two bookings would contribute two
+  // `booking_created` rows and two `confirmed` rows, and the funnel would then report a conversion rate
+  // above the share of people who converted. It cannot be a unique constraint — `funnel_step` is RANGE
+  // partitioned on `occurred_at` and PostgreSQL requires every unique constraint on a partitioned table
+  // to contain the partition key, so a unique (session_id, step, occurred_at) would permit exactly the
+  // second row the rule is about.
+  //
+  // ZY702 is about the CLOCK, and it is A-MEAS-07's ZY472 about the same calendar one table over. Trading
+  // runs 11:00-02:00, so a pass that ran at 22:00 would write a day's figures from half a day's trade;
+  // the row would look complete, and the next morning's report would show a day whose takings fell by
+  // half for no reason anybody could find. It has to exist separately from ZY472: a reconciliation
+  // refusing an open day says nothing about a rollup writing one. A CHECK cannot state either, because
+  // the closing instant is a row in `business_day`.
+  {
+    code: 'ZY701',
+    rule: 'A session may reach a given funnel step at most once.',
+    migration: '0150',
+    raisedBy: ['analytics.assert_one_step_per_session'],
+    translators: ['packages/db/src/repositories/analytics-rollup.ts'],
+  },
+  {
+    code: 'ZY702',
+    rule: 'A trading day that has not closed may not be rolled up.',
+    migration: '0150',
+    raisedBy: ['analytics.assert_rolled_up_day_has_closed'],
+    translators: ['packages/db/src/repositories/analytics-rollup.ts'],
+  },
   {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',

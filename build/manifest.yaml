@@ -13237,7 +13237,9 @@ units:
       no branch on the verdict anywhere in it (apps/web/app/api/collect/ingest.test.ts asserts the
       absence structurally and collect.itest.ts asserts a declared crawler''s events are STORED and
       flagged); excluding
-      bot-flagged sessions from the funnel is deferred to A-FIRST-09; the bot-filtered share on the analytics page
+      bot-flagged sessions from the funnel is deferred to A-FIRST-09 — DEFERRAL SATISFIED: its
+      funnelCountRows excludes bot sessions by default and includes them behind an explicit parameter,
+      and the steps are MATERIALISED either way so the verdict stays recoverable. The bot-filtered share on the analytics page
       is deferred to A-FIRST-10, and the same figure on the operations dashboard is deferred to R-REP-07. Each
       must call classifyBot and store its verdict rather than re-deriving a flag — BOT_KINDS and
       AI_CRAWLER_BOT_KINDS are exported from @berelax/core and @berelax/shared for exactly that — and the scan in
@@ -13409,13 +13411,18 @@ units:
       fbp/fbc COLUMNS remain open and are A-MEAS-03''s, which forwards them; A-MEAS-02 added none, for the
       reason it added no event_id — a column with no producer is indistinguishable from a column whose
       producer stopped working.'
-    - 'NOTE: deferred to A-FIRST-09 — funnel_step rows. This unit writes analytics.visitor, .session,
+    - 'NOTE: deferred to A-FIRST-09 — DEFERRAL SATISFIED: materialiseFunnelSteps writes all eight steps,
+      the collected four from the events and the domain four from the bookings A-FIRST-08 attributes, with
+      the `paid` step read from a settled invoice. What follows is the deferral as it stood: funnel_step
+      rows. This unit writes analytics.visitor, .session,
       .attribution, .event and .pre_consent_landing and no funnel step: A-FIRST-09''s own summary is
       "materialise funnel_step rows from analytics and domain events". What this unit does for it is decide
       the page_view `entry` flag, which A-FIRST-02 deferred here in so many words — it is overwritten
       server-side on the session''s first page view, because a browser has never been told which session it
       is in and a client claiming entry on its fourth page view would give one session four landings.'
-    - 'NOTE: deferred to A-FIRST-09 — which trading date daytime traffic belongs to (Y5-funnel-gap-bucket).
+    - 'NOTE: deferred to A-FIRST-09 — DEFERRAL SATISFIED: it ACTS on the question by counting the cohort
+      (daily_traffic.gap_sessions, daily_funnel.gap_entered, read off this basis) and resolving nothing;
+      the business decision stays open and is now re-bucketable. The deferral as it stood: which trading date daytime traffic belongs to (Y5-funnel-gap-bucket).
       This unit could not defer it entirely, because analytics.session.trading_date is NOT NULL with a real
       key to business_day and trading runs 11:00-02:00, so an instant between 02:00 and 11:00 belongs to no
       trading date while web traffic carries on. The row is filed under the next date the calendar opens and
@@ -13815,7 +13822,7 @@ units:
       excluded from conversion and bots excluded by default, plus the nightly daily_traffic, daily_funnel
       and daily_source_revenue rollups keyed on business_day and retained indefinitely.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - A-FIRST-02
@@ -13849,10 +13856,57 @@ units:
       remain present and unchanged
     - daily_source_revenue is integer fils taken from paid invoice lines, and its gross minus VAT reconciles
       to the invoice to the fils
+    - 'NOTE: the three rollups and analytics.funnel_step already existed, created by 0096 (A-FIRST-01)
+      against this unit by name, and their keys are right: every rollup is keyed on trading_date with a
+      real foreign key into public.business_day. So migration 0150 adds only what 0096 could not know —
+      the two gap counts, the two refusals and the two privileges a re-materialisation and the ref purge
+      need — and re-keys nothing. `nightly_rollups` already has its agent_definition and agent_heartbeat
+      rows from 0021, which declared the agent before any job existed precisely so a scheduled pass could
+      not be added without a heartbeat; this is that job, so no agent arrives here either. ADR 0103.'
+    - 'NOTE: Y5-funnel-gap-bucket is acted on by COUNTING the cohort and by resolving nothing.
+      daily_traffic.gap_sessions and daily_funnel.gap_entered are read off analytics.session.trading_date_basis,
+      the column 0116 created and ZY222 holds against business_day''s own instants in both directions, so
+      the cohort is visible and re-bucketable the day the business answers. An
+      analytics.rollup_trading_date(timestamptz) function was written, applied to a database and REMOVED
+      before the migration was finished: two statements of "which trading date does this instant belong
+      to" already exist and both are enforced — analytics.session.trading_date by ZY222 and
+      appointment.trading_date by a foreign key (0024) — and a third, consulted only by the rollups, would
+      disagree with both on exactly the dates somebody overrode the hours for. The counts sit BESIDE the
+      totals rather than in a key 0096 owns, which would turn one day into four rows and make A-FIRST-10,
+      R-REP-07 and A-MEAS-07 each sum them before showing a day.'
+    - 'NOTE: three files beyond the declared list, and one of them is where half the acceptance is proved.
+      packages/db/src/analytics-rollup.test.ts reads 0150 and asserts its structural claims, for the
+      reason analytics-dispatch.test.ts exists for 0137. packages/db/src/repositories/analytics-rollup.ts
+      holds the statements, because a repository is where a statement lives.
+      apps/worker/src/jobs/analytics-rollup.itest.ts is where the FUNNEL''s own arithmetic is proved — the
+      500-session fixture, the eight counts, the conversion rate, the no-show exclusion and the bot
+      parameter — because those need COLLECTED_EVENT_FUNNEL and APPOINTMENT_STATUS_FUNNEL from
+      @berelax/core and packages/db may never import core (ADR 0001). A copy of either mapping in a db
+      suite would be the second statement of the funnel the whole design exists to prevent. A-MEAS-05 and
+      A-MEAS-07 each recorded the same reason for the same move. packages/db/src/rollup.itest.ts holds
+      everything that is a property of the schema: ZY701, ZY702, the gap counts, the recompute''s
+      idempotence, the 01:30 filing, the revenue reconciliation and the dropped raw partition.'
+    - 'NOTE: a bot''s funnel steps are MATERIALISED and excluded at the COUNT, not at collection. ADR
+      0062''s rule is that the classifier''s verdict is stored and never acted on, and the two queries then
+      differ by exactly the seeded bot count because they are the same rows with one predicate moved —
+      the only arrangement in which that difference is a measurement rather than a claim. Filtering at the
+      materialisation is irreversible: a crawler re-classified as a human could never be counted back in,
+      because the raw events it would have to be rebuilt from are purged at ninety days.'
+    - 'NOTE: a booking with no attributed analytics session contributes NO funnel step, which is the shape
+      rather than a gap — the funnel measures web journeys and a walk-in has none. Its revenue is still
+      attributed, because daily_source_revenue reads booking_attribution (A-FIRST-08) directly and an
+      offline booking carries source=offline. So the till''s takings and the funnel''s denominator are
+      different populations on purpose.'
+    - 'NOTE: no test port band was needed; the allocated band is released unused. See A-FIRST-08''s note —
+      the same band covered all three of this agent''s units and none of them starts a server.'
     files:
-    - packages/db/migrations/NNNN_analytics_rollups.sql
+    - packages/db/migrations/0150_analytics_rollups.sql
     - apps/worker/src/jobs/analytics-rollup.ts
+    - apps/worker/src/jobs/analytics-rollup.itest.ts
     - packages/core/src/analytics/funnel-counts.ts
+    - packages/core/src/analytics/funnel-counts.test.ts
+    - packages/db/src/repositories/analytics-rollup.ts
+    - packages/db/src/analytics-rollup.test.ts
     - packages/db/src/rollup.itest.ts
   - id: A-FIRST-10
     order: 113
@@ -14351,7 +14405,10 @@ units:
       end because nothing in this build announces a conversion at booking time yet, so there is no earlier
       figure on file to correct. The discounted-invoice acceptance line is satisfied where it is decided
       instead: the repository reads invoice.gross_total and never appointment.gross_price_fils.'
-    - 'NOTE: deferred to A-FIRST-09 — the DATA half of the invoiced and package reads. invoice refuses
+    - 'NOTE: deferred to A-FIRST-09 — DEFERRAL SATISFIED: its suites build real documents and payments
+      inside a transaction they ROLL BACK, which removes exactly what they wrote and needs no declaration
+      in suite-table-declarations.ts — the answer to the difficulty this note records. The deferral as it
+      stood: the DATA half of the invoiced and package reads. invoice refuses
       DELETE for every role (ZI003) and TRUNCATE as the owner is the only legal removal, which is a
       declaration in packages/db/src/suite-table-declarations.ts and a statement wide enough to take other
       suites'' rows with it; package_sale is the same shape. A suite may delete only rows it created
@@ -14424,7 +14481,11 @@ units:
       renders an explicit unreconciled state and the API returns Unreconciled rather than a number — asserted
       at both layers'
     - 'the job is idempotent per business_day: two runs produce identical rows'
-    - 'NOTE: deferred to A-FIRST-09 — the INTERNAL side of the comparison. "Internal paid conversions from
+    - 'NOTE: deferred to A-FIRST-09 — DEFERRAL SATISFIED: internalPaidConversions reads the day''s settled
+      documents and the handler derives each event id through analyticsEventId, the same function the
+      enqueuer uses, so the two sides cannot be two different digests. NO_INTERNAL_TRUTH_ON_FILE is kept,
+      because a day the rollup has not run for must still read as *the internal side is missing*. The
+      deferral as it stood: the INTERNAL side of the comparison. "Internal paid conversions from
       the rollups" is that unit''s funnel materialisation and is not built, so the pass takes the internal
       side from an injected resolver whose shipped implementation answers ''nothing on file'' and then
       writes NOTHING for that day, counting it in the log line. A reconciliation written from an empty

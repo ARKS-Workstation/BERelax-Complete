@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**179 / 211 units complete.**
+**180 / 211 units complete.**
 
 ## Next up
 
@@ -130,7 +130,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 109 | `A-FIRST-06` | Typed browser collector and declarative interaction tracking | `A-FIRST-05`, `B-UI-01`, `B-UI-02`, `B-UI-03`, `B-UI-04`, `B-UI-05` | — | — |
 | [x] | 110 | `A-FIRST-07` | WhatsApp reference-code loop, end to end | `A-FIRST-05`, `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03` | — | Y12-ref-loop, Y1-nap |
 | [x] | 111 | `A-FIRST-08` | First-touch and last-touch attribution onto customer and booking | `A-FIRST-05`, `A-FIRST-07`, `C-CRM-01`, `C-CRM-02`, `C-CRM-03`, `C-CRM-04`, `C-CRM-05`, `C-CRM-06`, `C-CRM-07`, `C-CRM-08`, `C-CRM-09`, `C-CRM-10` | — | — |
-| [ ] | 112 | `A-FIRST-09` | Funnel to PAID and the nightly rollups on business_day | `A-FIRST-02`, `A-FIRST-08`, `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13` | — | — |
+| [x] | 112 | `A-FIRST-09` | Funnel to PAID and the nightly rollups on business_day | `A-FIRST-02`, `A-FIRST-08`, `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13` | — | — |
 | [ ] | 113 | `A-FIRST-10` | The /analytics admin page | `A-FIRST-09`, `F07`, `H04` | — | — |
 | [x] | 114 | `A-MEAS-01` | Egress guard: opaque category codes with an enumerating test | `A-FIRST-02`, `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06` | — | — |
 | [x] | 115 | `A-MEAS-02` | Analytics consent: Consent Mode v2 gating client tags and server pushes | `A-FIRST-05`, `C-CRM-01`, `C-CRM-02`, `C-CRM-03`, `C-CRM-04`, `C-CRM-05`, `C-CRM-06`, `C-CRM-07`, `C-CRM-08`, `C-CRM-09`, `C-CRM-10` | — | Y5-analytics-basis |

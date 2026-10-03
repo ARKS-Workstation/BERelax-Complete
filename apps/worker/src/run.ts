@@ -11,6 +11,7 @@ import { createBoss, shutdown } from './boss.ts'
 import { enqueue, transactionalEnqueue } from './enqueue.ts'
 import { setAnalyticsDispatchSql } from './jobs/analytics-dispatch.ts'
 import { setAnalyticsMaintenanceSql } from './jobs/analytics-partitions.ts'
+import { setAnalyticsRollupSql } from './jobs/analytics-rollup.ts'
 import { createMediaStorageFor, setMediaStorage } from './jobs/build-derivatives.ts'
 import { setVideoRenditionStorage } from './jobs/build-video-renditions.ts'
 import { setCashForecastSql } from './jobs/cash-forecast.ts'
@@ -129,6 +130,9 @@ async function main(): Promise<void> {
   // stand-in and a value captured at boot would survive a restart-free configuration change while the log
   // line went on claiming a real push.
   setAnalyticsDispatchSql(sql)
+  // A-FIRST-09's nightly rollup, before `startWorkers` for the same reason: it reads the day that has just
+  // closed out of the trading calendar rather than from arithmetic on the clock.
+  setAnalyticsRollupSql(sql)
   // A-MEAS-05's producer, before `startWorkers` for the same reason. It takes its trading date from the
   // calendar through `tradingDateAt` rather than from arithmetic on the clock, so it needs the connection
   // before its first fire rather than at import.

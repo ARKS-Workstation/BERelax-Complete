@@ -29,6 +29,7 @@ import {
   ANALYTICS_PARTITIONS_JOB_DEFINITION,
   ANALYTICS_RETENTION_JOB_DEFINITION,
 } from './jobs/analytics-partitions.ts'
+import { ANALYTICS_ROLLUP_JOB_DEFINITION } from './jobs/analytics-rollup.ts'
 import { BUILD_DERIVATIVES_JOB } from './jobs/build-derivatives.ts'
 import { BUILD_VIDEO_RENDITIONS_JOB } from './jobs/build-video-renditions.ts'
 import { CASH_FORECAST_JOB_DEFINITION } from './jobs/cash-forecast.ts'
@@ -504,6 +505,13 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
   // a cron and therefore an agent, and what the watchdog watches is the absence of a success.
   ANALYTICS_PARTITIONS_JOB_DEFINITION,
   ANALYTICS_RETENTION_JOB_DEFINITION,
+  // A-FIRST-09's nightly rollup at 02:35, and the ordering is the interesting part: trading closes at
+  // 02:00 and ZY702 refuses a rollup for a day that has not closed, so it cannot run earlier — and it runs
+  // before A-MEAS-05's 03:17 upload and A-MEAS-07's 04:23 reconciliation, whose internal side it produces.
+  // It reports to `nightly_rollups`, which 0021 declared before any job existed to fill it precisely so a
+  // scheduled pass could not be added without a heartbeat; this is that job. A-FIRST-07's expired-ref purge
+  // rides in the same pass rather than declaring a second agent for a `delete` that takes milliseconds.
+  ANALYTICS_ROLLUP_JOB_DEFINITION,
   // G-REV-02's two, and they are the first crons in this registry whose subject is something that happened
   // OUTSIDE the system. The tripwire at 06:15 reads the Places aggregate and reports an increase; the nudge at
   // 09:00 on a Monday reports a week of silence. Separate agents rather than one, for migration 0033's reason:

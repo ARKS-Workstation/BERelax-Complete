@@ -483,6 +483,26 @@ export {
   recordDispatchAttempt,
 } from './repositories/analytics-dispatch.ts'
 export {
+  type CollectedStageMapping,
+  type FunnelCountGroup,
+  funnelCountRows,
+  type InternalPaidConversion,
+  internalPaidConversions,
+  type MaterialisedFunnel,
+  type MaterialiseFunnelInput,
+  materialiseFunnelSteps,
+  purgeExpiredRefCodes,
+  ROLLUP_REFUSALS,
+  ROLLUP_SQLSTATE,
+  type RollupCounts,
+  type RollupInput,
+  type RollupRefusal,
+  rollUpTradingDate,
+  rollupDigest,
+  rollupRefusalOf,
+  type StatusStageMapping,
+} from './repositories/analytics-rollup.ts'
+export {
   type DecidedTransition,
   TRANSITION_REFUSALS,
   type TransitionActor,
@@ -5304,4 +5324,53 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // `berelax_app` so C-CRM-10's `delete_row` recipe stays a statement rather than needing a third branch in
 // 0085's SECURITY DEFINER function.
 //
-export const SCHEMA_VERSION = 149 as const
+// 150 is 0150_analytics_rollups.sql (A-FIRST-09) — what the funnel materialisation and the nightly
+// rollups needed that 0096 could not know. Mirrored in `packages/db/src/schema/analytics.ts`, so
+// `pnpm db:drift` compares the two.
+//
+// **Most of this unit is NOT in this file, and that is the point.** `analytics.funnel_step` and all three
+// rollups exist already, created by 0096 against this unit by name, and their keys are right: every rollup
+// is keyed on `trading_date` with a real foreign key into `public.business_day`, which is what makes "a
+// session that began at 02:00 belongs to the previous trading day" a property of the schema rather than of
+// the job. `nightly_rollups` already has its `agent_definition` and `agent_heartbeat` rows from 0021,
+// which declared the agent before any job existed precisely so a scheduled pass could not be added without
+// a heartbeat.
+//
+// **Y5-funnel-gap-bucket is acted on by COUNTING the cohort, and nothing here resolves a trading date.**
+// Trading runs 11:00-02:00, so between 02:00 and 11:00 no business day contains the instant at all while
+// web traffic carries on; 0116 filed such a session under the next date the calendar opens and made the row
+// say so in `trading_date_basis`, which ZY222 holds against `business_day`'s own instants in both
+// directions. ADR 0066 says that is *not* an answer to the open question and names A-FIRST-09 as the unit
+// that must act. The action is `daily_traffic.gap_sessions` and `daily_funnel.gap_entered`, read off that
+// stored basis, so the cohort is visible and re-bucketable the day the business answers rather than being
+// read as daytime trade.
+//
+// An `analytics.rollup_trading_date(timestamptz)` function was written, applied and REMOVED before this
+// file was finished. Two statements of "which trading date does this instant belong to" already exist and
+// both are enforced — `analytics.session.trading_date` by ZY222 and `appointment.trading_date` by a
+// foreign key (0024) — and a third, consulted only by the rollups, would disagree with both on exactly the
+// dates somebody overrode the hours for. The gap counts are a COUNT beside the total rather than a column
+// in the key, which is 0096's own shape for `bot_sessions` beside `sessions`: adding to the key would turn
+// one day into four rows and make every reader (A-FIRST-10, R-REP-07, A-MEAS-07) sum them first.
+//
+// **The application role gains DELETE on `analytics.funnel_step` and on nothing else in that schema.**
+// 0096's rule is that rows leave `analytics` through `analytics.run_retention` alone, and it makes this one
+// exception itself: *"a funnel step is DERIVED and a corrected derivation has to be able to replace it."* A
+// re-materialisation is that replacement and is not expressible without DELETE — the pass would have to
+// accumulate, and an accumulated funnel doubles every step the second time it runs. `analytics.event`
+// keeps its ZY065 refusal for every role but `berelax_retention`.
+//
+// It also grants DELETE on `whatsapp_ref`, for the purge A-FIRST-07 handed this unit with the rollups. The
+// "nothing references it" half needs no predicate: `booking_whatsapp_ref_capture.ref_code` is ON DELETE
+// RESTRICT, so a claimed code cannot be deleted whatever the pass asks — the statement anticipates that
+// rather than restating it, so one claimed code cannot abort the night's purge.
+//
+// ZY701 and ZY702 are used of the band ZY701-ZY710; ZY703 through ZY710 are released UNUSED and
+// deliberately unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
+// ZY701 makes the funnel's first bucket a count of SESSIONS unfalsifiable, and is a trigger rather than a
+// unique constraint because `funnel_step` is partitioned on `occurred_at` and a unique key would have to
+// contain it. ZY702 refuses a rollup for a day that has not closed, which is ZY472's rule about the same
+// calendar one table over; it reads `clock_timestamp()` and not `now()`, because `now()` is the
+// TRANSACTION's start and a long backfill would judge every day against the instant it began.
+//
+export const SCHEMA_VERSION = 150 as const
