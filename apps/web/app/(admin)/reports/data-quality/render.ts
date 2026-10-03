@@ -132,7 +132,8 @@ const CSS = `
     border-bottom: 1px solid var(--color-hairline);
     padding: var(--space-2) var(--space-3);
   }
-  .dq-attests { font-size: 0.875rem; color: var(--color-ink-3); margin: var(--space-2) 0 0; }
+  /* ink-2, for the reason kpi-tile.ts records: ink-3 on a surface is under 4.5:1 and axe says so. */
+  .dq-attests { font-size: 0.875rem; color: var(--color-ink-2); margin: var(--space-2) 0 0; }
 `
 
 const sides = (check: DataQualityCheckView): string => {

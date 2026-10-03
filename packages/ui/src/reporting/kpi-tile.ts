@@ -213,7 +213,17 @@ export const KPI_TILE_CSS = `
   }
   .kpi-tile__why,
   .kpi-tile__named { margin: 0 0 var(--space-2); color: var(--color-ink-2); }
-  .kpi-tile__formula { margin: var(--space-3) 0 0; color: var(--color-ink-3); }
+  /*
+    ink-2 and not ink-3, and the reason is a MEASUREMENT rather than taste: axe reported
+    color-contrast as SERIOUS on this element in all twelve cells of the matrix. ink-3 on a surface
+    is under 4.5:1, and a formula in a code element at the body size is normal text. Found by
+    running apps/web/e2e/dashboards.itest.ts; the string-level tile suite could not see it, because
+    a contrast ratio is a property of two rendered colours.
+
+    No backticks in this comment, deliberately: it lives INSIDE a template literal, and a backtick
+    here closes the string. That cost a web build.
+  */
+  .kpi-tile__formula { margin: var(--space-3) 0 0; color: var(--color-ink-2); }
   .kpi-tile__refusals { margin: 0 0 var(--space-2); padding-inline-start: var(--space-5); }
   .kpi-tile__check { color: var(--color-ink); }
   .kpi-tile[${KPI_TILE_STATE_ATTRIBUTE}="unreconciled"],

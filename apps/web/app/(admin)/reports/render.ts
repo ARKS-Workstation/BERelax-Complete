@@ -79,7 +79,8 @@ const CSS = `
     padding: var(--space-3) var(--space-4);
     margin: 0 0 var(--space-4);
   }
-  .dash-note { font-size: 0.875rem; color: var(--color-ink-3); }
+  /* ink-2, for the reason kpi-tile.ts records: ink-3 on a surface is under 4.5:1 and axe says so. */
+  .dash-note { font-size: 0.875rem; color: var(--color-ink-2); }
 `
 
 /**
