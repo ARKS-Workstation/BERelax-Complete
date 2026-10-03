@@ -84,6 +84,12 @@ const MONEY_FILES = [
  */
 const MUTATION_ALLOWED = new Map([
   [
+    'packages/fixtures/src/restore-drill.itest.ts',
+    'probes ZI003 on a RESTORED database, which is the only way to prove the append-only trigger ' +
+      "survived pg_restore: the update runs inside a rolled-back transaction in the drill's own " +
+      'throwaway restore target, and the assertion is the SQLSTATE and not that something threw',
+  ],
+  [
     'packages/db/src/repositories/invoice.itest.ts',
     'probes ZI003 by issuing the UPDATE and the DELETE and asserting the SQLSTATE of each',
   ],
