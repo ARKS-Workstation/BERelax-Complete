@@ -1,11 +1,15 @@
 import { sql } from 'drizzle-orm'
 import {
+  bigint,
   boolean,
   check,
+  date,
   index,
+  integer,
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   smallint,
   text,
   timestamp,
@@ -215,5 +219,96 @@ export const analyticsDispatch = pgTable(
     index('analytics_dispatch_state_idx').on(t.state, t.decidedAt.desc()),
     index('analytics_dispatch_due_idx').on(t.decidedAt),
     uniqueIndex('analytics_dispatch_event_destination_unique').on(t.eventId, t.destination),
+  ],
+)
+
+/**
+ * How one conversion differs between internal truth and what was pushed (0138, A-MEAS-07).
+ *
+ * `intentionally_not_pushed` is not a discrepancy. 0125 wrote a suppression because the visitor did not
+ * grant the signal the destination requires, and counting that as missing would report a growing number of
+ * entirely correct refusals as a fault — and the first response to a number like that is to make it go
+ * away.
+ */
+export const analyticsDispatchDifferenceKind = pgEnum('analytics_dispatch_difference_kind', [
+  'missing',
+  'duplicate',
+  'intentionally_not_pushed',
+])
+
+/**
+ * The daily comparison, one row per `(business_day, destination)` (0138, A-MEAS-07).
+ *
+ * What the mirror cannot say, and what `analytics-dispatch-reconciliation.test.ts` reads off the migration
+ * instead: ZY471 is a DEFERRED constraint trigger holding the three classification counts equal to the item
+ * rows at COMMIT, and ZY472 refuses a reconciliation for a trading day that had not closed when it claims
+ * to have run. The second needs the trading calendar, which no CHECK may read.
+ *
+ * REPLACED on a re-run rather than appended: a reconciliation is the current answer to a question about a
+ * day, and a table of every answer ever given makes "is this day reconciled" a query with an ordering in
+ * it. The dispatch rows are the append-only record; this is the answer about them.
+ */
+export const analyticsDispatchReconciliation = pgTable(
+  'analytics_dispatch_reconciliation',
+  {
+    businessDay: date('business_day').notNull(),
+    destination: text('destination').notNull(),
+    internalCount: integer('internal_count').notNull(),
+    pushedCount: integer('pushed_count').notNull(),
+    missingCount: integer('missing_count').notNull(),
+    duplicateCount: integer('duplicate_count').notNull(),
+    intentionallyNotPushedCount: integer('intentionally_not_pushed_count').notNull(),
+    /** Signed: what this business took minus what the platform was told. The two directions differ. */
+    differenceFils: bigint('difference_fils', { mode: 'number' }).notNull(),
+    state: text('state').notNull(),
+    ranAt: timestamp('ran_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.businessDay, t.destination] }),
+    check(
+      'analytics_dispatch_reconciliation_counts_nonneg',
+      sql`${t.internalCount} >= 0 and ${t.pushedCount} >= 0 and ${t.missingCount} >= 0 and ${t.duplicateCount} >= 0 and ${t.intentionallyNotPushedCount} >= 0`,
+    ),
+    check(
+      'analytics_dispatch_reconciliation_state_known',
+      sql`${t.state} in ('reconciled', 'unreconciled')`,
+    ),
+    check(
+      'analytics_dispatch_reconciliation_state_follows_the_figures',
+      sql`(${t.state} = 'unreconciled') = (${t.differenceFils} <> 0 or ${t.missingCount} > 0 or ${t.duplicateCount} > 0)`,
+    ),
+  ],
+)
+
+/** One difference, named by `event_id` (0138). Rows and not a jsonb array — see the migration's header. */
+export const analyticsDispatchReconciliationItem = pgTable(
+  'analytics_dispatch_reconciliation_item',
+  {
+    businessDay: date('business_day').notNull(),
+    destination: text('destination').notNull(),
+    eventId: text('event_id').notNull(),
+    classification: analyticsDispatchDifferenceKind('classification').notNull(),
+    dispatchId: uuid('dispatch_id'),
+    /** The SECOND row, for a duplicate: "these two rows are the same conversion" is what is actionable. */
+    otherDispatchId: uuid('other_dispatch_id'),
+    valueFils: bigint('value_fils', { mode: 'number' }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.businessDay, t.destination, t.eventId, t.classification] }),
+    check(
+      'analytics_dispatch_reconciliation_item_missing_has_no_row',
+      sql`${t.classification} <> 'missing' or (${t.dispatchId} is null and ${t.otherDispatchId} is null)`,
+    ),
+    check(
+      'analytics_dispatch_reconciliation_item_duplicate_has_two_rows',
+      sql`${t.classification} <> 'duplicate' or (${t.dispatchId} is not null and ${t.otherDispatchId} is not null and ${t.dispatchId} <> ${t.otherDispatchId})`,
+    ),
+    check(
+      'analytics_dispatch_recon_item_suppression_names_its_row',
+      sql`${t.classification} <> 'intentionally_not_pushed' or (${t.dispatchId} is not null and ${t.otherDispatchId} is null)`,
+    ),
+    index('analytics_dispatch_reconciliation_item_event_idx').on(t.eventId),
   ],
 )

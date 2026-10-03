@@ -52807,6 +52807,290 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 171a-171z. (A-MEAS-07) The reconciliation: every way a disagreement could come to read as agreement, and
+//            every way a figure could reach a screen that has no business showing one.
+//
+// This unit's whole subject is two sides of one number disagreeing, so the defects it is about are all
+// shapes in which the disagreement STOPS BEING VISIBLE. A consent suppression counted as missing produces a
+// permanent, entirely correct discrepancy — and the first response to a number like that is to make it go
+// away. A duplicate counted twice produces a money difference that is not there. A summary that may
+// disagree with its own items produces a panel rendering a count the rows underneath it contradict. And the
+// one that matters most: an unreconciled day that still carries a revenue figure, which a panel renders as
+// a figure whatever the warning beside it says.
+{
+  const RECON = 'packages/core/src/analytics/reconciliation.ts'
+  const RECON_SUITE = 'packages/core/src/analytics/reconciliation.test.ts'
+  const PANEL = 'apps/web/app/(admin)/analytics/panels/revenue-by-source.ts'
+  const PANEL_SUITE = 'apps/web/src/revenue-by-source-render.test.ts'
+  const WRITER = 'packages/db/src/repositories/dispatch-reconciliation.ts'
+  const MIGRATION = 'packages/db/migrations/0138_dispatch_reconciliation.sql'
+  const MIGRATION_SUITE = 'packages/db/src/dispatch-reconciliation.test.ts'
+  const RECON_ITEST = 'apps/worker/src/jobs/dispatch-reconciliation.itest.ts'
+
+  const unitFails = (...files) =>
+    runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const itestFails = () =>
+    runExpectingFailure('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      RECON_ITEST,
+    ])
+  const brokenUnit = (file, find, into, ...suites) =>
+    withEditedFile(
+      file,
+      (source) => replaceOnce(source, find, into),
+      () => unitFails(...suites),
+    )
+
+  // 171a. A consent suppression counted as a discrepancy. The conversion happened, the push correctly did
+  //       not, and nothing is owed — so this reports a growing number of entirely correct refusals as a
+  //       fault, every day, for ever.
+  checkRejectedBy(
+    'reconciliation: a consent suppression counted as missing is caught',
+    brokenUnit(
+      RECON,
+      '  suppressed: true,\n    cancelled_consent_withdrawn: true,',
+      '  suppressed: false,\n    cancelled_consent_withdrawn: false,',
+      RECON_SUITE,
+    ),
+    'is not counted as a discrepancy',
+  )
+
+  // 171b. And the other direction, which is the subtler one: a QUEUED or FAILED row read as a deliberate
+  //       refusal. The pass runs after the day has closed and the consumer drains every five minutes, so a
+  //       row still owed is a conversion the platform does not have — and calling it intentional makes the
+  //       day reconcile while the money is short.
+  checkRejectedBy(
+    'reconciliation: a queued or failed dispatch read as a deliberate refusal is caught',
+    brokenUnit(
+      RECON,
+      '    queued: false,\n    sent: false,\n    suppressed: true,',
+      '    queued: true,\n    sent: false,\n    suppressed: true,',
+      RECON_SUITE,
+    ),
+    'is NOT what a queued or failed row is',
+  )
+
+  // 171c. A duplicate's value counted once per ROW. The platform's figure is the sum over the ids it has
+  //       seen, so a conversion delivered twice under one id is one conversion to it too — counting it
+  //       twice reports a money disagreement that does not exist, on a day whose money is right.
+  checkRejectedBy(
+    'reconciliation: a duplicate counted twice in the money difference is caught',
+    brokenUnit(
+      RECON,
+      '      pushedFils += first.valueFils\n      pushedCount += 1\n      continue',
+      '      for (const row of delivered) pushedFils += row.valueFils\n      pushedCount += 1\n      continue',
+      RECON_SUITE,
+    ),
+    'does not report a disagreement that is not there',
+  )
+
+  // 171d. A duplicate reported with ONE id. "There is a duplicate" is not actionable; "these two rows are
+  //       the same conversion" is — and the ids are taken in id ORDER, so two runs of the pass produce
+  //       identical rows rather than whichever row the query returned first.
+  checkRejectedBy(
+    'reconciliation: a duplicate whose two ids are not taken in id order is caught',
+    brokenUnit(
+      RECON,
+      '  for (const rows of byEvent.values()) rows.sort((a, b) => a.dispatchId.localeCompare(b.dispatchId))',
+      '  for (const rows of byEvent.values()) rows.reverse()',
+      RECON_SUITE,
+    ),
+    'in id order',
+  )
+
+  // 171e. A push with no internal record behind it, dropped. It is the more alarming direction — a
+  //       platform told about revenue the journal cannot produce — and leaving it out is the silent lie.
+  checkRejectedBy(
+    'reconciliation: a dispatch with no internal truth behind it, dropped, is caught',
+    brokenUnit(
+      RECON,
+      '    pushedWithoutInternalTruth.push(eventId)',
+      '    if (false as boolean) pushedWithoutInternalTruth.push(eventId)',
+      RECON_SUITE,
+    ),
+    'makes the day unreconciled',
+  )
+
+  // 171f. THE one that matters most: a revenue figure on the unreconciled variant. A figure beside a
+  //       warning is read as a figure, which is the whole reason the union is shaped the way it is rather
+  //       than being a nullable number (ADR 0002, ADR 0073).
+  checkRejectedBy(
+    'reconciliation: a revenue figure carried on the unreconciled answer is caught',
+    brokenUnit(
+      RECON,
+      '    differenceFils,\n    pushedWithoutInternalTruth,',
+      '    differenceFils,\n    pushedFils,\n    pushedWithoutInternalTruth,',
+      RECON_SUITE,
+    ),
+    'carries no revenue figure on the unreconciled variant at all',
+  )
+
+  // 171g. The same defect at the API layer: a caller holding a number getting it past the boundary for a
+  //       day whose figures do not agree.
+  checkRejectedBy(
+    'reconciliation: an API that answers a number for an unreconciled day is caught',
+    brokenUnit(
+      PANEL,
+      '  if (isUnreconciled(entry.reconciliation)) return UNRECONCILED',
+      '  if (isUnreconciled(entry.reconciliation)) return entry.figure ?? UNRECONCILED',
+      PANEL_SUITE,
+    ),
+    'answers Unreconciled rather than a number',
+  )
+
+  // 171h. And at the document layer. A figure element the markup still carries is a number a stylesheet or
+  //       a screenshot can show, whatever the state attribute says.
+  checkRejectedBy(
+    'reconciliation: a panel that renders a figure on an unreconciled day is caught',
+    brokenUnit(
+      PANEL,
+      '    `<p>${escapeHtml(UNRECONCILED_PANEL_SENTENCE)}</p>`,',
+      '    `<p>${escapeHtml(UNRECONCILED_PANEL_SENTENCE)}</p>`,\n    `<p class="revenue-by-source__figure">${escapeHtml(entry.figure ?? \'\')}</p>`,',
+      PANEL_SUITE,
+    ),
+    'renders NO figure and no figure element at all',
+  )
+
+  // 171i. A reconciled destination with no figure, answered as a zero. `0.00` is a real figure and reads as
+  //       "this source produced no revenue", which is the exact confusion ADR 0002 is about.
+  checkRejectedBy(
+    'reconciliation: a missing figure answered as a zero rather than as the word is caught',
+    brokenUnit(
+      PANEL,
+      '  if (entry.figure === undefined) {',
+      '  if (false as boolean) {',
+      PANEL_SUITE,
+    ),
+    'rather than a zero',
+  )
+
+  // 171j. The write. An upsert instead of a delete-then-insert leaves the previous run's `missing` item
+  //       behind when a dispatch finally lands, and ZY471 then refuses the whole write — so the day stops
+  //       being reconcilable at all, which is a gate firing about a bug in the writer.
+  checkRejectedBy(
+    'reconciliation: a writer that leaves a stale item behind is caught',
+    withEditedFile(
+      WRITER,
+      (source) =>
+        replaceOnce(
+          source,
+          '      await tx`\n        delete from analytics_dispatch_reconciliation_item',
+          '      if (false as boolean) await tx`\n        delete from analytics_dispatch_reconciliation_item',
+        ),
+      () => itestFails(),
+    ),
+    'removes the missing item',
+  )
+
+  // 171k. ZY471's DEFERRAL, which is the line the migration test exists for. `deferrable initially
+  //       immediate` applies at the statement, so the WRITER'S ORDER would decide whether the rule held —
+  //       it would pass for every write this pass makes and fail for the first caller that wrote its items
+  //       first.
+  checkRejectedBy(
+    'reconciliation: a constraint trigger that is not deferred is caught',
+    brokenUnit(
+      MIGRATION,
+      'create constraint trigger analytics_dispatch_reconciliation_agrees\n  after insert or update or delete on analytics_dispatch_reconciliation\n  deferrable initially deferred',
+      'create constraint trigger analytics_dispatch_reconciliation_agrees\n  after insert or update or delete on analytics_dispatch_reconciliation\n  deferrable initially immediate',
+      MIGRATION_SUITE,
+    ),
+    'deferrable initially deferred',
+  )
+
+  // 171l. The state/figures bijection relaxed. A row saying `reconciled` beside three missing items is a
+  //       screen that shows a number while the rows underneath it say the number is wrong.
+  checkRejectedBy(
+    'reconciliation: a state that no longer follows the figures is caught',
+    brokenUnit(
+      MIGRATION,
+      "    check ((state = 'unreconciled')\n           = (difference_fils <> 0 or missing_count > 0 or duplicate_count > 0))",
+      '    check (state = state)',
+      MIGRATION_SUITE,
+    ),
+    'holds the state to the figures in both directions',
+  )
+
+  // 171m. And the suppression count smuggled INTO that condition, which is 171a arriving through the
+  //       schema: every day with a consent refusal on it would read as unreconciled for ever.
+  checkRejectedBy(
+    'reconciliation: a suppression count that makes a day unreconciled is caught',
+    brokenUnit(
+      MIGRATION,
+      'or missing_count > 0 or duplicate_count > 0))',
+      'or missing_count > 0 or duplicate_count > 0 or intentionally_not_pushed_count > 0))',
+      MIGRATION_SUITE,
+    ),
+    'holds the state to the figures in both directions',
+  )
+
+  // 171n. One dispatch id written twice for a duplicate — one row reported as two, which is a second
+  //       conversion that does not exist.
+  checkRejectedBy(
+    'reconciliation: a duplicate naming one row twice is caught',
+    brokenUnit(
+      MIGRATION,
+      '               and dispatch_id <> other_dispatch_id))',
+      '               and dispatch_id is not null))',
+      MIGRATION_SUITE,
+    ),
+    'ties each classification to the rows it may name',
+  )
+
+  // 171o. The day window on the read. A read with no window reconciles every day against every dispatch
+  //       ever written, which answers `reconciled` for the most recent day and nonsense for all the rest.
+  checkRejectedBy(
+    'reconciliation: a read that ignores the trading day window is caught',
+    withEditedFile(
+      WRITER,
+      (source) =>
+        replaceOnce(
+          source,
+          '       and d.decided_at >= b.opens_at\n       and d.decided_at <  b.closes_at',
+          '       and b.trading_date is not null',
+        ),
+      () => itestFails(),
+    ),
+    'keys on the DECISION instant inside the trading window',
+  )
+
+  // 171p. The vacuity control. Every case above asserts that a MUTATED tree fails, and a tree that fails
+  //       for its own reasons satisfies all of them.
+  {
+    const suites = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.config.ts',
+      RECON_SUITE,
+      PANEL_SUITE,
+      MIGRATION_SUITE,
+    ])
+    check(
+      'reconciliation: the unmutated suites pass, so every case above measured its own mutation',
+      !suites.failed,
+      suites.output,
+    )
+    const itest = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      RECON_ITEST,
+    ])
+    check(
+      'reconciliation: and the integration suite passes on the real tree',
+      !itest.failed,
+      itest.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

@@ -768,6 +768,19 @@ export {
   readDepositMovements,
 } from './repositories/deposit.ts'
 export {
+  DISPATCH_RECONCILIATION_REFUSALS,
+  DISPATCH_RECONCILIATION_SQLSTATE,
+  type DispatchReconciliationItemInput,
+  type DispatchReconciliationRefusal,
+  type DispatchReconciliationSummaryInput,
+  dispatchReconciliationRefusalOf,
+  dispatchReconciliationsForDay,
+  type PushedDispatchRow,
+  pushedDispatchesForDay,
+  type StoredDispatchReconciliation,
+  writeDispatchReconciliation,
+} from './repositories/dispatch-reconciliation.ts'
+export {
   DUPLICATE_CANDIDATE_LIMIT,
   DUPLICATE_CANDIDATE_REFUSALS,
   DUPLICATE_LABEL_SIMILARITY_FLOOR,
@@ -4684,4 +4697,43 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // figure rather than a placeholder: both adapters are named fakes behind the provider port, `real`
 // resolves to `notImplemented`, and the pass performs no outbound call of any kind.
 //
-export const SCHEMA_VERSION = 137 as const
+// 138 is 0138_dispatch_reconciliation.sql (A-MEAS-07) — the daily comparison between what this business
+// says it took and what each ad platform was actually told: one summary per (business_day, destination)
+// and one ITEM per difference, named by event_id. Mirrored in
+// `packages/db/src/schema/analytics-dispatch.ts`, so `pnpm db:drift` compares the two.
+//
+// The items are ROWS and not a jsonb array on the summary, which is the decision the rest follows from. A
+// count that cannot be held against its items by a constraint is a number nobody can check, and the panel
+// renders the counts — so the thing that has to be impossible is a summary disagreeing with the rows
+// underneath it. That is ZY471, a DEFERRED constraint trigger: the summary and its items are written in
+// one transaction, so a row-by-row check would fire on the summary before any item existed.
+//
+// `intentionally_not_pushed` is a classification and NOT a discrepancy, and it is the reason this table
+// has the shape it does. 0125 writes a suppression when the visitor did not grant the signal a
+// destination requires; counting that as `missing` would report a growing number of entirely correct
+// refusals as a fault, every day, for ever — and the first response to a number like that is to make it go
+// away. So it is counted, named, and kept out of both the difference and the `unreconciled` condition.
+//
+// `difference_fils` is SIGNED. Positive means conversions this business took that a platform does not know
+// about; negative means a platform was told about revenue the journal cannot produce. An absolute figure
+// would make the second indistinguishable from the first, and the second is the one somebody answers for.
+//
+// ZY472 refuses a reconciliation for a trading day that had not closed at the instant it claims to have
+// run. Trading runs 11:00-02:00, so a run while the day is open compares this build's figures against
+// dispatches the consumer has not attempted yet and reports every one as missing — a screen saying the
+// conversions did not go out, on the busiest part of the evening. A CHECK cannot state it, because the
+// closing instant is a row in `business_day`.
+//
+// Idempotence per business day is a PRIMARY KEY and not a convention: `(business_day, destination)` on the
+// summary and `(business_day, destination, event_id, classification)` on the item, so a second run cannot
+// add a row. An append-only history was the alternative and is wrong here — a reconciliation is the
+// current answer to a question about a day, asked again whenever the answer might have changed, and a
+// table of every answer ever given makes "is this day reconciled" a query with an ordering in it.
+//
+// ZY471 and ZY472 are used of the band ZY471-ZY480; ZY473 through ZY480 are released UNUSED and
+// deliberately unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises. It
+// also inserts the pass's own `agent_definition` and `agent_heartbeat` row (0031's convention), with
+// `expected_interval_seconds` 86400 and `budget_fils_per_run` 0: the pass reads this build's own tables
+// and performs no outbound call of any kind.
+//
+export const SCHEMA_VERSION = 138 as const

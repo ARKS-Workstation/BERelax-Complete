@@ -14,6 +14,7 @@ import { setAnalyticsMaintenanceSql } from './jobs/analytics-partitions.ts'
 import { createMediaStorageFor, setMediaStorage } from './jobs/build-derivatives.ts'
 import { setVideoRenditionStorage } from './jobs/build-video-renditions.ts'
 import { setCashForecastSql } from './jobs/cash-forecast.ts'
+import { setDispatchReconciliationSql } from './jobs/dispatch-reconciliation.ts'
 import {
   obligationNoticeRuntimeFor,
   SEND_OBLIGATION_NOTICE_JOB,
@@ -132,6 +133,10 @@ async function main(): Promise<void> {
   // calendar through `tradingDateAt` rather than from arithmetic on the clock, so it needs the connection
   // before its first fire rather than at import.
   setOfflineConversionSql(sql)
+  // A-MEAS-07's reconciliation, before `startWorkers` for the same reason: it reads the closed day out of
+  // the trading calendar rather than from arithmetic on the clock, so it needs the connection before its
+  // first fire.
+  setDispatchReconciliationSql(sql)
   // `singletonKey` is the notice id, so a pass overlapping the previous one does not queue the same notice
   // twice. It is not the guarantee — the notice's own `state = 'pending'` and 0060's
   // `obligation_notice_one_send_per_step` are — but it keeps the queue from filling with work the first

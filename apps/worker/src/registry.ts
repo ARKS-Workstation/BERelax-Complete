@@ -32,6 +32,7 @@ import { BUILD_DERIVATIVES_JOB } from './jobs/build-derivatives.ts'
 import { BUILD_VIDEO_RENDITIONS_JOB } from './jobs/build-video-renditions.ts'
 import { CASH_FORECAST_JOB_DEFINITION } from './jobs/cash-forecast.ts'
 import { CREDENTIAL_SWEEP_AGENT, runCredentialSweep } from './jobs/credential-sweep.ts'
+import { DISPATCH_RECONCILIATION_JOB_DEFINITION } from './jobs/dispatch-reconciliation.ts'
 import {
   GOOGLE_HEALTH_AGENT,
   GOOGLE_LIVENESS_AGENT,
@@ -537,6 +538,12 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
   // passes are one pipeline — and the limit of sharing is stated in the job's own header and handed to
   // A-MEAS-06, which owns the heartbeat and the watchdog for this dispatcher.
   OFFLINE_CONVERSIONS_JOB_DEFINITION,
+  // A-MEAS-07's reconciliation at 04:23, AFTER the 03:17 upload and after the five-minute consumer has had
+  // time to drain it. The ordering is the design: a reconciliation that ran before the upload would report
+  // every offline conversion as missing, which is the same failure ZY472 refuses for a day that is still
+  // open. Its own agent and its own heartbeat row (0138), because a reconciliation nobody ran looks
+  // exactly like one that found nothing.
+  DISPATCH_RECONCILIATION_JOB_DEFINITION,
 ]
 
 /**

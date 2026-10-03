@@ -2218,6 +2218,33 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['assert_dispatch_attempts_monotonic'],
     translators: ['packages/db/src/repositories/analytics-dispatch.ts'],
   },
+  // ZY471-ZY472 are A-MEAS-07's, of the band ZY471-ZY480; ZY473 through ZY480 are left free and
+  // deliberately absent, because an entry for a code no migration raises is direction 3.
+  //
+  // ZY471 is the one the whole table rests on. A reconciliation's COUNTS are what a panel renders, so a
+  // summary claiming zero discrepancies while its item rows hold three is a screen showing a number the
+  // rows underneath it contradict — and nothing else would error. It is a DEFERRED constraint trigger
+  // because the summary and its items are written in one transaction, so a row-by-row check would fire on
+  // the summary before any item existed; ZZ004's shape, for a different reason.
+  //
+  // ZY472 is about the CLOCK rather than the arithmetic. Trading runs 11:00-02:00, so a reconciliation run
+  // while the day is still open compares internal figures against dispatches the consumer has not
+  // attempted yet and reports every one of them as missing. A CHECK cannot state it: the closing instant
+  // is a row in `business_day`, and a CHECK may not read another row.
+  {
+    code: 'ZY471',
+    rule: "A reconciliation summary's classification counts must equal the item rows written for that business day and destination.",
+    migration: '0138',
+    raisedBy: ['assert_reconciliation_agrees_with_its_items'],
+    translators: ['packages/db/src/repositories/dispatch-reconciliation.ts'],
+  },
+  {
+    code: 'ZY472',
+    rule: 'A trading day that had not closed may not be reconciled.',
+    migration: '0138',
+    raisedBy: ['assert_reconciled_day_has_closed'],
+    translators: ['packages/db/src/repositories/dispatch-reconciliation.ts'],
+  },
   {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',
