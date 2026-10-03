@@ -1093,6 +1093,15 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
     action: 'inherits_parent',
     parent: 'public.package_sale.customer_id',
     why:
+      'THE ONLY RULE FOR THIS TABLE. A wildcard `public.imported_package_sale.*` sat beside this ' +
+      'entry until the integrating verify: the classifier resolves an exact key before a wildcard, ' +
+      'so the wildcard could never fire and `staleRuleKeys` reported it — a rule that matches ' +
+      'nothing makes the registry read broader than it is. It was invisible while the coverage ' +
+      'assertion above it was failing for another reason, which is the whole argument for checking ' +
+      'both. What it said is kept here: ZY255 refuses UPDATE and DELETE on this table for every ' +
+      'role including the owner, so an erasure cannot act on any column of it; and ' +
+      '`holder_phone_e164` is reached by NO probe today — probe 2 matches `phone_e164` exactly, ' +
+      'not as a suffix — so if one ever does, it needs its own entry rather than a wildcard. ' +
       'The reconstruction record points at the `package_sale` H-MIG-03 wrote from it. It carries no identity ' +
       'of its own — the holder is named by the sale, not by this row — so the column is a pointer at a sale ' +
       'whose own rule decides the matter, and a second answer beside it would be a second answer about one ' +
@@ -1117,6 +1126,183 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
       "unclassified column (ADR 0034) — it was P-HR-11 landing 0097 that made nine of this suite's cases " +
       'fail, which is the probe working rather than a gap in it.',
     registeredBy: 'P-HR-11',
+  }),
+  /*
+   * ## The seven columns the integrating verify found unclassified
+   *
+   * ADR 0034 makes an unclassified column a REFUSAL rather than a default, so the erasure stopped
+   * before touching a row and said which columns it could not account for. Seven arrived with
+   * Y-PAY-06/07, C-AUTO-10 and H-HARD-07, and each is answered on its own terms below — the fifth,
+   * sixth and seventh time this probe has caught a migration, and right every time.
+   */
+  rule({
+    key: 'public.campaign_recipient.customer_id',
+    // `consent_record` and not a marketing class, because what the row is FOR is the answer to "was
+    // this send permitted" — the consent record and the gate decision sit beside this column.
+    dataClass: 'consent_record',
+    action: 'retain_for_subject',
+    why:
+      'Which customer a campaign reserved a message for. Retained, for `public.suppression.' +
+      "contact_customer_id`'s reason one level along: C-AUTO-10 built this row to be ANSWERABLE to a " +
+      'regulator — `campaign_recipient_sent_row_is_answerable` makes "was this send permitted" a ' +
+      'constraint rather than a query — and the answer is the consent record and the gate decision on ' +
+      'the row beside this column. Dropping the link would leave a row that says a message was ' +
+      'permitted to somebody it can no longer name, which is a worse record than keeping it: after ' +
+      'erasure the customer row holds no phone and no display name, so the link identifies nobody.',
+    subjectReason:
+      'We keep the record that we were allowed to message you, and which campaign it was for, so we ' +
+      'can show a regulator why each message went out. It points at a record that no longer holds ' +
+      'your name or your number.',
+    registeredBy: 'C-AUTO-10',
+  }),
+  rule({
+    key: 'public.deposit_movement.invoice_id',
+    dataClass: 'financial',
+    action: 'inherits_parent',
+    parent: 'public.invoice.customer_id',
+    why:
+      'A deposit movement points at the document the deposit was applied to. It carries no identity ' +
+      'of its own — the appointment is named by its own id and the customer appears nowhere on the ' +
+      'row — so this is a pointer at a document whose rule decides the matter, exactly as ' +
+      '`public.commission_line.invoice_id` is. A second answer beside it would be a second answer ' +
+      'about one invoice.',
+    registeredBy: 'Y-PAY-06',
+  }),
+  rule({
+    key: 'public.incident_addendum.body',
+    // `audit`: a filed incident and its addenda are the record of what happened and what was
+    // notified, which is what the audit class is for. There is no incident class, and adding one for
+    // a single column would be a vocabulary nobody else reads.
+    dataClass: 'audit',
+    action: 'retain_append_only',
+    why:
+      'The free text of an addendum to a filed incident. The catalogue finds it on the contact-detail ' +
+      'axis because an addendum can quote one — a breach notification often says whose data moved — ' +
+      'and it is retained because ZY521 refuses an edit or a delete on this table for every role, ' +
+      'including the owner: H-HARD-07 made the register append-only so that the PDPL clock and what ' +
+      'was notified cannot be rewritten after the fact. Redacting it is therefore not available, and ' +
+      'would be the wrong answer anyway — an incident record that can be edited by the subject of the ' +
+      'incident is not a record. What the erasure CAN say, and now does, is that the text is kept ' +
+      'under the obligation and why.',
+    subjectReason:
+      'Where an incident affected your data, we keep the record of what happened and what we told the ' +
+      'authorities. That record cannot be changed after it is filed, by us or by anyone, which is what ' +
+      'makes it worth anything.',
+    registeredBy: 'H-HARD-07',
+  }),
+  rule({
+    key: 'public.payment_mandate.customer_id',
+    dataClass: 'financial',
+    action: 'retain_append_only',
+    why:
+      'Whose mandate it is. A mandate is the AUTHORITY to charge a card, and erasure must end that ' +
+      'authority — which Y-PAY-07 does by writing a `payment_mandate_revocation` row, not by editing ' +
+      'this one: the table is append-only, every column is NOT NULL, and there is no spelling of ' +
+      '`pseudonymise` that this schema admits. So the row stays, the authority ends, and the link ' +
+      'identifies nobody once the customer row is pseudonymised. A `delete_row` would also destroy ' +
+      'the evidence that an authority had existed and been revoked, which is the one thing a dispute ' +
+      'about a charge needs.',
+    subjectReason:
+      'We keep the record that you once authorised card payments and that the authorisation has been ' +
+      'cancelled. It points at a record that no longer holds your name or your number, and it is what ' +
+      'we would show if a charge were ever disputed.',
+    registeredBy: 'Y-PAY-07',
+  }),
+  rule({
+    key: 'public.payment_mandate.token_reference',
+    dataClass: 'financial',
+    action: 'retain_append_only',
+    why:
+      "The gateway's handle for the stored instrument, found on the credential axis. It is not a card " +
+      'number — the SAQ-A design means none ever reaches this system — and it is useless without the ' +
+      'merchant account it was issued against. Retained for the same structural reason as the column ' +
+      'above, and made INERT rather than erased: the revocation row is what tells the gateway to stop ' +
+      'honouring it. That the gateway actually does so is not provable here, because no gateway is ' +
+      'chosen (Y7-gateway), and this rule says so rather than implying a deletion this build cannot ' +
+      'perform.',
+    subjectReason:
+      'We keep the reference the payment provider gave us for your saved card, and we tell the provider ' +
+      'to stop honouring it. It is not your card number — we never hold one — and it is of no use ' +
+      'without our own merchant account.',
+    registeredBy: 'Y-PAY-07',
+  }),
+  rule({
+    key: 'public.payment_mandate_revocation.mandate_id',
+    dataClass: 'financial',
+    action: 'inherits_parent',
+    parent: 'public.payment_mandate.customer_id',
+    why:
+      'The back-reference from a revocation to the mandate it ended. Whatever happens to the mandate ' +
+      'happens to this, and nothing else can: a revocation that outlived its mandate would say an ' +
+      'authority was ended without saying which.',
+    registeredBy: 'Y-PAY-07',
+  }),
+  rule({
+    key: 'public.mandate_charge_attempt.mandate_id',
+    dataClass: 'financial',
+    action: 'inherits_parent',
+    parent: 'public.payment_mandate.customer_id',
+    why:
+      'Which mandate a charge attempt was made under. The attempt row holds the appointment, the ' +
+      "figure and the outcome, and names no person; this column is the pointer, and the mandate's own " +
+      'rule decides it.',
+    registeredBy: 'Y-PAY-07',
+  }),
+  /*
+   * ## The five digests the credential probe finds
+   *
+   * Each of these is a sha-256 of some BYTES — wording shown, a payload received, a document before
+   * and after, a settlement file — and the catalogue's credential axis finds them because the column
+   * name looks like a secret. None is: a digest is not a credential, it authenticates nothing, and it
+   * is one-way by construction. They are classified rather than exempted because ADR 0034 refuses an
+   * unclassified column, and `not_customer_data` is a claim a reader can check against the column.
+   */
+  rule({
+    key: 'public.payment_mandate.wording_sha256',
+    dataClass: 'not_customer_data',
+    action: 'not_customer_data',
+    why:
+      'The fingerprint of the mandate WORDING a customer agreed to, beside the version label. It is a ' +
+      'digest of text this business publishes — the same bytes for every customer who agreed to that ' +
+      'version — so it carries no identity at all, and it is what proves the wording has not been ' +
+      'edited since.',
+    registeredBy: 'Y-PAY-07',
+  }),
+  rule({
+    key: 'public.payment_webhook_event.payload_sha256',
+    dataClass: 'not_customer_data',
+    action: 'not_customer_data',
+    why:
+      'The digest of a delivery the gateway signed, which is how a replay is recognised as the same ' +
+      "event rather than a new one. One-way, and the payload it digests is the gateway's, not a " +
+      "customer's record.",
+    registeredBy: 'Y-PAY-04',
+  }),
+  rule({
+    key: 'public.seo_suggestion.before_content_sha256',
+    dataClass: 'not_customer_data',
+    action: 'not_customer_data',
+    why:
+      'The digest of the page content a suggestion would change. Site copy, not a person — and it is ' +
+      'what makes the rollback honest, because a before-state nobody can verify is not a rollback.',
+    registeredBy: 'G-SEO-05',
+  }),
+  rule({
+    key: 'public.seo_suggestion.after_content_sha256',
+    dataClass: 'not_customer_data',
+    action: 'not_customer_data',
+    why: 'The same, for the state the suggestion would leave behind. Site copy, not a person.',
+    registeredBy: 'G-SEO-05',
+  }),
+  rule({
+    key: 'public.settlement_batch.content_sha256',
+    dataClass: 'not_customer_data',
+    action: 'not_customer_data',
+    why:
+      'The digest of the settlement file as it arrived, so a reconciliation can say WHICH bytes it ' +
+      "reconciled and a re-import of the same file is recognised. The file is the gateway's statement " +
+      'to this business.',
+    registeredBy: 'Y-PAY-09',
   }),
   rule({
     key: 'public.invoice.customer_id',
@@ -1772,45 +1958,6 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
       'nothing left in our systems it can be matched against. We keep it so that we can always show ' +
       'where a past appointment in your history came from.',
     registeredBy: 'H-MIG-05',
-  }),
-  /*
-    H-MIG-03's column, classified here as COLLATERAL and not as this unit's work.
-
-    `imported_package_sale.package_sale_id` is a foreign key to `package_sale`, which carries a customer
-    id, so probe 3 enumerates it — and nothing classified it. That is not a latent tidiness problem: the
-    engine REFUSES to run while any probed column is unclassified, so on the tree this unit started from
-    C-CRM-10's erasure was non-functional for every subject, with `rights.itest.ts` red on the one case
-    that reports it. The unit report carries the baseline proof.
-
-    It is repaired here because H-MIG-04 cannot pass otherwise. This unit's own decision — that the
-    plaintext number lives only in `customer.phone_e164` and that an erasure therefore reaches it — is only
-    demonstrable by RUNNING an erasure, which is what `customer-import.itest.ts` does. Nothing else about
-    0119, its registry entries or its suites was touched.
-  */
-  rule({
-    key: 'public.imported_package_sale.*',
-    dataClass: 'financial',
-    action: 'retain_append_only',
-    why:
-      'What H-MIG-02’s workbook said about one reconstructed package, kept beside the `package_sale` it ' +
-      'produced (0119, H-MIG-03). Found by probe 3 through `package_sale_id`, whose parent carries a ' +
-      'customer id. ' +
-      'Retained, and `retain_append_only` rather than `inherits_parent` because the two reasons are ' +
-      'different and only one of them is about the parent: ZY255 refuses UPDATE and DELETE on this table ' +
-      'for every role including the owner, so an erasure cannot act on it at all. The parent’s own rule ' +
-      'is `retain_statutory` under the financial obligation, which this row is part of the evidence for — ' +
-      'it is what an imported deferred-revenue balance rests on when it disagrees with what the owner ' +
-      'believes, and `import_staging.entity_provenance` resolves it to the line of the file it was typed ' +
-      'on. ' +
-      'The wildcard covers the table because every column of it is one statement about the same ' +
-      'reconstructed package and the same refusal applies to all of them; `holder_phone_e164` is the one ' +
-      'worth noticing, and no probe reaches it today — probe 2 matches `phone_e164` exactly, not as a ' +
-      'suffix. If a probe ever does, the answer is this one and it needs its own entry saying so.',
-    subjectReason:
-      'Where a prepaid package on your record came from: the line of the reconstructed list it was typed ' +
-      'on, and what that line said. We are required to keep the records behind the balances in our ' +
-      'accounts, and this is the evidence for one of them.',
-    registeredBy: 'H-MIG-03',
   }),
 ])
 

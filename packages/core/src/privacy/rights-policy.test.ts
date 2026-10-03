@@ -351,9 +351,16 @@ describe('the erasure rule registry', () => {
     expect([...units].sort()).toEqual([
       'A-FIRST-08',
       'C-AUTO-07',
+      // C-AUTO-10 classifies `campaign_recipient.customer_id`: the row it built to be ANSWERABLE to a
+      // regulator about one send, which is why the link is retained rather than dropped.
+      'C-AUTO-10',
       'C-CRM-10',
       'G-REV-02',
       'G-REV-05',
+      // G-SEO-05's two content digests, found by the credential probe on the `_sha256` family and
+      // classified as what they are: fingerprints of site copy, not of a person.
+      'G-SEO-05',
+      'H-HARD-07',
       'H-MIG-03',
       'H-MIG-04',
       'H-MIG-05',
@@ -362,6 +369,15 @@ describe('the erasure rule registry', () => {
       'W-SITE-10',
       'W-SYS-11',
       'W-SYS-14',
+      // The payments estate, all at the integrating verify: Y-PAY-04's webhook payload digest,
+      // Y-PAY-06's deposit pointer, Y-PAY-07's mandate — whose authority an erasure ends with a
+      // revocation row rather than an edit, because the table is append-only — and Y-PAY-09's
+      // settlement digest. Twelve columns in all, each refused by ADR 0034 until it was classified,
+      // which is the fifth, sixth and seventh time this probe has caught a migration.
+      'Y-PAY-04',
+      'Y-PAY-06',
+      'Y-PAY-07',
+      'Y-PAY-09',
     ])
   })
 
