@@ -411,7 +411,10 @@ describe('W-SITE-06 — the therapist publishing guard, over the four combinatio
     expect(id).toBeDefined()
     await expect(
       sql`update employee set is_publishable = true where id = ${id ?? ''}::uuid`,
-    ).rejects.toThrow(/generated/i)
+      // PostgreSQL's own words for a generated column: `can only be updated to DEFAULT`. Matched on
+      // that phrase rather than on "generated", because the message does not contain it — which is the
+      // kind of expectation only a real database settles, and this assertion was written wrong first.
+    ).rejects.toThrow(/can only be updated to DEFAULT/)
     // And the route still 404s, which is the half that matters: the refusal above is the database's, and
     // this is the guard's.
     expect((await fetchPath(therapistPathFor('probe-therapist-02'))).status).toBe(404)
@@ -571,13 +574,22 @@ describe('W-SITE-08 — the sitemaps, the hreflang cross-check and the publish l
     })
   }
 
-  /** The `hreflang` set the SERVED page advertises, read out of its `<head>`. */
+  /**
+   * The `hreflang` set the SERVED page advertises, read out of its `<head>`.
+   *
+   * **Case-insensitive on the attribute name, and that is not defensive.** Next emits the attribute as
+   * `hrefLang` — React's property spelling — in the raw bytes: `<link rel="alternate" hrefLang="en" …>`.
+   * HTML attribute names are case-insensitive, so a browser's `getAttribute('hreflang')` finds it and
+   * `route-spine.itest.ts` (which reads the DOM through Playwright) never sees the difference. A regex
+   * over the bytes does, and a case-sensitive one returns an EMPTY set — which is how this assertion
+   * first failed, reporting "the page advertises no alternates" about a page that advertises three.
+   */
   function headAlternates(html: string): Readonly<Record<string, string>> {
     const found: Record<string, string> = {}
-    for (const link of html.matchAll(/<link[^>]*rel="alternate"[^>]*>/g)) {
+    for (const link of html.matchAll(/<link[^>]*rel="alternate"[^>]*>/gi)) {
       const tag = link[0]
-      const lang = /hreflang="([^"]+)"/.exec(tag)?.[1]
-      const href = /href="([^"]+)"/.exec(tag)?.[1]
+      const lang = /hreflang="([^"]+)"/i.exec(tag)?.[1]
+      const href = /href="([^"]+)"/i.exec(tag)?.[1]
       if (lang !== undefined && href !== undefined) found[lang] = href
     }
     return found
@@ -694,6 +706,18 @@ describe('W-SITE-08 — the sitemaps, the hreflang cross-check and the publish l
     const ORIGIN = 'https://example.test'
     const KEY = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6'
     const CLOCK = '2026-10-03T10:00:00.000Z'
+    /*
+      A probe service of this suite's own, per run, for the reason `treatments.itest.ts` gives — and for a
+      sharper one found by running this file TWICE, which is what the brief asks for. The first version
+      repriced a SEEDED variant: `changeVariantPrice` inserts a `price_list` row valid from today, so the
+      second run was refused by `price_list_no_overlap` and the suite could not run twice. A probe keyed on
+      the run instant cannot collide with itself, and nothing another file reads is touched.
+    */
+    const RUN = Date.now().toString(36)
+    const PROBE_KEY = `wsite08_probe_${RUN}`
+    const PROBE_SLUG = `wsite08-probe-${RUN}`
+    let probeServiceId = ''
+    let probeVariantId = ''
 
     function ports(key = KEY) {
       return {
@@ -707,24 +731,68 @@ describe('W-SITE-08 — the sitemaps, the hreflang cross-check and the publish l
       }
     }
 
-    it('M4: one run produces all five artefacts, and the ping carries exactly the changed URLs', async () => {
-      const [service] = await readTreatmentPages(sql)
-      expect(service).toBeDefined()
-      if (service === undefined) return
-      const lastmodBefore = service.lastModified
-
-      // The publish: a price change through the repository, which is what an admin screen does.
-      const [variant] = await sql<{ id: string }[]>`
-        select v.id from service_variant v join service s on s.id = v.service_id
-         where s.slug = ${service.slug} order by v.duration_minutes limit 1
+    beforeAll(async () => {
+      await cleanProbeService()
+      const [service] = await sql<{ id: string }[]>`
+        insert into service
+          (style, treatment_key, slug, internal_name, public_display_name, turnaround_minutes)
+        values ('asian', ${PROBE_KEY}, ${PROBE_SLUG}, 'W-SITE-08 probe',
+                ${'Hot Oil / Balm Massage (Asian)'}, 20)
+        returning id
       `
-      expect(variant).toBeDefined()
-      if (variant === undefined) return
+      probeServiceId = service?.id ?? ''
+      await sql`
+        insert into service_room_type_compat (service_style, service_treatment_key, room_type)
+        values ('asian', ${PROBE_KEY}, 'standard')
+      `
+      await sql`
+        insert into service_resource_shape
+          (service_style, service_treatment_key, shape, therapists_required, rooms_required,
+           min_room_capacity, required_room_type, therapist_buffer_minutes)
+        values ('asian', ${PROBE_KEY}, 'solo', 1, 1, 1, 'standard', 10)
+      `
+      const [variant] = await sql<{ id: string }[]>`
+        insert into service_variant (service_id, duration_minutes, gross_price_fils, provisional_note)
+        values (${probeServiceId}::uuid, 60, 20000, ${'W-SITE-08 probe fixture'})
+        returning id
+      `
+      probeVariantId = variant?.id ?? ''
+      await sql`update service set published_at = now() where id = ${probeServiceId}::uuid`
+    }, 60_000)
+
+    afterAll(async () => {
+      await cleanProbeService()
+      // And this suite's own propagation rows. They are what makes the ping idempotent, so leaving them
+      // behind would make a second run report every submission as already sent — which is exactly how
+      // the retry assertion failed the first time this file was run twice.
+      // This suite's own propagation rows, identified by the run token in their URLs. Narrow on purpose:
+      // `delete from publish_propagation where surface = 'content'` would take rows another file wrote,
+      // which is wider than "only rows it created".
+      await sql`
+        delete from publish_propagation
+         where subject_id like ${`wsite08-probe-%`}
+            or exists (select 1 from unnest(changed_urls) as u(url) where u.url like ${`%run=${RUN}%`})
+      `
+    })
+
+    /** Removes this run's probe and anything an interrupted earlier run left behind. */
+    async function cleanProbeService(): Promise<void> {
+      await sql`delete from redirect_map where source_path like ${'/treatments/wsite08-probe-%'}`
+      await sql`delete from redirect_map where target_path like ${'/treatments/wsite08-probe-%'}`
+      await sql`delete from service where treatment_key like ${'wsite08_probe%'}`
+    }
+
+    it('M4: one run produces all five artefacts, and the ping carries exactly the changed URLs', async () => {
+      const before = (await readTreatmentPages(sql)).find((page) => page.slug === PROBE_SLUG)
+      expect(before, 'the probe service is not on the menu').toBeDefined()
+      if (before === undefined) return
+      const lastmodBefore = before.lastModified
+
       // The admin path: an effective-dated `price_list` row in force today, which is what a price rise
       // is. It never overwrites the catalogue figure — `treatments.itest.ts` records why.
       await withUnitOfWork(sql, ACTOR, (uow) =>
         changeVariantPrice(uow, {
-          serviceVariantId: variant.id,
+          serviceVariantId: probeVariantId,
           grossPriceFils: 31_500,
           label: 'W-SITE-08 publish loop',
           validFrom: new Date().toISOString().slice(0, 10),
@@ -732,38 +800,33 @@ describe('W-SITE-08 — the sitemaps, the hreflang cross-check and the publish l
         }),
       )
 
-      const paths = revalidationPathsFor({ kind: 'price', slug: service.slug })
+      const paths = revalidationPathsFor({ kind: 'price', slug: PROBE_SLUG })
       const revalidated: string[] = []
       const { indexNow, purge } = ports()
       const report = await propagatePublish(
         {
           surface: 'service',
-          subjectId: service.slug,
+          subjectId: PROBE_SLUG,
           origin: ORIGIN,
           paths: [...paths],
           cacheTags: [...cacheTagsFor('service_price')],
           reason: 'service published',
         },
-        {
-          sql,
-          revalidate: (path) => revalidated.push(path),
-          indexNow,
-          purge,
-          actor: ACTOR,
-        },
+        { sql, revalidate: (path) => revalidated.push(path), indexNow, purge, actor: ACTOR },
       )
 
-      // 1. The route is live with correct JSON-LD — served, and valid by the same rule set the CI gate uses.
-      const html = await fetchHtml(`/treatments/${service.slug}`)
+      // 1. The route is live with correct JSON-LD — served, and valid by the same rule set the CI gate
+      //    uses. `dynamicParams` is on, so a service published after the build renders on demand.
+      const html = await fetchHtml(`/treatments/${PROBE_SLUG}`)
       const licence = await readLicenceClass()
       for (const graph of jsonLdBlocks(html)) {
         expect(
           formatFindings(validateGraph(graph, { licence: licence as never })),
-          `${service.slug} graph`,
+          `${PROBE_SLUG} graph`,
         ).toBe('')
       }
       // 2. The sitemap's lastmod moved, because the row's updated_at did.
-      const after = (await readTreatmentPages(sql)).find((page) => page.slug === service.slug)
+      const after = (await readTreatmentPages(sql)).find((page) => page.slug === PROBE_SLUG)
       expect(after?.lastModified, 'the price change did not move the row instant').not.toBe(
         lastmodBefore,
       )
@@ -778,7 +841,7 @@ describe('W-SITE-08 — the sitemaps, the hreflang cross-check and the publish l
       const purgeOutbox = await purge.outbox()
       expect(purgeOutbox).toHaveLength(1)
       expect([...(purgeOutbox[0]?.paths ?? [])]).toEqual([...paths].sort())
-      // 5. An audit row, with the propagation it describes.
+      // 5. An audit row, naming the propagation it describes.
       const [audit] = await sql<{ count: string }[]>`
         select count(*)::text as count from audit_event
          where action = 'publication.propagate' and entity_id = ${report.record.id}::text
@@ -791,11 +854,18 @@ describe('W-SITE-08 — the sitemaps, the hreflang cross-check and the publish l
 
     it('pings once per changed URL set, however many times the publish is retried', async () => {
       const { indexNow, purge } = ports()
+      /*
+        A path set unique to this RUN, and the reason is the second defect running this file twice found:
+        `publish_propagation_once_per_set` is unique on (surface, key) and the row outlives the process,
+        so a fixed set made the first call of the second run report `deduplicated: true` — the idempotency
+        working, measured as a failure. The run token is what makes "first call" mean first.
+      */
+      const retryPaths = [`/faq?run=${RUN}`, `/ar/faq?run=${RUN}`]
       const input = {
         surface: 'content' as const,
         subjectId: null,
         origin: ORIGIN,
-        paths: ['/faq', '/ar/faq'],
+        paths: retryPaths,
         cacheTags: ['content'],
         reason: 'faq published',
       }
@@ -806,13 +876,19 @@ describe('W-SITE-08 — the sitemaps, the hreflang cross-check and the publish l
       expect(second.deduplicated).toBe(true)
       // One row, because `publish_propagation_once_per_set` is unique on (surface, key) — so the
       // idempotency is the DATABASE's rather than the fake's memory, which a restart would end.
-      const rows = await readPropagations(sql, 100)
-      const forSet = rows.filter(
-        (row) =>
-          row.idempotencyKey ===
-          indexNowIdempotencyKey(['/faq', '/ar/faq'].map((p) => `${ORIGIN}${p}`)),
+      const key = indexNowIdempotencyKey(retryPaths.map((path) => `${ORIGIN}${path}`))
+      // Counted in SQL rather than filtered out of `readPropagations(sql, 100)`, which is brief rule 12's
+      // capped-reader trap: the limit is right for a console and wrong for a count, and the day the table
+      // passes a hundred rows the answer would pin at whatever the page held.
+      const [counted] = await sql<{ count: string }[]>`
+        select count(*)::text as count from publish_propagation
+         where surface = 'content' and idempotency_key = ${key}
+      `
+      expect(counted?.count).toBe('1')
+      // And the reader a console uses sees it too, which is the control that the row is really there.
+      expect((await readPropagations(sql, 100)).some((row) => row.idempotencyKey === key)).toBe(
+        true,
       )
-      expect(forSet).toHaveLength(1)
       // The provider saw both calls and sent one. Both are in its outbox: an outbox that recorded only
       // the first could not answer "did we try again?".
       const outbox = await indexNow.outbox()
@@ -822,8 +898,8 @@ describe('W-SITE-08 — the sitemaps, the hreflang cross-check and the publish l
           entry.outcome.kind === 'accepted' ? entry.outcome.deduplicated : null,
         ),
       ).toEqual([false, true])
-      expect(purgeIdempotencyKey(['/faq', '/ar/faq'])).toBe(
-        purgeIdempotencyKey(['/ar/faq', '/faq', '/faq']),
+      expect(purgeIdempotencyKey(retryPaths)).toBe(
+        purgeIdempotencyKey([...retryPaths].reverse().concat(retryPaths[0] as string)),
       )
     }, 120_000)
 
@@ -837,7 +913,7 @@ describe('W-SITE-08 — the sitemaps, the hreflang cross-check and the publish l
           surface: 'premises',
           subjectId: null,
           origin: ORIGIN,
-          paths: ['/contact'],
+          paths: [`/contact?run=${RUN}`],
           cacheTags: [...cacheTagsFor('address')],
           reason: 'address changed',
         },
@@ -870,7 +946,7 @@ describe('W-SITE-08 — the sitemaps, the hreflang cross-check and the publish l
           origin: ORIGIN,
           // A URL on another host, which is the rejection IndexNow actually makes: the key is verified
           // against the host it names, so a submission for somebody else's domain answers 422.
-          paths: ['/pricing'],
+          paths: [`/pricing?run=${RUN}`],
           cacheTags: [...cacheTagsFor('accent_density_radius')],
           reason: 'accent changed',
         },
