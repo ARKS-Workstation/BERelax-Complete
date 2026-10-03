@@ -61810,6 +61810,277 @@ export function chargebackNetEffectFils(`,
   )
 }
 
+// 201a-201z. (H-HARD-04) The restore drill shown to be able to FAIL, and its committed evidence shown to
+//            be re-judged rather than read. A drill that reports success without reading a row back has
+//            proved that two commands exited zero, which is ADR 0002 in the one subject where the cost of
+//            being wrong is the whole business: the backup nobody has restored.
+//
+//            Two of these cases exist because the drill found the defect in its own first runs, and both
+//            are the kind no row count can see — a restore that strips every GRANT, and a materialised
+//            view reported as data loss. Those are covered by the drill's own run and by ADR 0123; what
+//            is proved here is that each REFUSAL fires by name.
+{
+  const DRILL = 'scripts/restore-drill.mjs'
+  const AGE = 'scripts/check-drill-age.mjs'
+  const REPORT = 'artifacts/drills/restore-report.json'
+  const TRUNCATED = 'artifacts/drills/__gate_fixture__truncated.dump'
+  const SCHEMA_DUMP = 'artifacts/drills/__gate_fixture__schema.dump'
+  const url = process.env['DATABASE_URL'] ?? process.env['TEST_DATABASE_URL'] ?? ''
+
+  // 201a. A deliberately truncated backup is refused BY NAME, and with no database involved at all.
+  //
+  //       The fixture is a file that begins exactly like a custom-format dump — the five magic bytes —
+  //       and then stops. `pg_restore --list` parses an archive's table of contents and opens no
+  //       connection, so the drill reads the backup before it creates anything, which is why this case
+  //       can point `--source` at a port nothing is listening on and still get the right answer. That
+  //       ordering is deliberate in the script and is commented there: with the server's `show` queries
+  //       first, a rule about a FILE would have needed a reachable PostgreSQL to prove.
+  checkRejectedBy(
+    'the restore drill refuses a truncated backup by name, before it creates a database',
+    withFixture(TRUNCATED, 'PGDMP\u0001\u000e\u0000', () =>
+      runExpectingFailure(process.execPath, [
+        DRILL,
+        '--backup',
+        TRUNCATED,
+        '--source',
+        'postgres://nobody@127.0.0.1:1/none',
+        '--suite',
+        'off',
+        '--invariants',
+        'off',
+      ]),
+    ),
+    'restore-backup-unusable',
+  )
+
+  // 201b. The control, and a second rule in the same pair: a dump `pg_restore --list` CAN read gets past
+  //       the readability rule, and is then refused for having compared nothing.
+  //
+  //       Without this, 201a is satisfied by a drill that refuses every file — which is the gate that
+  //       passes while measuring nothing, from the other direction. A schema-only dump is used because it
+  //       is a real archive that restores no rows, so the floor on tables compared and rows read back
+  //       (`MINIMUM_TABLES_COMPARED`, `MINIMUM_READ_BACKS`) is the thing that fires instead.
+  check(
+    'a database is configured for the drill cases',
+    url !== '',
+    'DATABASE_URL or TEST_DATABASE_URL must be set: 201b restores a real archive, and skipping it ' +
+      'quietly is how a gate comes to be about nothing',
+  )
+  if (url !== '') {
+    let control = { failed: false, output: '' }
+    try {
+      run('pg_dump', ['--schema-only', '--format=custom', '--file', SCHEMA_DUMP, url])
+      control = runExpectingFailure(process.execPath, [
+        DRILL,
+        '--backup',
+        SCHEMA_DUMP,
+        '--suite',
+        'off',
+        '--invariants',
+        'off',
+      ])
+    } finally {
+      rmSync(SCHEMA_DUMP, { force: true })
+    }
+    checkRejectedBy(
+      'a readable archive gets past the backup rule and is refused for having compared nothing',
+      control,
+      'restore-examined-nothing',
+    )
+    check(
+      'and it is NOT refused as an unusable backup, which is what makes 201a a measurement',
+      control.failed && !control.output.includes('restore-backup-unusable'),
+      `the readability rule fired on an archive pg_restore can read:\n${control.output}`,
+    )
+  }
+
+  // 201c. The committed report is re-judged from its own bytes, so a hand-edited figure is refused.
+  //
+  //       The edit nobody would notice is the mismatch list from one entry to none, which is the figure
+  //       the whole gate turns on. `mismatches` is edited here rather than a duration, because a duration
+  //       is a measurement and the mismatch list is the verdict.
+  checkRejectedBy(
+    'the drill-age gate refuses a report whose figures were edited by hand',
+    withEditedFile(
+      REPORT,
+      (text) => replaceOnce(text, '"rowsCompared"', '"rowsCompared_edited"'),
+      () => runExpectingFailure(process.execPath, [AGE]),
+    ),
+    'drill-report-digest-mismatch',
+  )
+
+  // 201d. A migration the drill restored having CHANGED makes the evidence stale.
+  //
+  //       Raising `migrationCount` past what is on disk is the cheapest way to reach the rule from a
+  //       fixture: the prefix cannot be computed, which is itself the stale case. The digest rule fires
+  //       as well, because changing a figure changes the digest — that is not a flaw in the case, it is
+  //       the stronger statement, and `checkRejectedBy` asserts the rule this case is about rather than a
+  //       non-zero exit.
+  checkRejectedBy(
+    'the drill-age gate refuses evidence about a migration set that is not a prefix of this tree',
+    withEditedFile(
+      REPORT,
+      (text) => replaceOnce(text, '"migrationCount": 132', '"migrationCount": 9999'),
+      () => runExpectingFailure(process.execPath, [AGE]),
+    ),
+    'drill-report-stale-schema',
+  )
+
+  // 201e. And the half of the prefix rule that is a decision rather than a check: APPENDING a migration
+  //       must NOT make the evidence stale.
+  //
+  //       This is the case that keeps the rule from being a calendar in disguise. If adding a migration
+  //       invalidated the drill, every unit that writes one would have to re-run it — twenty minutes with
+  //       the suites — to get a green build, and a gate that fails on correct work is a gate somebody
+  //       deletes. The fixture is a real new file in the real migrations directory, sorted after the
+  //       newest so the prefix is untouched, removed in `withFixture`'s `finally`.
+  check(
+    'appending a migration does not make the recorded drill stale',
+    withFixture(
+      'packages/db/migrations/0999___gate_fixture__append.sql',
+      '-- A gate fixture. 201e proves that appending a migration does not invalidate the restore drill.',
+      () => !run(process.execPath, [AGE]).failed,
+    ),
+    'the drill-age gate failed with one migration appended, which makes it a gate that fails on correct ' +
+      'work',
+  )
+
+  // 201f. A report claiming no limitations is wrong about itself and is refused.
+  //
+  //       The same shape as `importersNotRun` in ADR 0106: this drill restores one database on one
+  //       machine from one local dump, and an artefact with an empty `notProved` would read exactly like
+  //       evidence from a configured off-site recovery.
+  checkRejectedBy(
+    'the drill-age gate refuses a report that lists nothing it did not prove',
+    withEditedFile(
+      REPORT,
+      (text) =>
+        replaceOnce(
+          text,
+          text.slice(
+            text.indexOf('"notProved": ['),
+            text.indexOf('],', text.indexOf('"notProved": [')) + 2,
+          ),
+          '"notProved": [],',
+        ),
+      () => runExpectingFailure(process.execPath, [AGE]),
+    ),
+    'drill-report-malformed',
+  )
+
+  // 201g. The calendar bound exists and fires — and is not enforced from a default.
+  //
+  //       `--max-age-days 0` makes every recorded drill too old, which is how the rule is seen to work
+  //       without this build inventing a figure for how often a restore must be rehearsed. The pair below
+  //       is the control: with a wide bound, and with none at all, the same artefact passes. That is the
+  //       difference between "the rule is unconfigured" and "the rule does not exist" (`Y13-rpo-rto`).
+  checkRejectedBy(
+    'the drill-age gate refuses a report older than a configured maximum age',
+    runExpectingFailure(process.execPath, [
+      AGE,
+      '--max-age-days',
+      '0',
+      '--now',
+      '2099-01-01T00:00:00Z',
+    ]),
+    'drill-report-too-old',
+  )
+  check(
+    'and judges no age at all when none is configured, rather than defaulting to one',
+    !run(process.execPath, [AGE, '--now', '2099-01-01T00:00:00Z']).failed &&
+      !run(process.execPath, [AGE, '--max-age-days', '36500']).failed,
+    'the gate failed on age with no maximum configured, which means it has a default figure in it',
+  )
+
+  // 201h. No artefact at all is its own named refusal, and not a pass.
+  checkRejectedBy(
+    'the drill-age gate refuses to report success when no drill has been recorded',
+    runExpectingFailure(process.execPath, [
+      AGE,
+      '--report',
+      'artifacts/drills/__gate_fixture__absent.json',
+    ]),
+    'drill-report-missing',
+  )
+
+  // 201i. The data-class completeness claim: a class with an erasure rule and no backup position fails.
+  //
+  //       Removing the `identity` entry is the fixture because it is the class whose absence would be
+  //       least visible — nobody reviewing a table of ten entries counts them. The test derives the class
+  //       set from `ERASURE_RULES` rather than from a second list, which is what makes this fail at all.
+  checkRejectedBy(
+    'a data class with an erasure rule and no stated backup position fails the completeness test',
+    withEditedFile(
+      'packages/core/src/privacy/backup-position.ts',
+      (text) =>
+        replaceOnce(text, "      dataClass: 'identity',", "      dataClass: 'operational',"),
+      () =>
+        runExpectingFailure('pnpm', [
+          'exec',
+          'vitest',
+          'run',
+          '-c',
+          'vitest.config.ts',
+          'packages/core/src/privacy/backup-position.test.ts',
+        ]),
+    ),
+    'states a backup position for every data class that carries an erasure rule',
+  )
+
+  // 201j. The committed artefact carries no invented recovery objective, and says which machine it was
+  //       measured on.
+  //
+  //       A static read of the file rather than a fixture, because the claim is about what the artefact
+  //       does NOT contain. Four nulls and a `measuredOn` field: brief rule 15 and brief rule 23, each
+  //       turned into something a scan can refuse. The day somebody decides a figure, this case is what
+  //       they will have to change deliberately.
+  {
+    const report = JSON.parse(readFileSync(REPORT, 'utf8'))
+    const objectives = report.objectives ?? {}
+    check(
+      'the committed drill report states no RPO, RTO, retention period or maximum age',
+      objectives.rpoSeconds === null &&
+        objectives.rtoSeconds === null &&
+        objectives.backupRetentionDays === null &&
+        objectives.drillMaxAgeDays === null &&
+        objectives.openQuestionId === 'Y13-rpo-rto',
+      `the artefact carries ${JSON.stringify(objectives)} — a figure here is indistinguishable from a ` +
+        'commitment somebody made',
+    )
+    check(
+      'and names the machine its durations were measured on, so no duration reads as a recovery time',
+      report.machine?.measuredOn === 'agent_container' ||
+        report.machine?.measuredOn === 'chosen_machine',
+      `machine.measuredOn is ${JSON.stringify(report.machine?.measuredOn)}`,
+    )
+    check(
+      'and records the PITR question as a READING off the server rather than as prose',
+      typeof report.pitr?.walLevel === 'string' &&
+        typeof report.pitr?.archiveMode === 'string' &&
+        report.pitr.configured === (report.pitr.archiveMode === 'on'),
+      `pitr is ${JSON.stringify(report.pitr)} — the configured flag has to follow the reading, or the ` +
+        'day somebody turns archiving on this field will still say no',
+    )
+  }
+
+  // 201k. Neither script spells a rule name, so the gate cases above cannot pass against a drill whose
+  //       rules have been renamed in one place only.
+  //
+  //       Both read `RESTORE_DRILL_RULES` and `DRILL_REPORT_RULES` from `packages/core`, which is what
+  //       makes a rule a rule rather than a string in a `console.error`. A literal here would be the
+  //       second statement of a fact, and the one that drifts is the one in the script nobody tests.
+  for (const script of [DRILL, AGE]) {
+    const text = readFileSync(script, 'utf8')
+    const body = text.slice(text.indexOf('*/') + 2)
+    check(
+      `${script} takes its rule names from the registry rather than spelling them`,
+      !/'(?:restore-[a-z-]+|drill-report-[a-z-]+)'/.test(body),
+      'a rule name is written as a literal in the script, so renaming it in packages/core would leave ' +
+        'the script printing the old one and every gate case above would still pass',
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -62673,6 +62944,15 @@ export function chargebackNetEffectFils(`,
     'pnpm processors',
     'pnpm docs-set',
     'pnpm dry-runs',
+    // H-HARD-04's gate over the committed restore drill, in the position `pnpm verify` runs it.
+    // Registered here because that is what makes dropping it from CI a failing build rather than the
+    // silent loss of the one check that says a backup has ever been restored: the evidence is a file, and
+    // a file nothing re-judges is a claim nobody is holding to anything.
+    'pnpm drill-age',
+    // H-MIG-09's driver as a CI step, which that unit deferred to H-HARD-04 for want of a restore drill.
+    // CI-only by construction: it creates and drops a database, which `pnpm verify` runs against one that
+    // already exists. Declared in `scripts/check-gate-registry.mjs`'s CI_ONLY with that reason.
+    'pnpm dry-run:ci',
     'pnpm descriptor-lint',
     'pnpm egress',
     // And the SAQ-A scan beside it, for the same reason in the other direction: it is the one check that

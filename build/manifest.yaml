@@ -21387,7 +21387,7 @@ units:
       and domain-invariant suites against the restored database, and emits a machine-readable report with
       measured RTO and data-loss window. A stale drill fails the build.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - F04
@@ -21424,11 +21424,51 @@ units:
     - every data class carrying an erasure rule also states its backup position, asserted by a completeness
       test over the data-class registry
     files:
+    - packages/core/src/ops/restore-drill.ts
+    - packages/core/src/ops/restore-drill.test.ts
+    - packages/core/src/privacy/backup-position.ts
+    - packages/core/src/privacy/backup-position.test.ts
+    - packages/fixtures/src/restore-drill.itest.ts
     - scripts/restore-drill.mjs
-    - artifacts/drills/restore-report.json
     - scripts/check-drill-age.mjs
-    - packages/db/src/data-classes.ts
+    - artifacts/drills/restore-report.json
     - docs/runbooks/restore.md
+    - docs/adr/0123-a-restore-drill-reads-rows-back-and-staleness-is-a-prefix-not-a-calendar.md
+    - scripts/test-gates.mjs
+    notes:
+    - 'NOTE: THE EPHEMERAL POSTGRES IS A DATABASE AND NOT A CONTAINER, and the full integration suite is
+      NOT run against the restored copy. There is no Docker daemon, no second host and no cloud backup
+      service here, so the drill creates a database beside the source, restores into it and drops it. The
+      suites it runs against the restored copy are packages/fixtures/src/restore-drill.itest.ts and pnpm
+      money-invariants, both recorded in the report with their exit status. pnpm test:integration whole
+      is NOT run: it drives the BUILT web application, so it would need a next build, which this unit''s
+      dispatch forbids for disk. What the drill proves is that the schema, the data, the grants and the
+      enforcement come back and that real statements can be issued against them as the application role;
+      what it does not prove is that the application serves from the restored copy.'
+    - 'NOTE: NO RPO, NO RTO AND NO RETENTION PERIOD, and the report carries all three as null with
+      drillMaxAgeDays beside them (Y13-rpo-rto). Nothing in this deployment takes a backup on a schedule,
+      so there is no interval for an RPO to be a function of; archive_mode and wal_level are READ OFF THE
+      SERVER into the report, which is how the report says PITR is not configured without asserting it.
+      The restore duration and the data-loss window ARE measured, and carry machine.measuredOn =
+      agent_container with the core count and load average, because a wall-clock figure from a four-core
+      box shared with other agents is a figure about the container (brief rule 23). Staleness is enforced
+      by a PREFIX rule over the migration set instead, which needs no figure; the calendar rule is
+      implemented and has a known-bad fixture but has no default. ADR 0123 records all of it.'
+    - 'NOTE: the declared file packages/db/src/data-classes.ts was written as
+      packages/core/src/privacy/backup-position.ts. DataClass is defined in
+      packages/core/src/privacy/rights-policy.ts and packages/db may never import packages/core
+      (ADR 0001, brief rule 4), so a registry keyed by that type cannot live in packages/db at all.'
+    - 'NOTE: no migration, no private SQLSTATE and no test port band. The drill and the gate read: the
+      drill writes only into a database it creates and drops, and neither raises a refusal from SQL. So
+      migrations 0169 and 0170, the bands ZY901-ZY910 and the port band { start: 24_500, width: 300 } are
+      RELEASED UNUSED for this unit, SCHEMA_VERSION is untouched and no migration-ledger paragraph was
+      added. One new pnpm verify step, pnpm drill-age, registered in gate case 29''s array and in
+      .github/workflows/ci.yml in the same commit.'
+    - 'NOTE: two defects the drill found in its OWN first two runs, both recorded in ADR 0123 decision 4
+      because they are the argument for the shape: it restored a database in which berelax_app held no
+      permissions at all (--no-owner --no-privileges, every row present, the money invariants failing
+      eight ways on permission denied), and it reported the seven reporting.* materialised views as data
+      loss (pg_dump emits a REFRESH, so they are as at the restore).'
   - id: H-HARD-07
     order: 179
     title: Incident register and the PDPL breach-notification clock
@@ -22505,14 +22545,23 @@ units:
     - packages/migration/src/report/diff.test.ts
     - docs/adr/0106-a-dry-run-is-a-fresh-database-and-three-recorded-runs-or-the-gate-is-decoration.md
     notes:
-    - 'NOTE: DEFERRED TO H-HARD-04 — the clean database is created by applying every migration from
-      nothing, not by restoring the restore-drill artefact, because scripts/restore-drill.mjs does not
-      exist (H-HARD-04 is todo) and the words "from the restore-drill artefact" cannot be satisfied by a
-      file that is not there. Running the driver as a CI step is deferred with it, for the same reason;
-      what CI runs is pnpm dry-runs, which reads the three committed runs and needs no database. The
-      restore drill''s own integration suite, named in the fourth acceptance line, is deferred to the
-      same unit; the domain-invariant half IS run — pnpm money-invariants against the post-import
-      database, with its verdict recorded on every run and checked by name.'
+    - 'NOTE: DEFERRAL SATISFIED by H-HARD-04 in two of three parts, and the third is settled rather than
+      deferred. (1) Running the driver as a CI step: DONE — pnpm dry-run:ci is a step in
+      .github/workflows/ci.yml, registered in gate case 29 and declared CI-only, so the driver now runs
+      against a database created from nothing inside the service container, which is this unit''s first
+      acceptance line. (2) The restore drill''s own integration suite, named in the fourth acceptance
+      line: DONE — packages/fixtures/src/restore-drill.itest.ts exists and is a second post-import check
+      in the driver beside pnpm money-invariants, so a post-import database whose triggers had been
+      disabled now fails the run. The three committed runs predate the suite and were NOT re-recorded:
+      they are the record of when those runs happened, the gate requires every recorded post-import check
+      to have passed rather than a named set, and re-running them would replace evidence of when they
+      happened with evidence of when they were re-run. (3) "The clean database is created by restoring
+      the restore-drill artefact": NOT DONE, and now settled rather than pending. The restore-drill
+      artefact is a REPORT and not a backup: no dump is committed to this repository and none may be — a
+      dump of this database is synthetic fixture data today and the whole customer list the day after
+      go-live. The clean database is therefore created by applying every migration from nothing, which is
+      what ADR 0106 already says a dry run means, and the restore PATH the acceptance line was reaching
+      for is proved separately and continuously by pnpm drill and pnpm drill-age (ADR 0123).'
     - 'NOTE: BLOCKED ON OWNER DATA — three importers and the opening trial balance are NOT rehearsed, and
       every recorded run states which and why: packages (Y8-packages, the owner''s sign-off is a human act
       with four values that may not be defaulted), appointments (Y8-visits), staff (Y8-staff, the leave

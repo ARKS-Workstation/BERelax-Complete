@@ -250,7 +250,23 @@ try {
     execution and two runs are compared on the report.
   */
   const postImportChecks = []
-  for (const check of [{ name: 'money invariant census', command: 'pnpm money-invariants' }]) {
+  for (const check of [
+    { name: 'money invariant census', command: 'pnpm money-invariants' },
+    /*
+      H-HARD-04's restore-drill suite, against the post-import database. This unit's fourth acceptance
+      line asks for it and its NOTE deferred it to that unit for want of a suite to run; there is one
+      now, so it runs here. It is the half a reconciliation report cannot make: the report counts rows,
+      and this asserts that the schema's ENFORCEMENT is intact — the append-only trigger on `invoice`
+      still raises ZI003, the audit rules still swallow an UPDATE, `btree_gist` is present, and the
+      constraint and trigger counts are above their floors. An import that reconciled perfectly into a
+      database whose triggers had been disabled would pass the report and fail here.
+    */
+    {
+      name: 'restore drill suite',
+      command:
+        'pnpm exec vitest run -c vitest.integration.config.ts packages/fixtures/src/restore-drill.itest.ts',
+    },
+  ]) {
     let ok = true
     try {
       execFileSync('pnpm', check.command.split(' ').slice(1), {

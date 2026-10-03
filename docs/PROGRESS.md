@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**196 / 211 units complete.**
+**197 / 211 units complete.**
 
 ## Next up
 
@@ -196,7 +196,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 175 | `H-HARD-01` | Security headers, CSP and public-endpoint rate limiting | `A-FIRST-01`, `A-FIRST-02`, `A-FIRST-03`, `A-FIRST-04`, `A-FIRST-05`, `A-FIRST-06`, `A-FIRST-07`, `A-FIRST-08`, `A-FIRST-09`, `A-FIRST-10`, `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `H05`, `W-SITE-01`, `W-SITE-02`, `W-SITE-03`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07`, `W-SITE-08`, `W-SITE-09`, `W-SITE-10`, `W-SITE-11` | — | — |
 | [x] | 176 | `H-HARD-02` | Dependency, secret, licence and container scanning in CI | `F02`, `H05` | — | — |
 | [x] | 177 | `H-HARD-03` | KEK rotation for clinical DEKs, and secret rotation | `F08`, `H-HARD-02` | — | Y5-residency |
-| [ ] | 178 | `H-HARD-04` | Backup, PITR and the automated restore drill | `F04`, `M-VAT-01`, `M-VAT-02`, `M-VAT-03`, `M-VAT-04`, `M-VAT-05`, `M-VAT-06`, `M-VAT-07`, `M-VAT-08`, `M-VAT-09`, `M-VAT-10`, `M-VAT-11`, `M-VAT-12`, `M-VAT-13`, `R-REP-01`, `R-REP-02`, `R-REP-03`, `R-REP-04`, `R-REP-05`, `R-REP-06`, `R-REP-07`, `R-REP-08` | — | — |
+| [x] | 178 | `H-HARD-04` | Backup, PITR and the automated restore drill | `F04`, `M-VAT-01`, `M-VAT-02`, `M-VAT-03`, `M-VAT-04`, `M-VAT-05`, `M-VAT-06`, `M-VAT-07`, `M-VAT-08`, `M-VAT-09`, `M-VAT-10`, `M-VAT-11`, `M-VAT-12`, `M-VAT-13`, `R-REP-01`, `R-REP-02`, `R-REP-03`, `R-REP-04`, `R-REP-05`, `R-REP-06`, `R-REP-07`, `R-REP-08` | — | — |
 | [x] | 179 | `H-HARD-07` | Incident register and the PDPL breach-notification clock | `C-CRM-01`, `C-CRM-02`, `C-CRM-03`, `C-CRM-04`, `C-CRM-05`, `C-CRM-06`, `C-CRM-07`, `C-CRM-08`, `C-CRM-09`, `C-CRM-10`, `F06`, `F09`, `M-VAT-01`, `M-VAT-02`, `M-VAT-03`, `M-VAT-04`, `M-VAT-05`, `M-VAT-06`, `M-VAT-07`, `M-VAT-08`, `M-VAT-09`, `M-VAT-10`, `M-VAT-11`, `M-VAT-12`, `M-VAT-13` | — | Y1-entity |
 | [ ] | 180 | `H-HARD-08` | Offline tolerance, honest failure and the paper fallback | `B-UI-01`, `B-UI-02`, `B-UI-03`, `B-UI-04`, `B-UI-05`, `H-HARD-01`, `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13` | — | — |
 | [ ] | 181 | `H-HARD-10` | Pen-test intake, findings register and the remediation gate | `H-HARD-01`, `H-HARD-02` | — | Y13-pentest |
