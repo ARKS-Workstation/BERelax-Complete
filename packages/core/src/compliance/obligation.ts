@@ -50,7 +50,18 @@ import { type Instant, type LocalDate, localDate, type TimeZone } from '../time.
  */
 
 /** What kind of duty an obligation is. Mirrors the `obligation_class` enum of 0052. */
-export const OBLIGATION_CLASSES = ['licence', 'credential', 'hygiene', 'tax', 'labour'] as const
+export const OBLIGATION_CLASSES = [
+  'licence',
+  'credential',
+  'hygiene',
+  'tax',
+  'labour',
+  // 0142 (H-HARD-07). docs/04 section 8 is a section of its own, and a PDPL breach notification filed
+  // under `licence` would sit in the calendar beside the trade licence renewal. It carries no blocking
+  // consequence: 0052 ties each effect to the class that may hold it, and inventing a third is a
+  // migration with an argument rather than a row.
+  'privacy',
+] as const
 export type ObligationClass = (typeof OBLIGATION_CLASSES)[number]
 
 /**

@@ -421,6 +421,26 @@ export {
   GRATUITY_SETTLEMENT_PAYABLE_ACCOUNT_SETTING_KEY,
 } from './gratuity-accounts.ts'
 export {
+  BREACH_CLOCK_OPEN_QUESTION_ID,
+  BREACH_NOTIFICATION_HOURS_SETTING_KEY,
+  BREACH_NOTIFICATION_OBLIGATION_KEY,
+  BREACH_SUBJECT_NOTIFICATION_OBLIGATION_KEY,
+  BREACH_THRESHOLD_OPEN_QUESTION_ID,
+  FIELD_AUDIENCES,
+  type FieldAudience,
+  INCIDENT_CLASSES,
+  INCIDENT_FIELDS,
+  INCIDENT_NOTIFIED_PARTIES,
+  INCIDENT_STRUCTURAL_COLUMNS,
+  INCIDENT_TABLES,
+  type IncidentClass,
+  type IncidentField,
+  type IncidentNotifiedParty,
+  type IncidentTable,
+  incidentFieldsFor,
+  PERSONAL_DATA_BREACH,
+} from './incident-register.ts'
+export {
   addressLines,
   addressOneLine,
   directionsLinkFor,

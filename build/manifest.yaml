@@ -20971,7 +20971,7 @@ units:
       for, wired to the compliance calendar so a personal-data-breach incident generates dated notification
       obligations from the recorded awareness timestamp.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - C-CRM-01
@@ -21014,11 +21014,42 @@ units:
       resolves per data class rather than deleting, asserted by the policy-engine test
     - the 72-hour deadline is a provisional:true setting and appears in the Unconfirmed Assumptions query
       result
+    - 'NOTE: the ADMIN SCREEN is NOT built. apps/web/app/(admin)/compliance/incidents/page.tsx is in this
+      entry''s files list and in none of its five acceptance lines, and a half-built screen would be worse
+      than none: apps/web/src/routes/registry.ts is in exact bijection with the filesystem and requires
+      every document in both locales, so an admin surface is a route.ts plus a render.ts plus an Arabic
+      counterpart plus a place in the screenshot and axe matrices. The register, the clock, the duties, the
+      refusals and the checks are all built and machine-checked. H-HARD-06 owns the runbook that tells
+      somebody what to do with a filed breach and is the natural owner of the screen that shows the
+      register; the writer it needs is packages/db/src/repositories/incident.ts (fileIncident,
+      addIncidentAddendum, recordIncidentNotification, incidentDuties).'
+    - 'NOTE: acceptance line 4 — the erasure conflict resolved per data class rather than deleted — is
+      C-CRM-10''s mechanism and was already built and asserted at length in packages/fixtures/src/rights.itest.ts
+      and packages/core/src/privacy/rights-policy.test.ts (ADR 0034). Restating it would be a second
+      statement of one fact. What this unit adds is the dependency made machine-checked: incident.itest.ts
+      asserts that every retain_statutory rule carries both an obligation column and the sentence a data
+      subject is given, and gate case 176l removes one of those and requires THIS unit''s suite to fail.'
+    - 'NOTE: the 72-hour period is the only figure and it is provisional, not confirmed. No statutory
+      period is a constant, no authority is named (obligation.authority is NULL on both duties, and
+      incident_notification.party records the CATEGORY), and no contact exists anywhere. Whether a breach
+      is notifiable at all is decided NOWHERE: both duties are always generated and dated, and closing one
+      is an act with a recorded reason. Y1-breach-clock and Y1-breach-threshold in docs/OPEN-QUESTIONS.md.'
+    - 'NOTE: two shared-schema changes this unit had to make, both with every literal moved in the same
+      commit. obligation_class gained privacy (two PDPL duties under licence would sit beside the trade
+      licence renewal, and the class is what obligation_blocking_effect_matches_class reads) — the pgEnum
+      mirror, the services/obligation.ts union, OBLIGATION_CLASSES and its pinned test all moved.
+      obligation_instance gained incident_id, inside obligation_instance_one_per_due_date: without it two
+      breaches whose deadlines land on the same civil date collide and the second filing silently reuses
+      the first''s duty, so completing one notification marks the other done. NULLS NOT DISTINCT is kept,
+      so every cadence-generated instance behaves exactly as before.'
     files:
-    - packages/db/migrations/00XX-incident.sql
-    - packages/core/src/compliance/breach-clock.ts
-    - apps/web/app/(admin)/compliance/incidents/page.tsx
+    - packages/db/migrations/0142_incident.sql
+    - packages/db/src/schema/incident.ts
+    - packages/db/src/repositories/incident.ts
     - packages/db/src/settings/pdpl.ts
+    - packages/core/src/compliance/breach-clock.ts
+    - packages/shared/src/incident-register.ts
+    - packages/fixtures/src/incident.itest.ts
   - id: H-HARD-08
     order: 180
     title: Offline tolerance, honest failure and the paper fallback

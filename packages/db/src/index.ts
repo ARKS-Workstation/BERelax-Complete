@@ -928,6 +928,19 @@ export {
   saveHoursOverride,
 } from './repositories/holiday-calendar.ts'
 export {
+  type AddendumArgs,
+  addIncidentAddendum,
+  type BreachFields,
+  type DutyToDate,
+  type FiledIncident,
+  type FileIncidentArgs,
+  fileIncident,
+  type IncidentDutyRow,
+  incidentDuties,
+  type NotificationArgs,
+  recordIncidentNotification,
+} from './repositories/incident.ts'
+export {
   type CustomerSnapshotInput,
   INVOICE_DOCUMENT_KINDS,
   INVOICE_SQLSTATE,
@@ -2129,6 +2142,10 @@ export {
   readDepositPolicy,
   type StoredDepositPolicy,
 } from './settings/payments.ts'
+export {
+  BREACH_NOTIFICATION_HOURS_SETTING_KEY,
+  readBreachNotificationHours,
+} from './settings/pdpl.ts'
 export {
   REMINDER_OFFSETS_SETTING_KEY,
   readReminderOffsets,
@@ -4636,4 +4653,69 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // ZY341-ZY342 of the band ZY341-ZY350 are used; ZY343 through ZY350 are released UNUSED and deliberately
 // unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
 //
-export const SCHEMA_VERSION = 128 as const
+// 142 is 0142_incident.sql (H-HARD-07) — the incident register, and a statutory clock that starts at an
+// event rather than at the paperwork.
+//
+// docs/04 §9 asks for an incident register and docs/04 §8 asks for a PDPL response while marking the
+// whole regulation [UNVERIFIED], including — in so many words — the breach notification threshold and
+// deadline. This migration is the register and the clock, and the three decisions in it are all about
+// instants.
+//
+// **`discovered_at` is the clock and `filed_at` is not.** A breach is noticed on a Friday evening and
+// written down on Monday morning. If the deadline came from the filing, the statutory clock would
+// restart every time somebody got round to the paperwork, and the later the record the more time the
+// business would appear to have. They are separate columns, `incident_filed_after_discovery` orders
+// them, and the gap is a visible fact rather than an erased one. The deadline is then computed in the
+// CIVIL zone and never through `resolveTradingDate`: trading runs 11:00–02:00, so the trading date puts
+// 01:30 on the previous day, and `rights-policy.ts` already states the principle — a statutory deadline
+// does not move with the salon's trading hours. Using the trading date would hand the business an extra
+// day roughly one night in three.
+//
+// **A filed incident is immutable (ZY521) and `incident_addendum` is the only way to add to it
+// (ZY522).** The obvious design is an editable row, because almost everything about an incident is
+// learned afterwards, and it fails in the one situation the register exists for: an insurer or a
+// regulator asks what was known WHEN, and an edited row reads identically whether a figure was known at
+// filing or written in last week. `incident_notification` is append-only too (ZY523) — when somebody was
+// told is the fact the whole clock rests on — and ZY525 refuses a notification dated before the
+// discovery it answers, which is either a mistyped instant or a backdated record.
+//
+// **ZY524 is the one that carries the unit, and it is DEFERRED.** A `personal_data_breach` row that
+// leaves its transaction without both notification duties dated is refused at COMMIT, so "filing a
+// breach creates the duties" is a property of the schema rather than of whichever writer remembered.
+// Deferred because the `obligation_instance` rows cannot exist before the incident they reference, so an
+// immediate check would refuse every correct filing.
+//
+// The duties are rows in the calendar 0052 already built rather than a second calendar: it reminds,
+// escalates, shows overdue and refuses a completion with no actor. Two things had to move for that.
+// `obligation_class` gained `privacy`, because two PDPL duties filed under `licence` would sit beside
+// the trade licence renewal where nobody would look for them — it carries `blocking_effect = 'none'`,
+// since blocking publishing on an overdue breach notification would be this build inventing a
+// consequence 0052 deliberately ties to two classes. And `obligation_instance` gained `incident_id`,
+// which joined `obligation_instance_one_per_due_date`: without it, two breaches whose deadlines land on
+// the same civil date collide on that constraint and the second filing silently reuses the first's duty,
+// so completing one notification would mark the other done. NULLS NOT DISTINCT is kept, so every
+// cadence-generated instance behaves exactly as before and the generator's `on conflict on constraint`
+// still names a constraint that exists.
+//
+// **Nothing here names an authority, a contact or a statutory period.** `obligation.authority` is NULL on
+// both definitions, which is that column's own stated purpose — a plausible one reads as configured
+// (brief rule 15) — and both carry `is_unverified` with an open question. The period is the
+// `provisional` setting `pdpl.breach_notification_hours`, so it appears on the Unconfirmed Assumptions
+// panel and is corrected by one audited settings change rather than by a release. And the THRESHOLD —
+// whether a given breach is notifiable at all — is deliberately decided nowhere: it is a judgement about
+// risk to the people affected, every breach filing generates the duty, and closing it is an act with a
+// recorded reason. A build that applied a threshold of its own would be deciding not to notify, silently,
+// with an absence for evidence.
+//
+// One defect worth recording, because it is a general trap: `incident_personal_data_categories_nonempty`
+// first read `array_length(personal_data_categories, 1) >= 1`, and `array_length` of an EMPTY array is
+// NULL rather than 0 — so the comparison was NULL, the conjunction was NULL, and a CHECK evaluating to
+// NULL PASSES. An empty category list went straight through and was caught at COMMIT by ZY524 instead,
+// naming the wrong rule entirely. It is `coalesce(..., 0) >= 1` now. The blank-element half goes through
+// `text_array_has_blank`, an IMMUTABLE function, because a CHECK may not contain a subquery and both of
+// the obvious spellings are one.
+//
+// ZY521-ZY525 of the band ZY521-ZY530 are used; ZY526 through ZY530 are released UNUSED and deliberately
+// unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
+//
+export const SCHEMA_VERSION = 142 as const

@@ -2189,6 +2189,54 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['refuse_delivered_reply_change'],
     translators: ['packages/db/src/repositories/reviews.ts'],
   },
+  // ZY521-ZY525 are H-HARD-07's, of the band ZY521-ZY530; ZY526 through ZY530 are left free and
+  // deliberately absent, because an entry for a code no migration raises is direction 3.
+  //
+  // Three of the five are one rule stated on three tables, and they are three codes rather than one for
+  // ADR 0043's reason: every translator matches on the code ALONE, so one code shared by the register,
+  // its addenda and its notifications would make a probe asserting "an addendum cannot be rewritten"
+  // pass when the statement bounced off the incident table instead.
+  //
+  // ZY524 is the one that carries the unit. A personal-data-breach row is a statutory clock that has
+  // started, and a filing whose duties were dated in a second transaction would leave a breach on file
+  // with nothing counting — a state nobody notices, because the register looks complete and the
+  // calendar simply has no entry. It is DEFERRED to commit, since the obligation_instance rows cannot
+  // exist before the incident they reference.
+  {
+    code: 'ZY521',
+    rule: 'A filed incident may not be edited or deleted; an addendum is the only way to add to it.',
+    migration: '0142',
+    raisedBy: ['refuse_incident_change'],
+    translators: [],
+  },
+  {
+    code: 'ZY522',
+    rule: 'An addendum to a filed incident may not be edited or deleted.',
+    migration: '0142',
+    raisedBy: ['refuse_incident_addendum_change'],
+    translators: [],
+  },
+  {
+    code: 'ZY523',
+    rule: 'A recorded incident notification may not be edited or deleted.',
+    migration: '0142',
+    raisedBy: ['refuse_incident_notification_change'],
+    translators: [],
+  },
+  {
+    code: 'ZY524',
+    rule: 'A personal-data-breach incident must leave its transaction with both notification duties dated.',
+    migration: '0142',
+    raisedBy: ['assert_breach_has_notification_duties'],
+    translators: [],
+  },
+  {
+    code: 'ZY525',
+    rule: 'An incident notification may not be dated before the discovery it answers.',
+    migration: '0142',
+    raisedBy: ['assert_notification_follows_discovery'],
+    translators: [],
+  },
   {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',

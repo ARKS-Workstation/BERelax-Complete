@@ -52652,6 +52652,309 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   )
 }
 
+// 176a-176z. (H-HARD-07) The incident register and the breach clock: every refusal shown to be able to
+//            stop firing, the clock shown to come from the DISCOVERY, and the field list shown to be
+//            held to the schema in both directions.
+//
+//            The unit's claim is that a statutory clock starts at an event, so the event is a row with an
+//            instant and the row cannot be edited afterwards. Four of those words are enforced by the
+//            database — ZY521 to ZY525 — and a trigger that stopped firing would leave a register that
+//            reads exactly as it does now, with every test still green, because every one of those tests
+//            asserts a REFUSAL. So each case below removes one refusal and requires the suite to notice.
+//
+//            The expensive ones go last. 176a to 176e each run `pnpm alerts`-sized work; 176f onwards run
+//            the integration suite, which needs a database.
+{
+  const INCIDENT_SQL = 'packages/db/migrations/0142_incident.sql'
+  const INCIDENT_FIELDS_TS = 'packages/shared/src/incident-register.ts'
+  const CLOCK_TS = 'packages/core/src/compliance/breach-clock.ts'
+  const INCIDENT_ITEST = 'packages/fixtures/src/incident.itest.ts'
+  const CLOCK_TEST = 'packages/core/src/compliance/breach-clock.test.ts'
+  const incidentUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const incidentIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // The control for the whole block. Every case asserts that a BROKEN tree is caught, and that says
+  // nothing unless the committed tree passes.
+  {
+    const clean = run('pnpm', incidentUnit(CLOCK_TEST))
+    check(
+      'incident: the committed clock suite passes, which is the control for 176a to 176e',
+      !clean.failed,
+      `the clock suite does not pass on the committed tree:\n${clean.output}`,
+    )
+  }
+
+  /*
+    176a. The clock computed from the FILING instead of the discovery.
+
+    This is the defect the whole unit is shaped against, and it is the one that would be invisible: the
+    register would be complete, the calendar entry would exist, and the deadline on it would simply be
+    later than the law allows — by however long the paperwork took. The mutation is the plausible wrong
+    implementation, not a syntax error: `breachNotificationDeadline` ignores its argument and uses the
+    moment it was called.
+  */
+  checkRejectedBy(
+    'incident: 176a a clock that starts when the paperwork is done is caught',
+    withEditedFile(
+      CLOCK_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const discovered = Date.parse(input.discoveredAtIso)',
+          '  const discovered = Date.now()',
+        ),
+      () => runExpectingFailure('pnpm', incidentUnit(CLOCK_TEST)),
+    ),
+    'breachNotificationDeadline',
+  )
+
+  /*
+    176b. The deadline dated on the TRADING date rather than the civil date.
+
+    Everything else dated in this build goes through `resolveTradingDate`, which is why this is the
+    mistake somebody would make: trading runs 11:00-02:00, so the trading date puts 01:30 on the previous
+    day, and a statutory period dated that way hands the business an extra day roughly one night in
+    three. The mutation is a zone offset of zero, which is what "use UTC and stop thinking about it"
+    looks like in this module.
+  */
+  checkRejectedBy(
+    'incident: 176b a deadline dated outside the business civil zone is caught',
+    withEditedFile(
+      CLOCK_TS,
+      (text) => replaceOnce(text, '  utcOffsetMinutes: 240,', '  utcOffsetMinutes: 0,'),
+      () => runExpectingFailure('pnpm', incidentUnit(CLOCK_TEST)),
+    ),
+    'in the business civil zone',
+  )
+
+  /*
+    176c. A comparison done on DATES rather than on instants.
+
+    A notification at 23:00 on the due date is inside a 72-hour window that expired at 09:00 that morning
+    only if the comparison is done on dates, and that is the answer a regulator would not accept. The
+    mutation truncates both sides to a day, which is the version that passes a casual reading.
+  */
+  checkRejectedBy(
+    'incident: 176c a timeliness answer computed on dates rather than instants is caught',
+    withEditedFile(
+      CLOCK_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  return notified <= deadline ? ',
+          '  return args.notifiedAtIso.slice(0, 10) <= args.deadlineAtIso.slice(0, 10) ? ',
+        ),
+      () => runExpectingFailure('pnpm', incidentUnit(CLOCK_TEST)),
+    ),
+    'INSTANTS',
+  )
+
+  /*
+    176d. A period that defaults instead of refusing.
+
+    A default here would be an invented statutory period in the one place nobody looks — and the
+    plausible spelling is exactly this: `?? 72`. The reader in `packages/db` throws for the same reason
+    and is covered by 176k.
+  */
+  checkRejectedBy(
+    'incident: 176d a clock that defaults an unreadable period rather than refusing is caught',
+    withEditedFile(
+      CLOCK_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (!Number.isInteger(input.periodHours) || input.periodHours < 1) {',
+          '  if (false) {',
+        ),
+      () => runExpectingFailure('pnpm', incidentUnit(CLOCK_TEST)),
+    ),
+    'whole number of hours',
+  )
+
+  /*
+    176e. A declared field that no column answers.
+
+    The acceptance line is that the schema's columns match the declared insurer and regulator field list
+    EXACTLY. This breaks the list rather than the schema, which is the direction that would otherwise be
+    satisfied by a test checking only that every column is declared — a field an insurer asks for with no
+    column is a question somebody answers in an email at the worst possible moment.
+  */
+  checkRejectedBy(
+    'incident: 176e a declared field with no column is caught by the completeness test',
+    withEditedFile(
+      INCIDENT_FIELDS_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "    column: 'cross_border_transfer',",
+          "    column: 'cross_border_transfer_basis',",
+        ),
+      () => runExpectingFailure('pnpm', incidentIntegration(INCIDENT_ITEST)),
+    ),
+    'declared vs actual',
+  )
+
+  /*
+    176f. A column no reader asks for.
+
+    The other direction, and it is broken from the LIST side on purpose: removing a column would need a
+    migration, and what this rule is really about is a schema growing a field the declared list does not
+    account for. Dropping the declaration is the same state the gate must refuse.
+  */
+  checkRejectedBy(
+    'incident: 176f a column the field list does not declare is caught',
+    withEditedFile(
+      INCIDENT_FIELDS_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  {\n    column: 'claim_anticipated',",
+          "  {\n    column: 'claim_anticipated_removed_for_the_fixture',",
+        ),
+      () => runExpectingFailure('pnpm', incidentIntegration(INCIDENT_ITEST)),
+    ),
+    'declared vs actual',
+  )
+
+  /*
+    176g. The structural-column exclusion growing to cover an awkward field.
+
+    This is the hole that makes a both-directions test one-directional, and it is cheap to open: declare
+    the column structural and both comparisons pass. So the exclusion list is itself asserted to be
+    exactly the keys and creation instants, and this case is what proves that assertion is reachable.
+  */
+  checkRejectedBy(
+    'incident: 176g a structural-column exclusion that grew to hide a field is caught',
+    withEditedFile(
+      INCIDENT_FIELDS_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  'breach_fields_present',\n]",
+          "  'breach_fields_present',\n  'estimated_loss_fils',\n]",
+        ),
+      () => runExpectingFailure('pnpm', incidentIntegration(INCIDENT_ITEST)),
+    ),
+    'declared vs actual',
+  )
+
+  /*
+    176h to 176j. The three append-only refusals, each shown to be able to stop firing.
+
+    One function and two triggers per table, which is the shape 0111 argued for: the half-written pair —
+    one trigger copied for the other event with the word not changed — is where this defect always hides,
+    and the table then documents a guarantee it half keeps. Each case removes the UPDATE trigger, which
+    is the half a reader is least likely to miss, and requires the suite to name the code.
+
+    `withEditedFile` edits the MIGRATION, which is the authority; the probe re-reads it only if the
+    database is rebuilt, so these three cases break the SQL text that `pnpm db:conventions` reads and
+    that the integration suite's refusal assertions depend on. The conventions gate is the faster of the
+    two and is what the first two use; 176j drives the suite, because a missing DELETE trigger on a table
+    whose comment claims both is exactly what the conventions rule is about.
+  */
+  checkRejectedBy(
+    'incident: 176h an incident table missing one of its two append-only triggers is caught',
+    withEditedFile(
+      INCIDENT_SQL,
+      (text) =>
+        replaceOnce(
+          text,
+          'create trigger incident_no_update before update on incident\n  for each row execute function refuse_incident_change();\n',
+          '',
+        ),
+      () => runExpectingFailure('pnpm', ['db:conventions']),
+    ),
+    'append-only-table-must-refuse-update-and-delete',
+  )
+
+  checkRejectedBy(
+    'incident: 176i an addendum table missing one of its two append-only triggers is caught',
+    withEditedFile(
+      INCIDENT_SQL,
+      (text) =>
+        replaceOnce(
+          text,
+          'create trigger incident_addendum_no_delete before delete on incident_addendum\n  for each row execute function refuse_incident_addendum_change();\n',
+          '',
+        ),
+      () => runExpectingFailure('pnpm', ['db:conventions']),
+    ),
+    'append-only-table-must-refuse-update-and-delete',
+  )
+
+  checkRejectedBy(
+    'incident: 176j a notification table missing one of its two append-only triggers is caught',
+    withEditedFile(
+      INCIDENT_SQL,
+      (text) =>
+        replaceOnce(
+          text,
+          'create trigger incident_notification_no_update before update on incident_notification\n  for each row execute function refuse_incident_notification_change();\n',
+          '',
+        ),
+      () => runExpectingFailure('pnpm', ['db:conventions']),
+    ),
+    'append-only-table-must-refuse-update-and-delete',
+  )
+
+  /*
+    176k. The period reader falling back instead of refusing.
+
+    `readBreachNotificationHours` throws on a stored value it cannot turn into whole hours, and the
+    tempting alternative is `?? 72` — which would restore the build's guess over a figure somebody had
+    deliberately changed, silently, on a statutory deadline. The integration suite's provisional-setting
+    cases are what notice, because a fallback makes the declared bound unenforceable.
+  */
+  checkRejectedBy(
+    'incident: 176k a breach-period reader that falls back to the build guess is caught',
+    withEditedFile(
+      'packages/db/src/settings/pdpl.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (typeof raw !== ',
+          '  if (typeof raw === "number") return raw\n  if (typeof raw !== ',
+        ),
+      () => runExpectingFailure('pnpm', incidentUnit('packages/db/src/settings/pdpl.test.ts')),
+    ),
+    'BreachPeriodUnreadable',
+  )
+
+  /*
+    176l. The erasure conflict, which is acceptance line 4 and is C-CRM-10's mechanism.
+
+    This unit does not restate it — that would be a second statement of the same fact — so what it
+    depends on is that the policy engine's answer for a financial record is a RETENTION with a reason and
+    never a delete. The mutation turns one `retain_statutory` rule into a delete, which is the change a
+    future unit would make to "finish" an erasure, and requires the rights suite to refuse it by name.
+  */
+  checkRejectedBy(
+    "incident: 176l a statutory retention that stops carrying the conflict it records is caught by THIS unit's suite",
+    withEditedFile(
+      'packages/core/src/privacy/rights-policy.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          // The key as well as the two fields, because `replaceOnce` found the pair four times and
+          // refused — which is the guard doing its job: `String.replace` would have taken the first,
+          // and a case that edits the wrong construct reports PASS about a file that still contains
+          // what it meant to remove.
+          "    key: 'public.invoice.notes',\n    dataClass: 'financial',\n    action: 'retain_statutory',\n    obligationColumn: 'financial_retention_years',",
+          "    key: 'public.invoice.notes',\n    dataClass: 'financial',\n    action: 'retain_statutory',\n",
+        ),
+      () => runExpectingFailure('pnpm', incidentIntegration(INCIDENT_ITEST)),
+    ),
+    'erasure rule registry is not well formed',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

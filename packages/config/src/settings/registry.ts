@@ -3,6 +3,8 @@ import {
   ALERT_THRESHOLDS_OPEN_QUESTION_ID,
   AppError,
   AUTH_FAILURE_THRESHOLD_SETTING_KEY,
+  BREACH_CLOCK_OPEN_QUESTION_ID,
+  BREACH_NOTIFICATION_HOURS_SETTING_KEY,
   CLINICAL_LINT_QUESTION_COPY_SETTING_KEY,
   CLINICAL_REAL_INTAKE_SETTING_KEY,
   CLINICAL_STEP_UP_WINDOW_MINUTES,
@@ -1679,6 +1681,44 @@ export const SETTINGS = [
         'Five CHOSEN, not measured. There is no rate-limiting policy on file yet — H-HARD-01 owns the ' +
         'public-endpoint limits and is not built — so this figure is a judgement about how many mistyped ' +
         'passwords are ordinary, and it is not derived from any observed sign-in behaviour.',
+    },
+  }),
+  // ---------------------------------------------------------------------------------------------
+  // H-HARD-07 — the one PDPL figure this build holds.
+  //
+  // docs/04 section 8 marks Federal Decree-Law 45 of 2021 and its executive regulations [UNVERIFIED]
+  // and says in so many words to confirm the breach notification threshold and deadline. 72 hours is
+  // therefore the build's reading of a secondary source, which is exactly what `provisional` is for: it
+  // puts the figure on the Unconfirmed Assumptions panel instead of letting it read, wherever it
+  // appears, like something somebody looked up.
+  //
+  // The THRESHOLD — whether a given breach is notifiable at all — is deliberately not a setting and not
+  // anything else in this build. It is a judgement about risk to the people affected, and a build that
+  // held a rule for it would be deciding not to notify, silently, with an absence for evidence. Every
+  // breach filing generates the duty and dates it; closing it is an act with a recorded reason.
+  define({
+    key: BREACH_NOTIFICATION_HOURS_SETTING_KEY,
+    tier: 'compliance_locked',
+    // One hour to thirty days. The floor exists because a deadline at or before the discovery reads on
+    // the calendar as a duty that was already overdue when it was created; the ceiling is low because a
+    // period longer than a month is not a breach notification regime, and a bound is what keeps a
+    // relaxation a judgement rather than a silencing.
+    schema: z.number().int().min(1).max(720),
+    defaultValue: 72,
+    label: 'Hours to notify a personal-data breach',
+    help: 'How long after DISCOVERING a personal-data breach the supervisory authority must be told. The deadline on every breach already filed was computed from the figure in force at the time, so changing this does not move it.',
+    // Owner only, and compliance-locked: lengthening this moves a statutory deadline, which is not an
+    // operational preference. The F07 matrix locks access and customer-safety policy to the owner.
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: BREACH_CLOCK_OPEN_QUESTION_ID,
+      note:
+        "72 hours is the build's reading of a secondary source and is NOT confirmed. docs/04 section 8 " +
+        'marks the regulation and its executive regulations UNVERIFIED and names the breach notification ' +
+        'deadline as one of the things to confirm. Which authority it is owed to is also not on file, ' +
+        'which is why obligation.authority is null on both breach duties (Y1-entity).',
     },
   }),
 ] as const
