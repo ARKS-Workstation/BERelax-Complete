@@ -30,15 +30,19 @@ import {
  */
 
 describe('the event name list is pinned', () => {
-  it('holds exactly these five names, in this order, at this version', () => {
+  it('holds exactly these six names, in this order, at this version', () => {
     expect([...ANALYTICS_EVENT_NAMES]).toEqual([
       'page_view',
       'service_viewed',
       'price_viewed',
       'cta_click',
       'whatsapp_ref_shown',
+      // A-MEAS-04's sixth, which is why the version below is 2: raw events are stamped with it and the
+      // rollups are kept for ever, so a rollup built before this event existed has to be tellable from
+      // one built after.
+      'web_vitals',
     ])
-    expect(ANALYTICS_TAXONOMY_VERSION).toBe(1)
+    expect(ANALYTICS_TAXONOMY_VERSION).toBe(2)
   })
 
   it('gives every name a schema, and holds no schema for a name the list does not have', () => {

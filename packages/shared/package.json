@@ -5,7 +5,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./analytics/collect-limits": "./src/analytics/collect-limits.ts"
+    "./analytics/collect-limits": "./src/analytics/collect-limits.ts",
+    "./analytics/consent-signal": "./src/analytics/consent-signal.ts",
+    "./analytics/dimensions": "./src/analytics/dimensions.ts"
   },
   "scripts": {
     "typecheck": "tsc --build"

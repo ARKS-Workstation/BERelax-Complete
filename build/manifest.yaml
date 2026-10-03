@@ -13276,7 +13276,12 @@ units:
       bot-flagged sessions from the funnel is deferred to A-FIRST-09 — DEFERRAL SATISFIED: its
       funnelCountRows excludes bot sessions by default and includes them behind an explicit parameter,
       and the steps are MATERIALISED either way so the verdict stays recoverable. The bot-filtered share on the analytics page
-      is deferred to A-FIRST-10, and the same figure on the operations dashboard is deferred to R-REP-07. Each
+      is deferred to A-FIRST-10 — DEFERRAL SATISFIED: the data-quality strip on /analytics renders it from
+      analytics.daily_traffic.bot_sessions over sessions, with both integers visible and `no data` rather
+      than 0% for a date with no sessions, and every other panel on that page excludes the flagged sessions
+      through the one predicate funnelCountRows and the session reads already use. It re-derives nothing:
+      no crawler name and no BOT_KINDS member appears anywhere under app/(admin)/analytics —
+      and the same figure on the operations dashboard is deferred to R-REP-07. Each
       must call classifyBot and store its verdict rather than re-deriving a flag — BOT_KINDS and
       AI_CRAWLER_BOT_KINDS are exported from @berelax/core and @berelax/shared for exactly that — and the scan in
       apps/web/src/crawler-policy.test.ts refuses a crawler name written at any of those call sites. Two shapes
@@ -13952,7 +13957,7 @@ units:
       and breakpoint split, time-of-day conversion across the 11:00–02:00 window, revenue by source joined
       to paid bookings, and a data-quality strip showing bot-filtered share and ref-capture rate.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - A-FIRST-09
@@ -13969,11 +13974,54 @@ units:
       visible, and renders 'no data' rather than 0% when no codes were issued
     - axe reports zero serious or critical violations, and screenshots at 3 viewports × 2 themes × 2 directions
       produce zero pixel diff on a second run
+    - 'NOTE: the screen is a route handler returning bytes (route.ts + render.ts), not a page.tsx. The
+      reason the till, the diary, the Messages inbox, the compliance calendar, the SEO suggestion queue and
+      A-MEAS-07''s revenue panel all record: apps/web/src/routes/registry.ts is in exact bijection with the
+      filesystem and requires every DOCUMENT to be served in BOTH locales, which would need an Arabic admin
+      document and the W-SYS-01 shell. The panels are .ts for the same reason, which is the deviation
+      A-MEAS-07 already recorded for panels/revenue-by-source.ts.'
+    - 'NOTE: ?date=YYYY-MM-DD is REQUIRED and has no default, which M-VAT-12''s ?period= records the reason
+      for: a page answering for "today" answers a different question every day, so a link to it could not be
+      cited and the pixel-diff acceptance line could not be repeated. ?dir=rtl mirrors the layout, which is
+      the till''s and the quick-book screen''s arrangement, and is what the RTL half of the capture matrix
+      renders.'
+    - 'NOTE: the acceptance list says Playwright and the suite is apps/web/src/analytics-page.itest.ts
+      rather than apps/web/e2e/analytics-page.spec.ts. It drives Playwright through H04''s
+      createCaptureHarness, which renders the document with page.setContent and needs no server — so the
+      allocated test port band is released unused. Driving a next start instead would have bought nothing:
+      the page is pure, and the three things a server could add (the response headers, the 303 for a
+      sessionless request and the 403 for a receptionist) are asserted against the route''s own GET called
+      directly with a minted ADMIN_SESSION_COOKIE.'
+    - 'NOTE: the revenue panel reads analytics.daily_source_revenue and is a DIFFERENT panel from A-MEAS-07''s
+      panels/revenue-by-source.ts. This one is money that arrived, joined to the attributed session; that one
+      is whether what was PUSHED to an advertising destination reconciles with internal truth. Two questions
+      that would be one number on a careless dashboard, so they are two panels and the page renders only the
+      first — the dispatch reconciliation belongs on A-MEAS-07''s own surface.'
+    - 'NOTE: the cohort the integration suite asserts against is its OWN, inserted inside a transaction that
+      is always rolled back, because analytics.event and analytics.funnel_step are append-only for every role
+      but berelax_retention (ZY065) — a cohort left behind would make every figure this file asserts grow and
+      the suite would pass once. The seed creates no analytics session, so "on the seeded fixture" is read as
+      "on the seeded CALENDAR": the trading date is the newest business_day that has closed, and the fifteen
+      hourly buckets are generated from that row rather than written down.'
+    - 'NOTE: migration 0160 and ADR 0114 are released unused. No row is added — every table this screen reads
+      exists (0096, 0125, 0150, 0151) — and no decision is locked that ADR 0002 (a gap is not a nought),
+      ADR 0007 (integer fils, the 11:00-02:00 trading day) and ADR 0066 (the visitor row is created at
+      consent, so a pre-consent landing contributes to no session) do not already state. SQLSTATE
+      ZY811-ZY820 is released unregistered: no migration here raises one, and an entry for a code nothing
+      raises is refused.'
     files:
-    - apps/web/app/(admin)/analytics/page.tsx
-    - apps/web/app/(admin)/analytics/panels/*.tsx
+    - apps/web/app/(admin)/analytics/route.ts
+    - apps/web/app/(admin)/analytics/render.ts
     - apps/web/app/(admin)/analytics/queries.ts
-    - apps/web/e2e/analytics-page.spec.ts
+    - apps/web/app/(admin)/analytics/panels/panel.ts
+    - apps/web/app/(admin)/analytics/panels/funnel.ts
+    - apps/web/app/(admin)/analytics/panels/tables.ts
+    - apps/web/app/(admin)/analytics/panels/time-of-day.ts
+    - apps/web/app/(admin)/analytics/panels/data-quality.ts
+    - apps/web/src/analytics-page-render.test.ts
+    - apps/web/src/analytics-page.itest.ts
+    - apps/web/src/routes/registry.ts
+    - scripts/test-gates.mjs
   - id: A-MEAS-01
     order: 114
     title: 'Egress guard: opaque category codes with an enumerating test'
@@ -14349,7 +14397,7 @@ units:
       v4 attribution — LCP element identity, CLS sources, INP target — to /api/collect segmented by route,
       breakpoint, locale and direction, with /book measured as its own route.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - A-FIRST-06
@@ -14376,11 +14424,75 @@ units:
       grant, and none before it in the same page session. Add that case to that file or beside it, and the band
       `analytics-consent` { start: 17_900, width: 300 } in packages/harness/src/ports.ts is the server it runs
       against.'
+    - 'NOTE: CLIENT_TAGS is EMPTY and that is the honest state, not an omission. No GA4 measurement id, no
+      container id and no Meta pixel id has been issued to this business, and no analytics destination host
+      appears anywhere in this repository (DECLARED_ADAPTERS in scripts/check-egress-guard.mjs is still
+      empty). A plausible-looking G-XXXXXXX would be indistinguishable from a configured one (brief rule
+      15): the tag would load, it would fail silently, and the dashboard would read as configured. So the
+      MECHANISM ships and the catalogue is a prop; Y5-client-tags records the missing ids and
+      tag-loader.test.ts asserts the array is empty, so the day somebody adds one is the day that row is
+      answered in the same commit.'
+    - 'NOTE: the /tag-loader fixture route (both locales) exists because of that emptiness. An interception
+      spec run against a real page would assert "no tag loaded" about a page with no tag declared, which
+      holds for ever including on the day the gate breaks (ADR 0003). The fixture declares ONE tag whose
+      src is a site-relative path nothing serves, and apps/web/src/tags-and-vitals.itest.ts intercepts and
+      fulfils it — so "a tag loaded after a grant" is a real request through the real loader and no vendor
+      host is named. The test port band { start: 23_600, width: 300 } is USED, as tags-and-vitals.'
+    - 'NOTE: the browser does NOT validate. webVitalsEvent builds the payload and /api/collect refuses a
+      bad one, which is the collector''s own documented position (A-FIRST-06) and is measured rather than
+      stylistic: the first build put these two client modules at 106,765 bytes because the reporter
+      imported parseAnalyticsEvent and breakpointFor from @berelax/shared, and the modules behind them
+      import zod at module scope. packages/shared/src/analytics/dimensions.ts is the fix — a leaf that
+      imports NOTHING, holding the dimension vocabulary MOVED out of collect.ts and taxonomy.ts and
+      re-exported by both, reached by its own subpath. 4,861 bytes after, budgeted at 6,144 in
+      build/budgets.json. consent-gate.ts''s import of @berelax/shared was changed to the zod-free
+      consent-signal leaf for the same reason: the tag loader calls mayLoadClientTag in the browser, which
+      is that module''s own documented client-tag call site.'
+    - 'NOTE: the taxonomy grew its SIXTH event, web_vitals, which taxonomy.ts''s own header anticipated as
+      "a deliberate committed diff with a schema". ANALYTICS_TAXONOMY_VERSION is 2, because raw events are
+      stamped with it and the rollups are kept for ever. It maps to NO funnel stage (COLLECTED_EVENT_FUNNEL)
+      — how fast a page was is not a step a visitor took — and attributes.test.ts''s declarable enumeration
+      was widened in the same commit: web_vitals carries `path` so the page-field rule admits it, and it is
+      excluded in practice by needing six data-track attributes no element carries.'
+    - 'NOTE: INP is asserted per route on the two FIXTURE routes and not on /book, and the reason is a
+      measurement one. A PerformanceObserver reports an `event` entry only past a 40 ms duration threshold
+      (web-vitals v4''s own figure), so an INP exists on a page where an interaction is slow — the fixture
+      makes one deliberately slow with an inline script. Forcing one on /book would mean making a real
+      booking form slow, and a case that clicked a fast control would pass or fail on how busy the machine
+      was (brief rule 23). What IS asserted for /book is that it is measured and that every row carries the
+      path, which is what makes "distinctly from other routes" a group-by rather than a second event name.'
+    - 'NOTE: the Lighthouse CI half of the first acceptance line is NOT built. "the Lighthouse CI budget on
+      home, a treatment route and /book still passes with tags enabled" needs Lighthouse CI, which does not
+      exist in this repository and is W-SITE-11''s to add — build/budgets.json''s collector entry already
+      records that absence for A-FIRST-06''s own LCP claim. What replaces it here is a measured client-js
+      budget over the two new modules, and the loader touching no network until the `load` event, which is
+      the same by-construction argument the collector makes. Deferred to W-SITE-11.'
+    - 'NOTE: migration 0161 is released unused — no row is added; the sixth event is a value in the closed
+      taxonomy and analytics.event already stores it. SQLSTATE ZY821-ZY830 is released unregistered: no
+      migration here raises one. ADR 0115 is USED, for the attribution identity.'
     files:
     - apps/web/app/(public)/_components/tag-loader.tsx
+    - apps/web/app/_analytics/web-vitals.client.tsx
+    - apps/web/app/_analytics/tag-loader-fixture.tsx
+    - apps/web/app/(en)/(dev)/tag-loader/page.tsx
+    - apps/web/app/(ar)/ar/tag-loader/page.tsx
+    - apps/web/app/_book/booking-page.tsx
     - packages/ui/src/analytics/web-vitals.ts
-    - apps/web/e2e/tags-and-vitals.spec.ts
-    - budget.json
+    - packages/ui/src/analytics/web-vitals.test.ts
+    - packages/ui/src/analytics/index.ts
+    - packages/ui/src/analytics/collector.island.tsx
+    - packages/shared/src/analytics/dimensions.ts
+    - packages/shared/src/analytics/taxonomy.ts
+    - packages/shared/src/analytics/collect.ts
+    - packages/core/src/analytics/funnel.ts
+    - packages/core/src/analytics/consent-gate.ts
+    - packages/harness/src/ports.ts
+    - apps/web/src/tag-loader.test.ts
+    - apps/web/src/tags-and-vitals.itest.ts
+    - apps/web/src/routes/registry.ts
+    - build/budgets.json
+    - docs/adr/0115-an-attribution-identity-is-a-structural-path-and-never-a-selector.md
+    - scripts/test-gates.mjs
   - id: A-MEAS-05
     order: 118
     title: 'Offline conversion loop: corrected values, no-show void, past event_time'
@@ -14435,12 +14547,18 @@ units:
       built and proved against a real PostgreSQL by supplying the session the way A-FIRST-08 will. The
       ''how-heard fallback'' named in this entry''s summary is the same deferral: this schema has no
       how-heard column, and inventing one would be a second statement of attribution.'
-    - 'NOTE: deferred to A-MEAS-04 — the correction of a conversion announced at BOOKING time. The ledger''s
-      invoice_correction statement (an estimate pushed on the booking, corrected to the invoice gross) is
-      built and proved in packages/core/src/analytics/conversion-value.test.ts, and is not reachable end to
-      end because nothing in this build announces a conversion at booking time yet, so there is no earlier
-      figure on file to correct. The discounted-invoice acceptance line is satisfied where it is decided
-      instead: the repository reads invoice.gross_total and never appointment.gross_price_fils.'
+    - 'NOTE: re-pointed by A-MEAS-04 to B-M1 — the correction of a conversion announced at BOOKING time.
+      The ledger''s invoice_correction statement (an estimate pushed on the booking, corrected to the
+      invoice gross) is built and proved in packages/core/src/analytics/conversion-value.test.ts, and is
+      still not reachable end to end. A-MEAS-04 built the half that was missing — TagLoader takes
+      conversions as branded EgressPayloads and pushes them onto the data layer through A-MEAS-01''s guard
+      — and the path remains blocked on Y5-client-tags rather than on a unit: CLIENT_TAGS is empty because
+      no measurement id, container id or pixel id has been issued and no destination host exists in this
+      repository, so there is nothing for a booking-time conversion to be announced TO. That is a
+      configuration nobody owns, which is why this is handed to B-M1 — the milestone that either closes an
+      unreachable path or records it as a stop — and not to a unit that would not build it either. The
+      discounted-invoice acceptance line is satisfied where it is decided instead: the repository reads
+      invoice.gross_total and never appointment.gross_price_fils.'
     - 'NOTE: deferred to A-FIRST-09 — DEFERRAL SATISFIED: its suites build real documents and payments
       inside a transaction they ROLL BACK, which removes exactly what they wrote and needs no declaration
       in suite-table-declarations.ts — the answer to the difficulty this note records. The deferral as it
@@ -19330,7 +19448,7 @@ units:
       switch. It shows the real reason per agent, so a paused autoresponder says it needs Google re-authorising
       rather than showing a generic error.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - G-AGT-01
@@ -19361,11 +19479,63 @@ units:
       for a role without the permission (deny-by-default from F07), asserted for receptionist
     - Playwright captures the console at 3 viewports x 2 themes x 2 directions with zero pixel diff on an
       unchanged rerun; axe reports zero violations
+    - 'NOTE: the screen is a route handler returning bytes (route.ts + render.ts), not page.tsx and
+      agent-row.tsx. The reason every other admin screen records: apps/web/src/routes/registry.ts is in
+      exact bijection with the filesystem and requires every DOCUMENT in BOTH locales, which would need an
+      Arabic admin document and the W-SYS-01 shell. The kill switch IS its own route, as the manifest
+      names it, and that is not only convention: a toggle reachable by GET is togglable by a crawler, a
+      link preview and a browser prefetch, and this one stops an agent.'
+    - 'NOTE: "cost to date against its budget" is built as a MECHANISM and the figure is filed, because
+      there is no figure. agent_definition.budget_fils_per_run is the only budget this schema holds and it
+      is a ceiling for ONE run; there is no per-day, per-week or per-month budget anywhere. So `spent` is
+      measured (sum of agent_run.cost_fils for the trading date) and the ceiling is DERIVED as
+      budget_fils_per_run x runs, which the screen says is a derivation rather than a figure somebody set.
+      Y13-agent-period-budget records the gap (brief rule 15). An agent with a nought budget has NO share
+      rather than 100%: twenty-nine of the thirty-two seeded agents spend nothing because their passes
+      read this build''s own tables, which is a measured nought and not a missing figure.'
+    - 'NOTE: "a test asserts constructing the cost cell from a float is a type error" is satisfied by the
+      TYPE and not by a test case, which is the stronger form. AgentCost carries `Money` from F05, whose
+      `fils` is `Brand<number, ''Fils''>` — so `{ fils: 1.5 }` does not typecheck at all and `aed(1.5)`
+      is a compile error through `IntegerLiteral`. A vitest case cannot assert a compile failure; what
+      would assert it is a gate fixture, and gate case 2 already proves tsc fails on a type error. The
+      renderer never divides by 100 either: `formatAmount` is @berelax/core''s.'
+    - 'NOTE: the UNRECONCILED SETTLEMENT BATCH alert H-HARD-05 deferred is DISCHARGED here — one
+      ALERT_REGISTRY entry, one ALERT_OBSERVERS observer, one runbook heading and one new THRESHOLD_UNITS
+      member (`batches`, because counting a payout file in `attempts` would be a wrong label beside a
+      figure). The observer counts BATCHES and not fils: variances net off, and a
+      settlement_variance.difference_fils is non-zero by CHECK (ZY447), so the question is "is there a
+      batch that does not tie". `state = quarantined OR a variance row`, because a posted batch can still
+      carry an unexplained line. reconciliation_exception is a DIFFERENT subject (a payment intent
+      diverging from the gateway, Y-PAY-05, ADR 0070) and its quarantined count is carried on the alert''s
+      detail as context rather than as the firing figure — folding the two would put "the acquirer paid a
+      different amount" and "an intent is in a state we cannot explain" on one screen with the same words.'
+    - 'NOTE: the screenshot matrix renders a SUBSET of six rows and not all thirty-two. createCaptureHarness
+      screenshots fullPage, thirty-two cards is about 13,000 CSS pixels, and at deviceScaleFactor 2 that is
+      past Chromium''s own texture limit — the first run failed with "Unable to capture screenshot", which
+      names neither the height nor the scale. Six rows is also the better specimen: the matrix is about the
+      layout in two directions and two themes, and twenty-six more identical cards test the same CSS
+      twenty-six more times. The row-count claim is a different case, against the whole screen.'
+    - 'NOTE: migration 0162 is released unused — every table this screen reads exists (0021, 0136, 0148,
+      0151) and the alert needs no row of its own, because an alert is a measurement over rows that already
+      exist. SQLSTATE ZY831-ZY840 is released unregistered: no migration here raises one. ADR 0116 is USED.
+      No test port band was needed: the console is driven through its own GET and POST with a minted
+      ADMIN_SESSION_COOKIE, and the matrix renders with page.setContent.'
     files:
-    - apps/web/app/(admin)/agents/page.tsx
-    - apps/web/app/(admin)/agents/agent-row.tsx
+    - apps/web/app/(admin)/agents/route.ts
+    - apps/web/app/(admin)/agents/render.ts
+    - apps/web/app/(admin)/agents/queries.ts
     - apps/web/app/(admin)/agents/kill-switch/route.ts
-    - apps/web/e2e/agent-console.spec.ts
+    - packages/core/src/agents/console-reason.ts
+    - packages/core/src/agents/console-reason.test.ts
+    - packages/core/src/agents/index.ts
+    - packages/shared/src/alerts/registry.ts
+    - packages/db/src/alerts.ts
+    - docs/runbooks/alerting.md
+    - apps/web/src/agent-console-render.test.ts
+    - apps/web/src/agent-console-screen.itest.ts
+    - apps/web/src/routes/registry.ts
+    - docs/adr/0116-a-reason-is-a-declared-consequence-or-the-agents-own-words.md
+    - scripts/test-gates.mjs
   - id: G-CONN-08
     order: 159
     title: Non-dismissible re-auth banner, escalating notification ladder, one-click reconnect
@@ -20124,7 +20294,12 @@ units:
       the same bytes it lints against rather than a second spelling of them. Several fixtures quote a term the
       reply must not contain (cupping, full service, nurse); each is a term of a shipped lexicon, quoted from
       it, and none is a claim about this business'
-    - 'NOTE deferred to G-AGT-02 (RE-POINTED from G-REV-07 by G-REV-07, which did NOT build it; RE-POINTED
+    - 'NOTE re-pointed by G-AGT-02 to B-M1 (RE-POINTED from G-AGT-02, which did NOT build it either —
+      the agent console carries a kill switch and no configuration surface, and a reply signature is not
+      a thing it shows; FOUR units have now declined it and the blocker has never been a unit''s work:
+      Y9-reply-signature is a VALUE nobody has supplied, and a plausible sign-off would publish under the
+      owner''s name. B-M1 is the milestone that either closes an unreachable path or records it as a stop,
+      which is what this is. RE-POINTED from G-REV-07 by G-REV-07, which did NOT build it; RE-POINTED
       from G-REV-06 by G-REV-06, which did not either): the SOURCE
       of the auto-appended signature. The cap criterion needs the
       mechanism, so renderFinalReply is the one implementation both linters measure and deliverApprovedReply
@@ -23225,7 +23400,16 @@ units:
       on one account, and an overdue blocking obligation
     - every registry entry declares severity, threshold and a runbook id, and an entry naming an unknown
       runbook id fails a gate
-    - 'NOTE: the UNRECONCILED SETTLEMENT BATCH alert is deferred to G-AGT-02, re-pointed by the integrator at the Y-PAY-09/04/05 merge. Y-PAY-05 was the original owner and shipped the rows the alert would read (settlement_variance, reconciliation_exception) but added no ALERT_REGISTRY entry and no ALERT_OBSERVERS observer, so the deferral is undischarged rather than satisfied - checked by grepping both files for a settlement entry before re-pointing. G-AGT-02 owns the console that reads alerts and is still todo, which is why it takes this and is deliberately ABSENT
+    - 'NOTE: the UNRECONCILED SETTLEMENT BATCH alert is deferred to G-AGT-02 — DEFERRAL SATISFIED:
+      G-AGT-02 added one ALERT_REGISTRY entry (`unreconciled_settlement_batch`, same_day, structural
+      threshold of 1 batch pointing at 0136, routed to the owner and the accountant), one
+      ALERT_OBSERVERS observer in packages/db/src/alerts.ts, one runbook heading
+      (alerting#a-settlement-batch-does-not-reconcile) and one THRESHOLD_UNITS member (`batches`). The
+      observer counts BATCHES and not fils, because variances net off and ZY447 makes a variance row exist
+      only when two figures disagree; it reads `state = quarantined OR a variance row`, because a posted
+      batch can still carry an unexplained line. reconciliation_exception stays Y-PAY-05''s subject and
+      its quarantined count is carried on the alert''s detail as context rather than as the firing figure.
+      The original wording, which was true when written: re-pointed by the integrator at the Y-PAY-09/04/05 merge. Y-PAY-05 was the original owner and shipped the rows the alert would read (settlement_variance, reconciliation_exception) but added no ALERT_REGISTRY entry and no ALERT_OBSERVERS observer, so the deferral is undischarged rather than satisfied - checked by grepping both files for a settlement entry before re-pointing. G-AGT-02 owns the console that reads alerts and is still todo, which is why it takes this and is deliberately ABSENT
       from ALERT_REGISTRY rather than present and unobservable. Nothing in this schema records a settlement
       batch or its reconciliation state — Y-PAY-05 owns reconciliation_exception and is todo — so an entry
       for it would have an observer that could only ever answer "nothing to see", which is exactly the

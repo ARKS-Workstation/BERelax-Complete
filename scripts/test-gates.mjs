@@ -61810,6 +61810,688 @@ export function chargebackNetEffectFils(`,
   )
 }
 
+// 192a-192z. (A-FIRST-10) The /analytics dashboard: every way a figure could come to be shown that
+//            nothing produced, and every way a gap could come to read as a nought.
+//
+//            This unit ships one screen and no new rows, so every defect available to it is a defect in a
+//            NUMBER or in the order numbers are printed in — and each of the six below leaves a page that
+//            renders, looks right and is wrong. A time-of-day chart sorted by hour is the one worth
+//            stating: it is the obvious thing to write, it produces a chart with all fifteen of the right
+//            buckets in it, and it puts midnight and 01:00 at the front with a nine-hour hole after them.
+//            Nothing errors. The reader sees a quiet evening.
+//
+//            The other five are the same shape. An attribute emitted as `0` for a panel with nothing
+//            measured, a share printed as 0% where there is no denominator, a panel dropped from the
+//            spine, a region that lost its label, and a permission widened to one the front desk holds:
+//            every one is a smaller diff than the comment explaining it.
+//
+//            192a to 192d run the render suite and are fast. 192e and 192f drive the integration suite,
+//            which needs a database, and are narrowed with `-t` so neither pays for the screenshot matrix.
+{
+  const PANEL = 'apps/web/app/(admin)/analytics/panels/panel.ts'
+  const TIME_OF_DAY = 'apps/web/app/(admin)/analytics/panels/time-of-day.ts'
+  const QUERIES = 'apps/web/app/(admin)/analytics/queries.ts'
+  const ROUTE = 'apps/web/app/(admin)/analytics/route.ts'
+  const RENDER_SUITE = 'apps/web/src/analytics-page-render.test.ts'
+  const PAGE_ITEST = 'apps/web/src/analytics-page.itest.ts'
+  const renderSuite = () => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', RENDER_SUITE]
+  const pageItest = (name) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    PAGE_ITEST,
+    '-t',
+    name,
+  ]
+
+  // The control for the whole block. Every case below asserts that a BROKEN tree is caught, and that says
+  // nothing unless the committed tree passes.
+  {
+    const committed = run('pnpm', renderSuite())
+    check(
+      'analytics: the committed render suite passes, which is the control for 192a to 192d',
+      !committed.failed,
+      `the /analytics render suite does not pass on the committed tree:\n${committed.output}`,
+    )
+  }
+
+  /*
+    192a. The hourly buckets sorted by hour.
+
+    The mutation nobody would review as a defect — a chart ought to be in order, and `11, 12, … 23, 0, 1`
+    does not look like one. It is: the premises is open across midnight, so the trading order IS the order,
+    and sorting puts the two quietest hours of the night at the front followed by a nine-hour gap the
+    business was shut for. Every bucket is present, every figure is right, and the chart is unreadable.
+  */
+  checkRejectedBy(
+    'analytics: 192a an hourly chart re-sorted into calendar order is caught',
+    withEditedFile(
+      TIME_OF_DAY,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const rows = panel.buckets\n    .map((bucket: HourBucket, index: number) => {',
+          '  const rows = [...panel.buckets]\n    .toSorted((a, b) => a.hour - b.hour)\n' +
+            '    .map((bucket: HourBucket, index: number) => {',
+        ),
+      () => runExpectingFailure('pnpm', renderSuite()),
+    ),
+    'does not re-sort what it is given',
+  )
+
+  /*
+    192b. A panel with nothing measured given a headline of nought.
+
+    `data-headline` absent is what says "nothing was measured"; `data-headline="0"` says the figure is
+    nought. The two are different facts (ADR 0002) and the attribute is what a test compares, so this
+    mutation makes a day with no data indistinguishable from a day the funnel failed — and it makes the
+    headline comparison pass by comparing nought against nought.
+  */
+  checkRejectedBy(
+    'analytics: 192b a no-data panel that emits a headline of nought is caught',
+    withEditedFile(
+      PANEL,
+      (text) =>
+        replaceOnce(
+          text,
+          '    ...(value === null ? [] : [`data-headline="${value}"`]),',
+          '    `data-headline="${value ?? 0}"`,',
+        ),
+      () => runExpectingFailure('pnpm', renderSuite()),
+    ),
+    'omits the attribute entirely for a panel with no figure',
+  )
+
+  /*
+    192c. A share printed for a row with no denominator.
+
+    One cell, and the row it appears on is the one the full outer join exists for: a tuple with a
+    conversion and no sessions. `0.0%` there reports that the source converted nobody, which is the
+    opposite of what the row holds, and `Math.round((n * 1000) / 0)` is `Infinity` rather than an error.
+  */
+  checkRejectedBy(
+    'analytics: 192c a share cell that prints 0% where there is no denominator is caught',
+    withEditedFile(
+      PANEL,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (denominator <= 0) return \'<td class="num">—</td>\'\n  const perMille = Math.round((numerator * 1000) / denominator)',
+          '  const perMille = denominator <= 0 ? 0 : Math.round((numerator * 1000) / denominator)',
+        ),
+      () => runExpectingFailure('pnpm', renderSuite()),
+    ),
+    'renders an em dash and never 0% for a row with no denominator',
+  )
+
+  /*
+    192d. A panel dropped from the spine.
+
+    The spine is what the page renders from AND what the suite counts, which is the arrangement that makes
+    "all nine panels render" a check. Dropping an id removes the panel from the page and from the count at
+    once, so every other assertion in the file still passes — the data-quality strip, which is the panel
+    that says whether anything else can be believed, simply is not there.
+  */
+  checkRejectedBy(
+    'analytics: 192d a spine that lost a panel, and with it the count that would notice, is caught',
+    withEditedFile(
+      QUERIES,
+      (text) => replaceOnce(text, "  'data-quality',\n] as const", '] as const'),
+      () => runExpectingFailure('pnpm', renderSuite()),
+    ),
+    'declares nine, which is the control for every case below',
+  )
+
+  /*
+    192e. The permission widened to one the front desk holds.
+
+    `settings:read` is in `RECEPTIONIST_PERMISSIONS`, so this one word opens a screen showing what every
+    visitor paid to every signed-in member of staff. Nothing errors, every figure is correct, and the
+    audit row that would have recorded the refusal is never written because there is no refusal.
+  */
+  checkRejectedBy(
+    'analytics: 192e a dashboard permission widened to one the receptionist holds is caught',
+    withEditedFile(
+      ROUTE,
+      (text) =>
+        replaceOnce(
+          text,
+          "export const ANALYTICS_PERMISSION: Permission = 'report:read'",
+          "export const ANALYTICS_PERMISSION: Permission = 'settings:read'",
+        ),
+      () => runExpectingFailure('pnpm', pageItest('answers 403 to a receptionist')),
+    ),
+    'answers 403 to a receptionist and writes the denial to audit_event',
+  )
+
+  /*
+    192f. The refusal that writes nothing.
+
+    The 403 stays, so the screen is still closed and every behavioural assertion about the refusal passes.
+    What goes is the only record that somebody tried — which is the half of the acceptance line that is
+    about the insider-threat trail rather than about access control, and the half whose absence looks
+    exactly like nobody having tried.
+  */
+  checkRejectedBy(
+    'analytics: 192f a refusal that answers 403 and records nothing is caught',
+    withEditedFile(
+      ROUTE,
+      (text) =>
+        replaceOnce(
+          text,
+          '      await withSql(async (sql) => await recordDenial(sql, principal))\n',
+          '',
+        ),
+      () => runExpectingFailure('pnpm', pageItest('answers 403 to a receptionist')),
+    ),
+    'answers 403 to a receptionist and writes the denial to audit_event',
+  )
+}
+
+// 193a-193z. (A-MEAS-04) The tag loader and the field metrics: every way a tag could come to load without
+//            a grant, every way an identity could come to carry a name, and every way a figure could come
+//            to flatter.
+//
+//            Two families, and they fail in opposite directions. The consent half fails OPEN and in
+//            silence: a loader that read the banner's attribute instead of re-asking the gate would agree
+//            with it on every page anybody tested, and would disagree on the day the attribute was set
+//            from somewhere else. The measurement half fails FLATTERING: CLS summed instead of windowed,
+//            INP taken as the maximum, a report sent twice — each of those produces a number, each number
+//            is wrong in the direction nobody questions, and none of them errors.
+//
+//            The third family is one case and it is the unit's own privacy rule: an attribution identity
+//            that carries an id. ADR 0115 exists because every library in this space answers "what was
+//            slow" with a CSS selector, and on a treatment page a selector carries a service name and a
+//            price. 193a and 193b are the two halves of it — the pattern that refuses one, and the
+//            function that cannot build one.
+//
+//            Every case here runs a unit suite, so the whole block is fast and needs no database.
+{
+  const TAXONOMY = 'packages/shared/src/analytics/taxonomy.ts'
+  const TAXONOMY_SUITE = 'packages/shared/src/analytics/taxonomy.test.ts'
+  // The zod-free leaf the browser reads. The identity pattern lives HERE and not in the taxonomy, which
+  // is the whole of `dimensions.ts`'s reason for existing — see its header and the 106,765 bytes.
+  const DIMENSIONS = 'packages/shared/src/analytics/dimensions.ts'
+  const VITALS = 'packages/ui/src/analytics/web-vitals.ts'
+  const VITALS_SUITE = 'packages/ui/src/analytics/web-vitals.test.ts'
+  const LOADER = 'apps/web/app/(public)/_components/tag-loader.tsx'
+  const LOADER_SUITE = 'apps/web/src/tag-loader.test.ts'
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+
+  // The control for the whole block. Every case asserts that a BROKEN tree is caught, and that says
+  // nothing unless the committed tree passes.
+  {
+    const committed = run('pnpm', unit(VITALS_SUITE))
+    check(
+      'tags: the committed web-vitals suite passes, which is the control for 193a, 193b, 193e to 193g',
+      !committed.failed,
+      `the web-vitals suite does not pass on the committed tree:\n${committed.output}`,
+    )
+    const loader = run('pnpm', unit(LOADER_SUITE))
+    check(
+      'tags: the committed tag-loader suite passes, which is the control for 193c and 193d',
+      !loader.failed,
+      `the tag-loader suite does not pass on the committed tree:\n${loader.output}`,
+    )
+  }
+
+  /*
+    193a. The identity pattern widened to admit a class.
+
+    One character — a dot in a character class — and every assertion about the identities this build
+    PRODUCES still passes, because this build does not produce one with a class in it. What changes is
+    what the server accepts: `/api/collect` is a write path exposed to the internet, so the pattern is
+    the refusal that covers every client and not only this one's code.
+  */
+  checkRejectedBy(
+    'tags: 193a an identity pattern that would accept a class is caught',
+    withEditedFile(
+      DIMENSIONS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  /^[a-z][a-z0-9-]*(?::nth-of-type\\(\\d+\\))?(?:>[a-z][a-z0-9-]*(?::nth-of-type\\(\\d+\\))?)*(?:\\[data-track=[a-z_]+\\])?$/',
+          '  /^[a-z][a-z0-9.-]*(?::nth-of-type\\(\\d+\\))?(?:>[a-z][a-z0-9.-]*(?::nth-of-type\\(\\d+\\))?)*(?:\\[data-track=[a-z_]+\\])?$/',
+        ),
+      () => runExpectingFailure('pnpm', unit(VITALS_SUITE)),
+    ),
+    'refuses an identity ADR 0115 forbids',
+  )
+
+  /*
+    193b. The identity built from the element's id.
+
+    The mutation a developer debugging a slow page would write, and it is an improvement in every sense
+    except the one that matters: `#deep-tissue-60` is a far better answer to "which element" than
+    `section:nth-of-type(2)>h2`, and it is a service name in the raw event store.
+  */
+  checkRejectedBy(
+    'tags: 193b an attribution identity built from the element id is caught',
+    withEditedFile(
+      VITALS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  const identity = `${steps.toReversed().join('>')}${suffix}`",
+          '  const own = (element as unknown as { id?: string }).id\n' +
+            "  const identity = `${steps.toReversed().join('>')}${own ? `#${own}` : ''}${suffix}`",
+        ),
+      () => runExpectingFailure('pnpm', unit(VITALS_SUITE)),
+    ),
+    'cannot carry an id, a class or any text, because it is given none',
+  )
+
+  /*
+    193c. The loader short-circuiting on the banner's attribute.
+
+    This is ADR 0076's whole subject, and the mutation looks like an optimisation: the attribute is right
+    there on `<html>`, it was set before first paint, and reading it saves parsing a cookie. It is a
+    SECOND authority on consent — the attribute exists so the CSS can hide the banner, and the day it is
+    set from somewhere else the loader and the dispatch writer disagree about one visitor.
+  */
+  checkRejectedBy(
+    'tags: 193c a loader that reads the banner attribute instead of asking the gate is caught',
+    withEditedFile(
+      LOADER,
+      (text) =>
+        replaceOnce(
+          text,
+          '    const decision = mayLoadClientTag(tag.target, host.cookie())',
+          "    const quick = document.documentElement.getAttribute('data-consent')\n" +
+            '    const decision =\n' +
+            "      quick !== null && quick !== ''\n" +
+            '        ? { target: tag.target, permitted: true, missing: [], reason: null }\n' +
+            '        : mayLoadClientTag(tag.target, host.cookie())',
+        ),
+      () => runExpectingFailure('pnpm', unit(LOADER_SUITE)),
+    ),
+    'calls the one gate and nothing that could answer the same question',
+  )
+
+  /*
+    193d. The gate's answer ignored.
+
+    The refusal branch dropped, so every declared tag loads for every visitor. It is the one case in this
+    block whose effect a person could notice — a pixel firing for somebody who refused — and it is here
+    because the EVIDENCE is in somebody else's advertising account rather than in this repository, weeks
+    later, with no commit to point at.
+  */
+  checkRejectedBy(
+    'tags: 193d a loader that injects whatever the gate answered is caught',
+    withEditedFile(
+      LOADER,
+      (text) =>
+        replaceOnce(
+          text,
+          '    if (!decision.permitted) {\n      refused.push(tag.id)\n      continue\n    }\n',
+          '    if (!decision.permitted) refused.push(tag.id)\n',
+        ),
+      () => runExpectingFailure('pnpm', unit(LOADER_SUITE)),
+    ),
+    'refuses every tag when there is no cookie at all',
+  )
+
+  /*
+    193e. CLS summed instead of windowed.
+
+    A total is the obvious implementation and it is a bigger number than the metric, which makes it look
+    conservative. It is not: it makes a page that shifts a little on every scroll worse than one that
+    throws its content around once, which is the opposite of what a reader experiences — and it makes
+    this build's figure incomparable with one measured by any other tool, which is the whole value of
+    using the published metric name.
+  */
+  checkRejectedBy(
+    'tags: 193e a CLS that totals every shift rather than windowing them is caught',
+    withEditedFile(
+      VITALS,
+      (text) =>
+        replaceOnce(
+          text,
+          '    const continues =\n      largestInWindow !== null &&',
+          '    const continues =\n      true ||',
+        ),
+      () => runExpectingFailure('pnpm', unit(VITALS_SUITE)),
+    ),
+    'starts a new window after a gap, and reports the larger of the two',
+  )
+
+  /*
+    193f. INP taken as the maximum.
+
+    The maximum is what a reader of the code would assume INP is, and on a busy page it is the figure one
+    unlucky interaction decides. The published algorithm walks down the ranking as the interaction count
+    grows for exactly that reason, and a build reporting the maximum would read as a slower page than it
+    is — which is the one direction of error that gets investigated and then dismissed.
+  */
+  checkRejectedBy(
+    'tags: 193f an INP taken as the slowest interaction rather than the percentile is caught',
+    withEditedFile(
+      VITALS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const index = Math.min(kept.length - 1, Math.floor(Math.max(0, interactionCount) / 50))',
+          '  const index = 0',
+        ),
+      () => runExpectingFailure('pnpm', unit(VITALS_SUITE)),
+    ),
+    'moves down the ranking as the interaction count grows',
+  )
+
+  /*
+    193g. The once-per-page guard removed.
+
+    `visibilitychange` and `pagehide` both fire on a real navigation, so every figure on the dashboard
+    doubles while every single measurement stays correct. Nothing errors, every row validates, and the
+    only symptom is a count that is twice what it should be — which is invisible without a second source
+    to compare it against.
+  */
+  checkRejectedBy(
+    'tags: 193g a reporter that reports twice per page view is caught',
+    withEditedFile(
+      VITALS,
+      (text) => replaceOnce(text, '    if (reported) return\n    reported = true\n', ''),
+      () => runExpectingFailure('pnpm', unit(VITALS_SUITE)),
+    ),
+    'reports every metric it observed, once, and flushes',
+  )
+
+  /*
+    193h. A sixth event added to the taxonomy with the version left alone.
+
+    Raw events are stamped with the taxonomy version and kept 90 days; the rollups are kept for ever. So a
+    rollup built before an event existed and one built after are distinguishable by exactly one number,
+    and leaving it alone is how a reader of an old rollup comes to believe it was computed under the
+    vocabulary they are reading it with.
+  */
+  checkRejectedBy(
+    'tags: 193h a taxonomy that grew an event without bumping its version is caught',
+    withEditedFile(
+      TAXONOMY,
+      (text) =>
+        replaceOnce(
+          text,
+          'export const ANALYTICS_TAXONOMY_VERSION = 2',
+          'export const ANALYTICS_TAXONOMY_VERSION = 1',
+        ),
+      () => runExpectingFailure('pnpm', unit(TAXONOMY_SUITE)),
+    ),
+    'holds exactly these six names, in this order, at this version',
+  )
+}
+
+// 194a-194z. (G-AGT-02) The agent console: every way a reason could come to be generic, every way a
+//            figure could come to be invented, and the one way a kill switch could come to be unaudited.
+//
+//            This unit's defects are mostly SENTENCES, which is unusual and is why it needs a gate. A
+//            console that says "an error occurred" about a paused autoresponder passes every behavioural
+//            test, renders, looks finished, and sends somebody after a stack trace for a Google grant
+//            that has a button on the screen above. Collapsing the two Google dependences into one is the
+//            same shape: "paused" about an agent that is running sends somebody after a stopped worker.
+//
+//            The figures fail the other way — towards being present when they should be absent. A nought
+//            budget with a computed share reads as 100% of nothing; a cost grouped by the calendar date
+//            moves a night's spend onto the wrong day; a pending count read through a capped list reports
+//            the cap. Each of those is a number on a screen and none of them errors.
+//
+//            194a to 194c run the render suite and are fast. 194d to 194g drive the integration suite,
+//            narrowed with `-t` so none of them pays for the screenshot matrix. 194h runs the alert gate.
+{
+  const REASON = 'packages/core/src/agents/console-reason.ts'
+  const REASON_SUITE = 'packages/core/src/agents/console-reason.test.ts'
+  const QUERIES = 'apps/web/app/(admin)/agents/queries.ts'
+  const KILL_SWITCH = 'apps/web/app/(admin)/agents/kill-switch/route.ts'
+  const OBSERVERS = 'packages/db/src/alerts.ts'
+  const RENDER_SUITE = 'apps/web/src/agent-console-render.test.ts'
+  const SCREEN_ITEST = 'apps/web/src/agent-console-screen.itest.ts'
+  const renderSuite = () => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', RENDER_SUITE]
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const screenItest = (name) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    SCREEN_ITEST,
+    '-t',
+    name,
+  ]
+
+  // The control for the whole block. Every case asserts a BROKEN tree is caught, which says nothing
+  // unless the committed tree passes.
+  {
+    const committed = run('pnpm', renderSuite())
+    check(
+      'agents: the committed console render suite passes, which is the control for 194a and 194c',
+      !committed.failed,
+      `the agent console render suite does not pass on the committed tree:\n${committed.output}`,
+    )
+    const reasons = run('pnpm', unit(REASON_SUITE))
+    check(
+      'agents: the committed reason suite passes, which is the control for 194b',
+      !reasons.failed,
+      `the agent reason suite does not pass on the committed tree:\n${reasons.output}`,
+    )
+    const alerts = run('pnpm', ['alerts'])
+    check(
+      'agents: the committed alert registry passes its gate, which is the control for 194h',
+      !alerts.failed,
+      `the alert registry gate does not pass on the committed tree:\n${alerts.output}`,
+    )
+  }
+
+  /*
+    194a. A generic sentence for the one case that has no words.
+
+    `failing_without_words` is the member the whole design rests on: an agent whose heartbeat records a
+    failure and no error text, which is what a worker killed mid-attempt leaves behind. It is exactly the
+    branch somebody reaches for a fallback on, and the fallback reads as defensive programming.
+  */
+  checkRejectedBy(
+    'agents: 194a a generic error sentence in the one case with no words is caught',
+    withEditedFile(
+      REASON,
+      (text) =>
+        replaceOnce(
+          text,
+          "export const FAILING_WITHOUT_WORDS_REASON =\n  'failing, and agent_heartbeat.last_error is empty",
+          "export const FAILING_WITHOUT_WORDS_REASON =\n  'An error occurred. failing, and agent_heartbeat.last_error is empty",
+        ),
+      () => runExpectingFailure('pnpm', renderSuite()),
+    ),
+    'the console renders An error occurred',
+  )
+
+  /*
+    194b. The two Google dependences collapsed into one.
+
+    One word. The SEO agent reads through the connection and falls back to the history it keeps, so with
+    no grant it still runs and its figures are older than they look. Calling that "paused" sends somebody
+    after a stopped worker — and it hides the thing that matters, which is that this week's deltas are
+    against older data than the screen suggests.
+  */
+  checkRejectedBy(
+    'agents: 194b a Google dependence that reports a degradation as a pause is caught',
+    withEditedFile(
+      REASON,
+      (text) =>
+        replaceOnce(
+          text,
+          "  seo_agent: Object.freeze({\n    dependence: 'degrades',",
+          "  seo_agent: Object.freeze({\n    dependence: 'pauses',",
+        ),
+      /*
+        The PURE reason suite and not the render suite, and finding that out is what this case is worth.
+        Pointed at the render suite first, it exited zero: `agent-console-render.test.ts` constructs the
+        reason KIND itself and asserts the table's sentence, so a flipped `dependence` changed nothing
+        there. The derivation is `agentConsoleReason`'s, and `console-reason.test.ts` is where the facts
+        go in and the reason comes out — which is also why that suite exists at all.
+      */
+      () => runExpectingFailure('pnpm', unit(REASON_SUITE)),
+    ),
+    /*
+      The NAMED case and not the loop over the table.
+
+      `reads the declared dependence rather than the agent's name` derives its expectation FROM
+      `GOOGLE_DEPENDENT_AGENTS`, so a flipped `dependence` makes it agree with itself — and its
+      both-kinds-present control still holds, because two other agents are also `degrades`. That case is
+      worth having (it covers every entry) and it cannot catch this one, which is the difference between
+      a derived assertion and a pinned one. `degrades an agent that reads through it` names the agent and
+      the answer, so it is the case that fires.
+    */
+    'degrades an agent that reads through it',
+  )
+
+  /*
+    194c. The budget warning moved to the ceiling.
+
+    `990` to `1000`: the warning then fires only for a run that spent its whole budget, which is the run
+    that has already been stopped mid-work by `createRunBudget`. The point of 99% is the run that is
+    about to be, and a threshold at the ceiling is a warning that arrives with the incident.
+  */
+  checkRejectedBy(
+    'agents: 194c a budget warning moved from 99% to the ceiling is caught',
+    withEditedFile(
+      QUERIES,
+      (text) =>
+        replaceOnce(
+          text,
+          'export const AGENT_BUDGET_WARNING_PER_MILLE = 990',
+          'export const AGENT_BUDGET_WARNING_PER_MILLE = 1000',
+        ),
+      () => runExpectingFailure('pnpm', renderSuite()),
+    ),
+    'renders the warning variant at 99% of a run',
+  )
+
+  /*
+    194d. A share computed against a nought ceiling.
+
+    Twenty-nine of the thirty-two agents have `budget_fils_per_run = 0`, which is a MEASURED nought: those
+    passes perform no outbound call. A share against it is not 100% and is not infinity — there is nothing
+    to be a share OF — and the mutation produces a cell that reads as a budget nobody set.
+  */
+  checkRejectedBy(
+    'agents: 194d a budget share computed against a nought ceiling is caught',
+    withEditedFile(
+      QUERIES,
+      (text) =>
+        replaceOnce(
+          text,
+          '  denominator <= 0n ? null : Number((numerator * 1000n) / denominator)',
+          '  denominator <= 0n ? 0 : Number((numerator * 1000n) / denominator)',
+        ),
+      () =>
+        runExpectingFailure('pnpm', screenItest('has no share for an agent with a nought budget')),
+    ),
+    'has no share for an agent with a nought budget',
+  )
+
+  /*
+    194e. A refusal that answers 403 and records nothing.
+
+    The screen is still closed, so every behavioural assertion about the refusal passes. What goes is the
+    only record that somebody tried to stop an agent — which is the half of the acceptance line that is
+    about the insider-threat trail, and whose absence looks exactly like nobody having tried.
+  */
+  checkRejectedBy(
+    'agents: 194e a kill-switch refusal that records nothing is caught',
+    withEditedFile(
+      KILL_SWITCH,
+      (text) =>
+        replaceOnce(
+          text,
+          "      await withSql(\n        async (sql) => await record(sql, principal, { agentKey, desired, operation: 'denied' }),\n      )\n",
+          '',
+        ),
+      () => runExpectingFailure('pnpm', screenItest('refuses a receptionist')),
+    ),
+    'refuses a receptionist, records the refusal, and changes nothing',
+  )
+
+  /*
+    194f. A pending count read through a capped reader.
+
+    `settings-store.itest.ts`'s defect, applied to a queue: a limit is right for a panel and wrong for a
+    count, and a capped reader pinned at its limit reports the cap as the answer. Three drafts waiting
+    become one, the owner clears it, and two are still there.
+  */
+  checkRejectedBy(
+    'agents: 194f a pending count read through a capped reader is caught',
+    withEditedFile(
+      QUERIES,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const [drafts] = await sql<{ n: string }[]>`\n    select count(*)::text as n\n      from google_reviews',
+          '  const [drafts] = await sql<{ n: string }[]>`\n    select count(*)::text as n\n      from (select 1 from google_reviews',
+        ).replace(
+          '       and draft_quarantine_reason is null\n  `',
+          '       and draft_quarantine_reason is null limit 1) capped\n  `',
+        ),
+      () => runExpectingFailure('pnpm', screenItest('counts 3 pending review drafts')),
+    ),
+    'counts 3 pending review drafts and 5 pending SEO suggestions',
+  )
+
+  /*
+    194g. Cost grouped by the calendar date.
+
+    A run that began at 01:30 belongs to the PREVIOUS trading date (ADR 0007), so a calendar-date
+    grouping moves a night's spend onto the wrong day. For a budget that is the difference between a day
+    that was inside it and one that was not, and the figure is wrong on exactly the nights the business is
+    busiest.
+  */
+  checkRejectedBy(
+    'agents: 194g a cost grouped by the calendar date rather than the trading date is caught',
+    withEditedFile(
+      QUERIES,
+      (text) =>
+        replaceOnce(
+          text,
+          'on r.agent_key = d.agent_key and r.trading_date = ${query.tradingDate}::date',
+          'on r.agent_key = d.agent_key and r.started_at::date = ${query.tradingDate}::date',
+        ),
+      /*
+        The case this mutation breaks is the one whose fixture DISCRIMINATES, and the first pointing was
+        at the one that does not: `counts a run by its TRADING date` inserts a run on an EARLIER trading
+        date, and under `started_at::date` that run is excluded for a different reason, so the assertion
+        still holds and the gate reported nothing rejected. The sums case inserts runs whose `started_at`
+        is today and whose `trading_date` is the closed day the figures are about, so a calendar grouping
+        drops both and the figure goes to nought.
+      */
+      () =>
+        runExpectingFailure('pnpm', screenItest('sums agent_run.cost_fils for the trading date')),
+    ),
+    'sums agent_run.cost_fils for the trading date and derives the ceiling',
+  )
+
+  /*
+    194h. An observer with no registry entry.
+
+    The deferral H-HARD-05 left is discharged by a row AND an observer, and the registry's whole design is
+    that neither can exist alone: an alert with no reader reports the same thing as a quiet day, and a
+    reader with no alert has no severity, no threshold, no runbook and no audience. This breaks the second
+    direction, which is the one a `Record` alone would not catch at runtime.
+  */
+  checkRejectedBy(
+    'agents: 194h an alert observer the registry does not declare is caught',
+    withEditedFile(
+      OBSERVERS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  unreconciled_settlement_batch: observeUnreconciledSettlementBatch,\n',
+          '  unreconciled_settlement_batch: observeUnreconciledSettlementBatch,\n  not_an_alert: observeUnreconciledSettlementBatch,\n',
+        ),
+      () => runExpectingFailure('pnpm', ['alerts']),
+    ),
+    'observer-without-an-alert',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

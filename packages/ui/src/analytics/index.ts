@@ -47,3 +47,23 @@ export {
   type TrackedPage,
   trackDeclaringElement,
 } from './use-track.ts'
+export {
+  attachWebVitals,
+  CLS_SESSION_GAP_MS,
+  CLS_SESSION_WINDOW_MS,
+  IDENTITY_MAX_DEPTH,
+  type IdentifiableElement,
+  INP_DURATION_THRESHOLD_MS,
+  INP_LONGEST_KEPT,
+  type Interaction,
+  identifiableFrom,
+  interactionToNextPaint,
+  type LayoutShift,
+  largestShiftWindow,
+  type ObservedMetric,
+  structuralIdentity,
+  type WebVitalsDimensions,
+  type WebVitalsHost,
+  webVitalsEvent,
+  webVitalsValueOf,
+} from './web-vitals.ts'

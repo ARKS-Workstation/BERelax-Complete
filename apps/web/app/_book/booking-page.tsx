@@ -63,7 +63,9 @@ import {
   wallClock,
 } from '../../src/book/state.ts'
 import { type Locale, localisedPath } from '../../src/i18n/locales.ts'
+import WebVitalsIsland from '../_analytics/web-vitals.client.tsx'
 import { RouteNav } from '../_routes/route-nav.tsx'
+import { TagLoader } from '../(public)/_components/tag-loader.tsx'
 import { OtpField, PhoneField, ResendButton, SubmitOnce } from './details.client.tsx'
 import { SlotPicker } from './slot-picker.client.tsx'
 import { BookStyles } from './styles.tsx'
@@ -1218,6 +1220,24 @@ export function BookingPageBody(props: BookingPageProps) {
         the route docs/03 §6's funnel is about, so it opts in.
       */}
       <CollectorIsland path={localisedPath(BOOK_PATH, locale)} />
+      {/*
+        The web-vitals reporter and the tag loader, beside it (A-MEAS-04).
+
+        Here and not in the shell for the same reason the collector is here, and on THIS route first
+        because it is the one the acceptance line names: "INP rows exist for /book distinctly from other
+        routes". A booking page's responsiveness is the figure that costs money — a reader who taps
+        a slot and waits 600 ms for it to highlight is a reader who taps it again.
+
+        The reporter reuses the collector's own queue through `trackCollectorEvent`, so there is one batch
+        and one envelope rather than two. The loader's catalogue is EMPTY — no measurement id, container id
+        or pixel id has been issued and no analytics host appears anywhere in this repository
+        (Y5-client-tags) — so on this route it declares nothing, loads nothing and costs the reader the
+        bytes of a module that returns immediately. That is deliberate rather than premature: the
+        mechanism is wired where it will be used, and filling in the catalogue is one edit to one array
+        rather than a change to this page.
+      */}
+      <WebVitalsIsland path={localisedPath(BOOK_PATH, locale)} />
+      <TagLoader />
     </main>
   )
 }

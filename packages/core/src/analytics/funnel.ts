@@ -144,6 +144,17 @@ export const COLLECTED_EVENT_FUNNEL: Readonly<
       'that an unattributed booking is distinguishable from no booking. Counting it as a stage of its ' +
       'own would insert a step between the click and the booking that no customer performs.',
   }),
+  web_vitals: Object.freeze({
+    stage: null,
+    entryPageViewOnly: false,
+    why:
+      'Not a stage, and not a thing a visitor did. A-MEAS-04 reports how fast the page was and what the ' +
+      'slow part was attributed to; a reader who waited four seconds for the largest element has taken ' +
+      'no step through the funnel, and counting it as one would put a bucket between the landing and the ' +
+      'service page that nobody passes through. The reason it is collected at all is the other half of ' +
+      'the same question the funnel asks: a drop-off between two stages and an INP of 600 ms on the ' +
+      'route between them are the same finding read twice.',
+  }),
 })
 
 /**

@@ -305,6 +305,79 @@ const observeOverdueBlockingObligation: AlertObserver = async (sql, at) => {
 }
 
 /**
+ * Settlement batches that do not tie, and the quarantined exceptions beside them for context.
+ *
+ * ## Why the figure is a COUNT OF BATCHES and not a sum of fils
+ *
+ * A sum is the obvious measurement and it is the wrong one twice over. Variances net off — a line we
+ * recorded 200 fils high and another 200 fils low sum to nothing while both are real disagreements — and
+ * a `settlement_variance.difference_fils` is non-zero by CHECK precisely so that a row EXISTS only when
+ * two figures disagree. So the question the threshold answers is "is there a batch that does not tie",
+ * and the answer is a count of batches with at least one reason not to.
+ *
+ * `state = 'quarantined'` OR a variance row, and the OR matters: a batch can be `posted` and still carry
+ * a variance — a line with no local record does not stop the rest of the payout being journalled — so a
+ * query over the state alone would miss exactly the case where the money went into the books and one line
+ * of it is unexplained.
+ *
+ * ## The incident key, and why the quarantined exceptions are in `detail` and not in the figure
+ *
+ * The oldest untied batch's id: stable for as long as that batch is untied, gone the moment it is
+ * explained, so the alert clears itself and a second untied batch is a second incident rather than a
+ * louder version of the first. The ordering is TOTAL — `settled_on`, then `batch_reference`, then `id` —
+ * because the row IS the key and a tie would make it flap between passes.
+ *
+ * `reconciliation_exception` is a DIFFERENT subject: a payment intent diverging from the gateway, with
+ * its own register and its own remedy (ADR 0070, Y-PAY-05). Its quarantined count is carried here because
+ * an operator looking at unreconciled money wants both numbers, and it is deliberately NOT the figure
+ * that fires: folding the two together would put "the acquirer paid a different amount" and "an intent is
+ * in a state we cannot explain" on one screen with the same words, which is the collapse
+ * `raiseAlertThresholdFault`'s own comment refuses one function over.
+ */
+const observeUnreconciledSettlementBatch: AlertObserver = async (sql) => {
+  const rows = await sql<
+    { batchId: string; batchReference: string; settledOn: string; variances: number }[]
+  >`
+    select b.id::text            as "batchId",
+           b.batch_reference     as "batchReference",
+           b.settled_on::text    as "settledOn",
+           count(v.id)::int      as variances
+      from settlement_batch b
+      left join settlement_variance v on v.batch_id = b.id
+     where b.state = 'quarantined' or v.id is not null
+     group by b.id, b.batch_reference, b.settled_on
+     order by b.settled_on, b.batch_reference, b.id
+  `
+  const [exceptions] = await sql<{ quarantined: string }[]>`
+    select count(*)::text as quarantined
+      from reconciliation_exception
+     where kind = 'quarantined'
+  `
+  if (exceptions === undefined) {
+    // An aggregate over an empty table returns one row, so this cannot happen — and it is named rather
+    // than coalesced to zero, for this module's rule: a reader that cannot read must not return zero.
+    throw new Error(
+      'The quarantined-exception count returned no row, which an aggregate over an empty table cannot.',
+    )
+  }
+  const oldest = rows[0]
+  return {
+    alertId: 'unreconciled_settlement_batch',
+    observed: rows.length,
+    incidentKey: oldest?.batchId ?? 'none',
+    detail: {
+      batches: rows.map((row) => ({
+        batchReference: row.batchReference,
+        settledOn: row.settledOn,
+        variances: row.variances,
+      })),
+      // Context, not the figure. See the header.
+      quarantinedIntentExceptions: Number(exceptions.quarantined),
+    },
+  }
+}
+
+/**
  * One observer per registered alert.
  *
  * `satisfies Record<AlertId, AlertObserver>` and not a type annotation: the annotation would accept an
@@ -320,6 +393,7 @@ export const ALERT_OBSERVERS = {
   job_failure_rate: observeJobFailureRate,
   repeated_auth_failure: observeRepeatedAuthFailure,
   overdue_blocking_obligation: observeOverdueBlockingObligation,
+  unreconciled_settlement_batch: observeUnreconciledSettlementBatch,
 } satisfies Record<AlertId, AlertObserver>
 
 /**

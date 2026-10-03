@@ -256,6 +256,14 @@ function findHoursLiterals(
     readFileSync(file, 'utf8')
       .split('\n')
       .forEach((line, index) => {
+        // A COMMENT is not a rendered surface, and this rule is about what a page shows. Added at the
+        // A-FIRST-10 merge: that unit's doc comments quote the acceptance line's own "11:00 through
+        // 01:00" wording, and rewording them to satisfy a scan would delete the reason the code is
+        // shaped as it is. The rendered literals it also had were real and were removed. A line that
+        // merely starts with a comment marker is still skipped only here — `respect` and the exempt
+        // list are untouched, so a literal in rendered copy is refused exactly as before.
+        const code = line.trim()
+        if (code.startsWith('//') || code.startsWith('*') || code.startsWith('/*')) return
         for (const { name, pattern } of HOURS_PATTERNS) {
           if (pattern.test(line))
             findings.push({ file: relativePath, line: index + 1, pattern: name })

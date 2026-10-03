@@ -282,6 +282,16 @@ export const TEST_PORT_BANDS = {
   // 23_300 is the band these units were allocated. [23_300, 23_600) is above every band above it and well
   // below EPHEMERAL_PORT_FLOOR.
   'public-site': { start: 23_300, width: 300 },
+  // A-MEAS-04's tag loader and web-vitals reporter, which need a real server for the three claims no pure
+  // test can make: a REQUEST to a tag that must not happen before a grant and must happen after one in the
+  // same page session, the `dataLayer` a real script would read, and a `PerformanceObserver`'s own figures
+  // — which only exist in a browser that laid a page out.
+  //
+  // 23_600 and not the next round number after `walk-in-speed`: 23_000 and 23_300 are allocations held by
+  // units in flight in other worktrees, and a band chosen from what one worktree can see is exactly how
+  // `template-editor` and `book-flow` came to share one. [23_600, 23_900) contains none of
+  // RESTRICTED_PORTS and is below the ephemeral floor.
+  'tags-and-vitals': { start: 23_600, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

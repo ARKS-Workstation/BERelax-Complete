@@ -4,7 +4,7 @@
 
 # ADR index
 
-103 records, generated from the front matter of each one. Every column below is read
+105 records, generated from the front matter of each one. Every column below is read
 out of the record it describes, so a row cannot be wrong without the record being wrong — which is
 the whole reason this file is not maintained by hand. For the argument behind any of them, read
 [README.md](README.md) and then the record.
@@ -114,3 +114,5 @@ the whole reason this file is not maintained by hand. For the argument behind an
 | [0111](0111-a-therapist-page-is-a-refusal-and-a-departure-redirects.md) | A therapist page is a REFUSAL with three dispositions, and a departure redirects | accepted | 2026-10-03 | W-SITE-06 | docs/01 decisions 23 — the implementation side of |
 | [0112](0112-a-sitemap-is-refused-rather-than-served-lopsided-and-a-ping-is-never-reported-unsent.md) | A lopsided sitemap is REFUSED rather than served, and a ping is never reported that was not sent | accepted | 2026-10-03 | W-SITE-08 | docs/01 decisions — none; this is the propagation-shaped consequence of |
 | [0113](0113-a-301-map-is-a-function-and-the-proxy-resolves-it-from-a-committed-module.md) | A 301 map is a FUNCTION with no gaps and no loops, and the proxy resolves it from a committed module | accepted | 2026-10-03 | W-SITE-09 | docs/01 decisions — none; this is the relaunch-shaped consequence of migration 0029's |
+| [0115](0115-an-attribution-identity-is-a-structural-path-and-never-a-selector.md) | a web-vitals attribution identity is a structural path and never a selector | accepted | 2026-10-03 | A-MEAS-04 | docs/01 decisions — none. This is a mechanism under ADR 0018 (first-party measurement), |
+| [0116](0116-a-reason-is-a-declared-consequence-or-the-agents-own-words.md) | a reason is a declared consequence or the agent's own words, and nothing else is representable | accepted | 2026-10-03 | G-AGT-02 | docs/01 decisions — none. A mechanism under ADR 0002 (a gap is not a nought), beside |
