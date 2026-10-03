@@ -575,3 +575,98 @@ export const settlementVariance = pgTable(
     index('settlement_variance_batch_idx').on(table.batchId, table.kind),
   ],
 )
+
+/**
+ * One VERIFIED webhook delivery. Mirrors `0147_payment_webhook_event.sql`.
+ *
+ * There is deliberately no `verified` boolean: an unverified delivery writes NOTHING at all, so a row for
+ * one cannot exist and the refusals are `audit_event` rows — an unauthenticated request must not be able
+ * to fill a table.
+ *
+ * `unique (gateway, event_id)` is REPLAY PROTECTION: the same event twice lands once, and the second
+ * delivery is answered 200. `payloadSha256` plus ZY672 is IDEMPOTENCY, which is a different claim: a
+ * DIFFERENT body under a known event id is refused and never applied. The unique constraint cannot tell
+ * the two apart — both are a second row with the same id.
+ *
+ * The refusals that are triggers have no Drizzle expression: ZY671 (append-only on both tables), ZY672
+ * (a reused event id over a different payload digest), ZY673 (an `applied` intent run must have its
+ * `payment_intent_transaction` row) and ZY674 (a run must name a handler `payment_webhook_handlers()`
+ * declares).
+ */
+export const paymentWebhookEvent = pgTable(
+  'payment_webhook_event',
+  {
+    id: uuid('id').primaryKey(),
+    /** The adapter the delivery is attributed to. Free text: no provider has been chosen. */
+    gateway: text('gateway').notNull(),
+    /** The GATEWAY's own identifier, stable across redeliveries. The whole mechanism. */
+    eventId: text('event_id').notNull(),
+    /** One of `PAYMENT_INTENT_EVENTS` in `@berelax/core`. */
+    eventType: text('event_type').notNull(),
+    gatewayIntentId: text('gateway_intent_id').notNull(),
+    /**
+     * The amount the event carries, or null for one that moves no money.
+     *
+     * STORED, because a capture delivered before its authorisation cannot be folded on arrival — ADR
+     * 0056's table is strict — and is HELD here until its predecessor turns up, which needs the amount.
+     * The body is not kept, so this column and `occurredAt` are the only two figures the fold has.
+     */
+    amountFils: bigint('amount_fils', { mode: 'bigint' }),
+    /** The digest of the BYTES, computed before the body was parsed. ZY672's subject. */
+    payloadSha256: text('payload_sha256').notNull(),
+    /** The gateway's own instant, which the lifecycle fold orders by. */
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull(),
+    /** The instant the SIGNATURE covered: what the timestamp tolerance was judged against. */
+    signedAt: timestamp('signed_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    unique('payment_webhook_event_one_row_per_event').on(table.gateway, table.eventId),
+    check(
+      'payment_webhook_event_payload_is_sha256',
+      sql`${table.payloadSha256} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      'payment_webhook_event_type_known',
+      sql`${table.eventType} in ('action_required', 'authorised', 'authorisation_failed', 'captured', 'refunded', 'voided')`,
+    ),
+    check(
+      'payment_webhook_event_amount_matches_type',
+      sql`case when ${table.eventType} in ('authorised', 'captured', 'refunded') then ${table.amountFils} is not null and ${table.amountFils} > 0 else ${table.amountFils} is null end`,
+    ),
+    index('payment_webhook_event_intent_idx').on(table.gatewayIntentId, table.occurredAt),
+    index('payment_webhook_event_received_idx').on(table.receivedAt.desc()),
+  ],
+)
+
+/**
+ * One row per (event, handler): ADR 0008's exactly-once-per-handler as a constraint.
+ *
+ * A boolean on the event would have said only "something was done", and one delivery legitimately has
+ * more than one handler — a capture moves the intent AND settles the document it paid for, and those can
+ * fail independently. A handler added later re-processes the events it has no row for without re-running
+ * the ones it does.
+ */
+export const paymentWebhookHandlerRun = pgTable(
+  'payment_webhook_handler_run',
+  {
+    id: uuid('id').primaryKey(),
+    webhookEventId: uuid('webhook_event_id')
+      .notNull()
+      .references(() => paymentWebhookEvent.id),
+    /** `WEBHOOK_HANDLERS` in `@berelax/payments`, held to it by ZY674. */
+    handler: text('handler').notNull(),
+    /** `applied` changed something; `skipped` looked and had nothing to do. Both are a RUN. */
+    outcome: text('outcome').notNull(),
+    detail: text('detail').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    unique('payment_webhook_handler_run_once').on(table.webhookEventId, table.handler),
+    check(
+      'payment_webhook_handler_run_outcome_known',
+      sql`${table.outcome} in ('applied', 'skipped')`,
+    ),
+    index('payment_webhook_handler_run_handler_idx').on(table.handler, table.createdAt.desc()),
+  ],
+)

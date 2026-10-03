@@ -182,6 +182,27 @@ const schema = z
      * and no token. What must not happen outside production is an authorisation, and `PAYMENT_PROVIDER=real`
      * is already refused for that (ADR 0005).
      */
+    /**
+     * The shared secret a card gateway signs its webhook deliveries with — Y-PAY-04.
+     *
+     * **No default, and `optional()` for the same reason the three KEKs and the document-signing secret
+     * are.** No gateway has been chosen and no merchant account exists (OPEN-QUESTIONS `Y7-gateway`), so
+     * there is no secret to default to — and the one default that would "work" is the one this schema
+     * exists to make impossible: a webhook endpoint that trusts an unsigned body.
+     *
+     * Unset is a FIRST-CLASS state and it refuses: `webhookSigningSecretFrom` in `@berelax/payments`
+     * answers `not_configured`, the endpoint answers **503** with `[payment-webhook-not-configured]`, and
+     * no row is written. 503 and not 401, deliberately: 401 says *your signature is wrong* and the truth
+     * is *we cannot check it*, which is a different fact with a different remedy — and a gateway retries a
+     * 503 while a 401 makes it give up on an event that was perfectly valid.
+     *
+     * NOT in the `real`-refused list below: a signing secret is not a provider selection, and holding one
+     * outside production lets a staging deployment verify a staging gateway's deliveries. What must not
+     * happen outside production is an authorisation, and `PAYMENT_PROVIDER=real` is already refused for
+     * that (ADR 0005).
+     */
+    PAYMENT_WEBHOOK_SIGNING_SECRET: z.string().optional(),
+
     PAYMENT_HOSTED_FIELDS_FRAME_ORIGIN: z.string().optional(),
     PAYMENT_HOSTED_FIELDS_SCRIPT_ORIGIN: z.string().optional(),
 

@@ -92,20 +92,23 @@ interface Ticket {
   readonly invoiceId: string
 }
 
-const run = (suffix: string): string => `YPAY09-${nonce}-${suffix}`
-
 /**
- * A document number unique to this run AND to this ticket.
+ * A document series period unique to this RUN, so document numbers cannot collide with anything.
  *
- * `invoice_series_period_number_unique` covers (series, period, number), and the first version of this
- * helper keyed only on the run — so the second ticket collided with the first. The suffix is folded in,
- * which is also why each ticket has one.
+ * `invoice_series_period_number_unique` covers (series, period, number) and `period_key` is free text, so
+ * putting the run's nonce in the period makes a plain counter sufficient. The first version of this
+ * helper hashed the nonce and the ticket name into a range of nine thousand, which collided between two
+ * tickets of ONE run and could collide between runs — a flake that presents as a duplicate key in a
+ * suite that has just inserted its own fixtures.
  */
-const invoiceNumberFor = (suffix: string): number => {
-  let hash = 0
-  for (const character of `${nonce}-${suffix}`) hash = (hash * 31 + character.charCodeAt(0)) % 8_999
-  return 900_000 + hash
+const PERIOD_KEY = (): string => `2099-${nonce}`
+let nextInvoiceNumber = 0
+const invoiceNumberFor = (): number => {
+  nextInvoiceNumber += 1
+  return nextInvoiceNumber
 }
+
+const run = (suffix: string): string => `YPAY09-${nonce}-${suffix}`
 
 /**
  * A whole till ticket: invoice, its line, its checkout entry crediting `2040`, one `card_online` tender,
@@ -133,7 +136,7 @@ async function ticket(suffix: string, tipFils: number): Promise<Ticket> {
         customer_id, customer_name_snapshot, issue_date, issue_trading_date, tax_point_date,
         net_total, vat_total, gross_total
       ) values (
-        'tax_invoice', 'TAX-INV', '2099', ${invoiceNumberFor(suffix)},
+        'tax_invoice', 'TAX-INV', ${PERIOD_KEY()}, ${invoiceNumberFor()},
         ${run(`${suffix}-INV`)},
         ${FIXTURE_ISSUER.legalName}, ${FIXTURE_ISSUER.tradingName}, ${FIXTURE_ISSUER.trn},
         ${FIXTURE_ISSUER.addressLines.join('\n')}, ${FIXTURE_ISSUER.emirate},

@@ -54990,6 +54990,323 @@ export function chargebackNetEffectFils(`,
   }
 }
 
+// 178a-178z. Y-PAY-04 — a webhook is an UNAUTHENTICATED REQUEST until its signature verifies.
+//
+//            Every case in this block breaks one step of an ORDER, and the order is the unit. The defect
+//            each one creates is invisible from the outside: the endpoint keeps answering, the gateway
+//            keeps being happy, and the only evidence is a payment that moved without a signature or a
+//            body in a log nobody meant to put it in.
+//
+//            178a to 178e are the verification itself: the fall-back to trusting the body when no secret
+//            is configured, the three refusals collapsed into one, and the tolerance checked BEFORE the
+//            MAC — which is the subtlest of them, because it still refuses the right requests and makes
+//            the two refusals indistinguishable in the log.
+//
+//            178f is the one worth reading twice: the refusal branch carrying the body. It is the shape
+//            every "add the payload to the error for debugging" change takes, it is one line, and under
+//            SAQ-A the body is the one place a misconfigured gateway could put a primary account number.
+//
+//            178g and 178h are the two database claims that are easy to confuse: replay protection (the
+//            same bytes twice land once, answered 200) and idempotency (a DIFFERENT body under a reused
+//            id is refused). Treating the second as the first accepts a forged payload silently and then
+//            ignores it silently, which is why 178h breaks exactly that.
+//
+//            178i is the route reading `request.json()` instead of `request.text()`. It makes every
+//            signature fail, which sounds loud and is not: it presents as a gateway integration that
+//            "cannot be made to work", and the only check that catches it is one that signs real bytes.
+//
+//            178j is holding. A capture arriving before its authorisation must be HELD rather than
+//            refused, because the gateway will not send it again once it has a 200 — so refusing it loses
+//            a money movement, and ADR 0056's table stays strict only because the waiting happens here.
+//
+//            178k is the acceptance line about the client callback, and it is checked as a SCAN: the
+//            claim is that one path cannot reach another, and an absence is not provable by a passing
+//            assertion.
+//
+//            178l and 178m are the gates this unit had to stay inside: the SQLSTATE registry in both
+//            directions, and the migration ledger's documented run.
+//
+//            178y and 178z are the controls: every case above is satisfied by something FAILING, so one
+//            has to be satisfied by the real tree passing.
+//
+//            Nothing here edits `packages/db/migrations/0147_payment_webhook_event.sql` in order to test a
+//            DATABASE rule, for blocks 134, 154, 166, 167 and 168's reason. ZY671-ZY674 are proved against
+//            a real PostgreSQL by `packages/fixtures/src/payment-webhook.itest.ts`, and two of them — ZY673
+//            and ZY674 — are DEFERRED, so that file drives them through real transactions rather than
+//            savepoints. What the migration IS edited for is 178m, where the checker reads the text.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const VERIFY = 'packages/payments/src/webhook/verify.ts'
+  const HANDLERS = 'packages/payments/src/webhook/handlers.ts'
+  const INGEST = 'apps/web/app/api/webhooks/payments/ingest.ts'
+  const INTENT = 'packages/payments/src/intent.ts'
+  const WEBHOOK_MIGRATION = 'packages/db/migrations/0147_payment_webhook_event.sql'
+  const WEBHOOK_REGISTRY = 'packages/db/src/sqlstate-registry.ts'
+
+  const VERIFY_SUITE = 'packages/payments/src/webhook/verify.test.ts'
+  const INGEST_SUITE = 'packages/fixtures/src/payment-webhook.itest.ts'
+  const SERVER_SUITE = 'apps/web/src/payments-webhook.itest.ts'
+
+  const verifySuite = () => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', VERIFY_SUITE]
+  const ingestSuite = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    INGEST_SUITE,
+  ]
+
+  /**
+   * One anchored edit to a shipped module, then the suite that must fail because of it.
+   *
+   * Named for this block rather than reusing block 168's `breakSettlement`, and the reason is mechanical
+   * rather than stylistic: two blocks defining a helper of the same shape is how git found the bodies as
+   * shared context and INTERLEAVED two blocks at a merge (block 133's note about its own helper).
+   */
+  const breakWebhook = (name, file, find, into, rule, args = verifySuite()) => {
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        file,
+        (source) => replaceOnce(source, find, into),
+        () => runExpectingFailure('pnpm', args),
+      ),
+      rule,
+    )
+  }
+
+  // ---- the verification ------------------------------------------------------------------------
+
+  // 178a. THE case the unit exists for: verify when a secret is configured, trust the body when one is
+  //       not. One line, works everywhere a secret is set, and the machine where it is not is production
+  //       on the day it is rotated.
+  breakWebhook(
+    'webhook: falling back to trusting the body with no secret configured fails by name',
+    VERIFY,
+    "  if (input.secret.kind === 'not_configured') {\n    return refuse('secret_not_configured', input.secret.missing)\n  }",
+    "  if (input.secret.kind === 'not_configured') {\n    return { kind: 'verified', body: input.rawBody, signedAtEpochSeconds: 0 }\n  }",
+    'refuses every delivery when it is absent',
+  )
+
+  // 178b. A blank secret treated as configured. `FOO=` is what a misconfigured deployment looks like, and
+  //       an empty string is a perfectly valid HMAC key that anybody can compute against.
+  breakWebhook(
+    'webhook: a blank signing secret read as configured fails by name',
+    VERIFY,
+    "  if (secret === undefined || secret.trim() === '') {",
+    '  if (secret === undefined) {',
+    'is absent by default, and a blank one is absent too',
+  )
+
+  // 178c. The three refusals collapsed into one. The acceptance line asks for absent, malformed and
+  //       wrong-key to be ANSWERED individually, because they have different remedies: a caller that is
+  //       not the gateway, a gateway whose format changed, and a key that does not match.
+  breakWebhook(
+    'webhook: collapsing absent and malformed into one refusal fails by name',
+    VERIFY,
+    "  if (signature === null || timestamp === null) return refuse('signature_malformed')",
+    "  if (signature === null || timestamp === null) return refuse('signature_absent')",
+    'refuses a MALFORMED signature',
+  )
+
+  // 178d. The shape check removed, which is what makes `timingSafeEqual` safe to call at all: it THROWS
+  //       on a length mismatch, so a forged signature of the wrong length becomes a 500.
+  breakWebhook(
+    'webhook: dropping the hex shape check fails by name',
+    VERIFY,
+    "  if (!SIGNATURE_SHAPE.test(signature) || !TIMESTAMP_SHAPE.test(timestamp)) {\n    return refuse('signature_malformed')\n  }",
+    "  if (false) {\n    return refuse('signature_malformed')\n  }",
+    'refuses a MALFORMED signature',
+  )
+
+  // 178e. The tolerance moved BEFORE the MAC. The subtlest edit in the block: it still refuses the right
+  //       requests, and it makes a forged stale body and the gateway's own retry answer the same thing —
+  //       so the log can no longer tell a replay from a forgery.
+  breakWebhook(
+    'webhook: checking the tolerance before the MAC fails by name',
+    VERIFY,
+    '  const expected = signWebhookPayload(input.secret.secret, timestamp, input.rawBody)',
+    "  if (Math.abs(Math.floor(input.now / 1000) - Number(timestamp)) > (input.toleranceSeconds ?? WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS)) return refuse('timestamp_outside_tolerance')\n  const expected = signWebhookPayload(input.secret.secret, timestamp, input.rawBody)",
+    'rejects a FORGED stale delivery as invalid, not as a replay',
+  )
+
+  // 178f. The refusal carrying the body. This is the shape every "put the payload in the error so we can
+  //       debug it" change takes, and under SAQ-A the body is the one place a misconfigured gateway could
+  //       put a primary account number (ADR 0067).
+  breakWebhook(
+    'webhook: a refusal that carries the body fails by name',
+    VERIFY,
+    "    return refuse('signature_invalid')",
+    "    return { ...refuse('signature_invalid'), body: input.rawBody } as never",
+    'returns only a reason, a status and the missing key names',
+  )
+
+  // ---- the two database claims -----------------------------------------------------------------
+
+  // 178g. A redelivery answered as a refusal. A gateway that gets a 4xx for an event it has already had
+  //       processed escalates an incident and retries harder.
+  breakWebhook(
+    'webhook: refusing a redelivery instead of answering it fails by name',
+    HANDLERS,
+    "    if (isWebhookRedelivery(error)) return { kind: 'redelivered', eventId: delivery.eventId }",
+    '    if (isWebhookRedelivery(error)) throw error',
+    'answers a redelivery without a second transition',
+    ingestSuite(),
+  )
+
+  // 178h. Idempotency treated as replay protection: a DIFFERENT body under a reused event id read as the
+  //       same event arriving twice. It accepts a forged payload silently and then ignores it silently,
+  //       which is the one failure here with no trace at all.
+  breakWebhook(
+    'webhook: treating a reused event id as a redelivery fails by name',
+    HANDLERS,
+    "    if (refusal !== null && refusal.details?.['rule'] === 'eventIdReused') {\n      return { kind: 'event_id_reused', eventId: delivery.eventId }\n    }",
+    "    if (refusal !== null && refusal.details?.['rule'] === 'eventIdReused') {\n      return { kind: 'redelivered', eventId: delivery.eventId }\n    }",
+    'refuses a DIFFERENT body under a reused event id',
+    ingestSuite(),
+  )
+
+  // 178i. The route parsing instead of reading bytes. It makes every signature fail, which presents as a
+  //       gateway integration that "cannot be made to work" rather than as a bug in this file — and the
+  //       only check that catches it is one that signs real bytes and POSTs them.
+  {
+    // Comments are STRIPPED first, and that is not a loosening: this file SAYS in prose that it does not
+    // call `request.json()`, which is the claim — so a scan over the raw text reports the documentation
+    // as the violation. Block 168k's first run made exactly that mistake.
+    const withoutComments = (text) =>
+      text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ')
+    const ingest = withoutComments(readFileSync(INGEST).toString())
+    check(
+      'webhook: the route reads the raw body and never request.json()',
+      ingest.includes('await request.text()') && !ingest.includes('request.json()'),
+      'the ingest path parses the request instead of reading its bytes',
+    )
+    // The control: the scan must be able to SEE a `request.json()`, or it is satisfied by any file.
+    check(
+      'webhook: the raw-body scan fires on a route that parses',
+      withoutComments(
+        readFileSync(INGEST).toString().replace('await request.text()', 'await request.json()'),
+      ).includes('request.json()'),
+      'the scan cannot detect the thing it forbids',
+    )
+  }
+
+  // 178j. Holding removed, so a capture arriving before its authorisation is refused. The gateway will
+  //       not send it again once it has a 200, so the movement is simply lost — and the endpoint reports
+  //       a 500 about an event that was perfectly valid.
+  breakWebhook(
+    'webhook: refusing an out-of-order delivery instead of holding it fails by name',
+    HANDLERS,
+    '    if (error instanceof IntentTransitionRefused) return null',
+    '    if (error instanceof IntentTransitionRefused) throw error',
+    'converges to the same terminal state however the six events arrive',
+    ingestSuite(),
+  )
+
+  // ---- the client callback, as a scan ----------------------------------------------------------
+
+  // 178k. "An invoice is marked paid only by a webhook-confirmed capture" is an ABSENCE: the client
+  //       callback path must not be able to reach the tender. An absence cannot be proved by a passing
+  //       assertion, so it is read — and the control fires on a source that does reach it.
+  {
+    const intent = readFileSync(INTENT).toString()
+    const callback = intent.slice(intent.indexOf('export async function recordClientCallback'))
+    const forbidden = ['tenderWebhookCapture', 'insert into payment', 'update payment_intent']
+    const reached = forbidden.filter((needle) => callback.includes(needle))
+    check(
+      'webhook: the client callback path cannot reach the tender or move an intent',
+      reached.length === 0,
+      `recordClientCallback mentions: ${reached.join(', ')}`,
+    )
+    check(
+      'webhook: the client-callback scan fires on a path that does reach it',
+      forbidden.filter((needle) => `${callback}\ntenderWebhookCapture(uow, {})`.includes(needle))
+        .length === 1,
+      'the scan cannot detect the thing it forbids',
+    )
+  }
+
+  // ---- the gates this unit had to stay inside --------------------------------------------------
+
+  // 178l. The registry's forward direction: a code the migration raises and the registry does not list.
+  withEditedFile(
+    WEBHOOK_REGISTRY,
+    (source) => replaceOnce(source, "    code: 'ZY673',", "    code: 'ZY998',"),
+    () =>
+      checkRejectedBy(
+        'webhook: a raised code missing from the SQLSTATE registry is refused',
+        runExpectingFailure('pnpm', ['sqlstate']),
+        'ZY673',
+      ),
+  )
+
+  // 178m. And the ledger's documented run, which gate case 90a reads by the shape of the opening line.
+  {
+    const ledger = readFileSync('packages/db/src/index.ts').toString()
+    check(
+      'webhook: the migration ledger documents 0147 in the shape gate case 90a reads',
+      ledger.includes('// 147 is 0147_payment_webhook_event.sql (Y-PAY-04)'),
+      'the paragraph for 147 is absent or opens in another shape',
+    )
+    check(
+      'webhook: SCHEMA_VERSION is the newest migration on disk',
+      ledger.includes('export const SCHEMA_VERSION = 147 as const'),
+      'SCHEMA_VERSION does not name 147',
+    )
+    const migration = readFileSync(WEBHOOK_MIGRATION).toString()
+    // The amount is a COLUMN, because a held event is re-folded from its row and the body is not kept.
+    check(
+      'webhook: the event row carries the two figures a re-fold needs, and not the body',
+      migration.includes('amount_fils        bigint') &&
+        migration.includes('occurred_at        timestamptz not null') &&
+        !migration.includes('payload            text'),
+      'the event row cannot be re-folded, or it stores the body',
+    )
+    // The released codes of the band must stay UNREGISTERED (ADR 0043 direction 3).
+    const registry = readFileSync(WEBHOOK_REGISTRY).toString()
+    const claimed = ['ZY675', 'ZY676', 'ZY677', 'ZY678', 'ZY679', 'ZY680'].filter((code) =>
+      registry.includes(code),
+    )
+    check(
+      'webhook: the released codes of the band are not registered',
+      claimed.length === 0,
+      `registered without being raised: ${claimed.join(', ')}`,
+    )
+  }
+
+  // ---- the controls ----------------------------------------------------------------------------
+
+  // 178y. The committed verification suite passes, which is what makes every case above a claim about an
+  //       edit rather than about a suite that fails anyway.
+  {
+    const pure = run('pnpm', verifySuite())
+    check('webhook: the committed verification suite passes', !pure.failed, pure.output)
+  }
+
+  // 178z. And the two database suites, which are where the claims a pure test cannot reach are proved:
+  //       the four refusals, the handler set held equal across SQL and TypeScript, ten concurrent
+  //       deliveries producing one transition and one entry, the shuffled six-event convergence, and the
+  //       statuses the application actually serves.
+  {
+    const pair = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      INGEST_SUITE,
+      SERVER_SUITE,
+    ])
+    check(
+      'webhook: the refusals, the races and the served statuses pass against the real database',
+      !pair.failed,
+      pair.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

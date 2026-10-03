@@ -251,6 +251,16 @@ export const TEST_PORT_BANDS = {
   // 19_100 is the band this unit was allocated. 16_800 through 19_000 are allocations held by units in
   // `template-editor` and `book-flow` came to share one. [19_100, 19_400) contains none of
   'flow-builder': { start: 19_100, width: 300 },
+  // Y-PAY-04's webhook ingest, which needs a real server for every claim it makes. Three of them can only
+  // be made against what the application ANSWERS: the three 401s for an absent, a malformed and a
+  // wrong-key signature, the 200 a redelivery gets rather than a 409, and the 503 an absent signing
+  // secret gets rather than a 401 — statuses a handler test can assert about a `Response` object it built
+  // itself, which is exactly why they have to be asserted about one the route served. The fourth is the
+  // body: the suite POSTs raw bytes and signs them, so a route that read `request.json()` and
+  // re-serialised would fail every signature, and nothing short of a real request can show that.
+  // 20_000 is the band this unit was allocated. [20_000, 20_300) is above every band above it and well
+  // below EPHEMERAL_PORT_FLOOR.
+  'payments-webhook': { start: 20_000, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

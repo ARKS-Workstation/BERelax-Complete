@@ -439,6 +439,29 @@ export const ROUTES = [
       'is somewhere a relay naturally posts. Dynamic because it reads the clock once and writes.',
   },
   {
+    id: 'payments-webhook',
+    path: '/api/webhooks/payments',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'Y-PAY-04s webhook ingest: the only source of truth for payment state, and the only path that can ' +
+      'mark an invoice paid. POST only, with deliberately no GET and no verification-challenge handler - ' +
+      'every gateway wants a different one, none has been chosen (Y7-gateway), and a GET that echoed a ' +
+      'query parameter back is the shape of an open redirect. Under /api and NOT /api/v1: it is not a ' +
+      'versioned public API, it is an endpoint one configured third party posts to, and a locale prefix ' +
+      'would give it two URLs of which the gateway would hold whichever was typed into a dashboard. ' +
+      'Exempt from the proxy for /api/collects reason: a 301 on a mistyped trailing slash would ' +
+      'downgrade the POST to a GET with the delivery dropped. Dynamic by necessity - it verifies a ' +
+      'signature against a clock and writes rows. Not indexable and nothing to index: every answer is ' +
+      'JSON with no-store, and an unsigned request gets 401 before the body is read. Nothing is read ' +
+      'from the query string: the signature covers the body and the timestamp header, and a parameter ' +
+      'that could select an intent would be a way to move money with a URL.',
+  },
+  {
     id: 'whatsapp-ref',
     path: '/api/whatsapp',
     kind: 'handler',

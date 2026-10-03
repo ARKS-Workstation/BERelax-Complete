@@ -1210,6 +1210,49 @@ export {
   recordGatewayIntentId,
 } from './repositories/payment-intent.ts'
 /*
+  Y-PAY-04's webhook side (0147). Reads and writes only; the signature is `@berelax/payments`' and happens
+  strictly before any of this.
+
+  Two claims that are often confused and are not the same: `isWebhookRedelivery` is REPLAY PROTECTION — the
+  same bytes again, answered 200 — and it matches the CONSTRAINT NAME as well as the SQLSTATE, because a
+  bare 23505 in the same transaction could equally be `payment_webhook_handler_run_once` or the intent's
+  own idempotency key. `eventIdReused` (ZY672) is IDEMPOTENCY: a DIFFERENT body under a known event id,
+  refused and never applied. `recordPaymentWebhookEvent` takes a `UnitOfWork` because ZY673 reads the
+  `payment_intent_transaction` rows at COMMIT — an event row committed separately from its application
+  would let a crash between the two leave a run claiming a movement that never happened, and the run row is
+  what stops a retry.
+
+  `tenderWebhookCapture` is the ONLY path that writes a `card_online` `payment` row for a gateway capture,
+  which is the acceptance line "an invoice is marked paid only by a webhook-confirmed capture":
+  `recordClientCallback` contains no UPDATE and never reaches it. `findInvoiceForIntentReference` is a
+  LOOKUP that may legitimately answer nothing, because 0106 refused a key from `payment_intent` to
+  `invoice` — an intent is authorised before there is a document.
+*/
+export {
+  declaredWebhookHandlers,
+  findInvoiceForIntentReference,
+  findPaymentWebhookEvent,
+  isPaymentWebhookRule,
+  isWebhookHandlerAlreadyRun,
+  isWebhookRedelivery,
+  PAYMENT_WEBHOOK_CONSTRAINT,
+  PAYMENT_WEBHOOK_SQLSTATE,
+  type PaymentWebhookEventRow,
+  type PaymentWebhookRule,
+  paymentWebhookError,
+  type RecordHandlerRunInput,
+  type RecordPaymentWebhookEventInput,
+  readPaymentIntentByGatewayIntentId,
+  readWebhookEventsForIntent,
+  readWebhookHandlerRuns,
+  recordPaymentWebhookEvent,
+  recordWebhookHandlerRun,
+  tenderWebhookCapture,
+  type WebhookEventForIntentRow,
+  type WebhookHandlerRunRow,
+  type WebhookIntentRow,
+} from './repositories/payment-webhook.ts'
+/*
   P-HR-12's payroll side (0104). Reads and writes only: the arithmetic is
   `packages/core/src/hr/payroll.ts`'s and the WPS layout is `packages/core/src/hr/wps-sif.ts`'s, this
   package may not import either, and `packages/hr` is where the halves meet.
@@ -5119,4 +5162,51 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // ZY441-ZY447 of the band ZY441-ZY450 are used; ZY448-ZY450 are RELEASED unused and deliberately
 // unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
 //
-export const SCHEMA_VERSION = 136 as const
+// 147 is 0147_payment_webhook_event.sql (Y-PAY-04) — the webhook event, where replay protection and
+// idempotency are TWO claims and both live in the database because the worker restarts.
+//
+// Two append-only tables, one function that states a set (`payment_webhook_handlers()`), and four
+// refusals. The reason none of it can be a `Set` in a handler is mechanical: the web process restarts on
+// every release and the worker on every crash, at which point the memory of what has been seen is empty
+// and the gateway is still retrying every delivery it has not had a 200 for.
+//
+// **The two claims, and why one unique constraint is not both.** `unique (gateway, event_id)` is REPLAY
+// PROTECTION: the same event twice lands once, and the second delivery is answered 200 — a gateway that
+// gets a 4xx for a redelivery escalates an incident about an event it processed correctly. `ZY672` is
+// IDEMPOTENCY: a DIFFERENT body under a reused id is refused, audited and never applied, because it is
+// either a gateway defect that would double-count money or somebody who holds the signing secret and is
+// editing the payload. The constraint cannot tell them apart — both are a second row with the same id —
+// so `payload_sha256` is stored and compared, and the trigger deliberately does NOT raise for a matching
+// digest: that case falls through to the unique violation the caller answers 200 to.
+//
+// **Why a second table rather than a `handled` boolean.** One delivery legitimately has more than one
+// handler — a capture moves the intent AND settles the document it paid for, and those can fail
+// independently — so a boolean would mean "something was done", which is not a claim anybody can retry
+// against. `unique (webhook_event_id, handler)` is ADR 0008's exactly-once-per-handler, and `ZY674` holds
+// the handler name to `payment_webhook_handlers()` because a TYPO is a new slot in that constraint rather
+// than an error: the event would be processed twice while the constraint reported success. The set is
+// stated twice, here and as `WEBHOOK_HANDLERS` in `@berelax/payments`, with the pairing check in
+// `packages/fixtures/src/payment-webhook.itest.ts`.
+//
+// **`ZY673` is what makes "applied" mean something.** A run recorded as `applied` for the `intent`
+// handler must have its `payment_intent_transaction` row, at COMMIT. Without it the row says the event was
+// applied and nothing moved — and because the run row exists, no retry will ever look at that event again.
+// That is a LOST money movement the system believes it has processed, which is the worst failure available
+// to a webhook endpoint, and it is the other half of ADR 0056.
+//
+// **A row here is EVIDENCE THAT A SIGNATURE VERIFIED**, which is why there is no `verified` column: an
+// unverified delivery writes nothing at all, so a row for one cannot exist. The three refusals the
+// acceptance names — absent, malformed and wrong-key — are `audit_event` rows and nothing else, because
+// an unauthenticated request must not be able to fill a table.
+//
+// No signing secret, no key version, no endpoint URL and no tolerance window are stored.
+// `PAYMENT_WEBHOOK_SIGNING_SECRET` is absent by default in every environment (`Y7-gateway`) and its
+// absence answers 503 rather than 401 — 401 says "your signature is wrong" and the truth is "we cannot
+// check it", and a gateway retries a 503 while a 401 makes it give up. The tolerance is
+// `WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS` beside the verification, where it belongs; a column for it would
+// be a second answer.
+//
+// ZY671-ZY674 of the band ZY671-ZY680 are used; ZY675-ZY680 are RELEASED unused and deliberately
+// unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
+//
+export const SCHEMA_VERSION = 147 as const
