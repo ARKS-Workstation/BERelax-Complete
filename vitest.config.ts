@@ -77,6 +77,12 @@ export default defineConfig({
         // Loaded by the harness with a browser; the unit suite cannot reach the file reads.
         'packages/fixtures/src/media.ts',
         'packages/fixtures/src/load.ts',
+        // H-HARD-11's soak runs. Every line is a transaction, a race or a drain against a real
+        // PostgreSQL — 200 bookings in flight for one place and a 10,000-event backlog — so the unit
+        // suite cannot reach any of it, and a mock of a row lock would assert that the mock works. The
+        // JUDGEMENTS over what it measures are `packages/core/src/ops/soak.ts`, which is counted, and
+        // the run itself is driven by `scripts/soak.mjs` and by gate case 204k.
+        'packages/fixtures/src/soak.ts',
         // SQL only. Its behaviour — including that a re-wrap touches five columns and nothing else — is
         // proved against a real PostgreSQL by packages/google/src/google-connection.itest.ts.
         'packages/google/src/postgres-store.ts',

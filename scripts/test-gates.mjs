@@ -62536,6 +62536,222 @@ export function chargebackNetEffectFils(`,
   }
 }
 
+// 204a-204z. (H-HARD-11) The soak's recorded numbers shown to be re-judged rather than read, and the one
+//            figure that is a measurement of the MACHINE shown to be treated as one. The claims about the
+//            code are counts of rows and are enforced on every run; the latency reading is enforced only
+//            for a machine somebody chose, and both halves of that have a fixture here — because a budget
+//            rule that can never fire is decoration, and a budget rule that fires on an agent container
+//            is a gate that fails on correct work.
+{
+  const BUDGET = 'scripts/check-perf-budget.mjs'
+  const REPORT = 'artifacts/soak/report.json'
+  const FIXTURE = 'artifacts/soak/__gate_fixture__report.json'
+  const PERF_ITEST = 'packages/fixtures/src/availability-perf.itest.ts'
+  const gate = (path) => runExpectingFailure('pnpm', ['perf-budget', '--report', path])
+  const committed = JSON.parse(readFileSync(REPORT, 'utf8'))
+
+  // 204a. The edit a reader would quote. The percentile is recomputed from the samples the report
+  //       carries, so a hand-edited p95 fails — which is what makes the figure in the artefact the
+  //       figure that was measured.
+  checkRejectedBy(
+    'the perf gate refuses a p95 the report’s own samples do not give',
+    withEditedFile(
+      REPORT,
+      (text) => replaceOnce(text, `"p95Ms": ${committed.availability.p95Ms},`, '"p95Ms": 1,'),
+      () => runExpectingFailure('pnpm', ['perf-budget']),
+    ),
+    'soak-report-arithmetic-inconsistent',
+  )
+
+  // 204b. Two successes is the double booking and zero is a lock that refuses everybody. Both are the
+  //       same rule, and the acceptance line's "exactly one" is the reason it is not "at least one".
+  for (const [successes, what] of [
+    ['2', 'two successes, which is the double booking'],
+    ['0', 'no success, which is a lock that refuses everybody'],
+  ]) {
+    checkRejectedBy(
+      `the perf gate refuses ${what}`,
+      withEditedFile(
+        REPORT,
+        (text) => replaceOnce(text, '"successes": 1,', `"successes": ${successes},`),
+        () => runExpectingFailure('pnpm', ['perf-budget']),
+      ),
+      'soak-contention-not-exactly-one-success',
+    )
+  }
+
+  // 204c. A rejection that carried no refusal name is a raw constraint violation reaching a caller,
+  //       which is what "zero unhandled constraint-violation 5xx" is at the service boundary.
+  checkRejectedBy(
+    'the perf gate refuses a run in which any rejection was untyped',
+    withEditedFile(
+      REPORT,
+      (text) => replaceOnce(text, '"untypedFailures": 0,', '"untypedFailures": 1,'),
+      () => runExpectingFailure('pnpm', ['perf-budget']),
+    ),
+    'soak-refusal-not-typed',
+  )
+
+  // 204d. Exactly one delivery per (event, handler), in both directions: one more row than pairs is a
+  //       second delivery, one fewer is an event a handler never saw.
+  for (const delta of [1, -1]) {
+    checkRejectedBy(
+      `the perf gate refuses ${delta > 0 ? 'an extra' : 'a missing'} delivery row`,
+      withEditedFile(
+        REPORT,
+        (text) =>
+          replaceOnce(
+            text,
+            `"deliveries": ${committed.backlog.deliveries},`,
+            `"deliveries": ${committed.backlog.deliveries + delta},`,
+          ),
+        () => runExpectingFailure('pnpm', ['perf-budget']),
+      ),
+      'soak-backlog-not-exactly-one-delivery-per-handler',
+    )
+  }
+
+  // 204e. The budget rule fires — for a reading taken on a machine somebody chose. Without this case the
+  //       rule would be unreachable and "breaching the committed number fails the build" would be a
+  //       sentence rather than a check.
+  {
+    const breaching = {
+      ...committed,
+      machine: { ...committed.machine, measuredOn: 'chosen_machine' },
+      availability: {
+        ...committed.availability,
+        concurrency: 50,
+        // Fifty identical samples, not one: the report's own floor refuses fewer samples than queries,
+        // and a fixture that tripped THAT rule would have made case 204f below fail for a reason that
+        // proves nothing about the budget.
+        samples: Array.from({ length: 50 }, () => 900),
+        p95Ms: 900,
+        medianMs: 900,
+        budgetMs: 300,
+      },
+    }
+    checkRejectedBy(
+      'breaching the committed availability budget on a chosen machine fails the build',
+      withFixture(FIXTURE, `${JSON.stringify(breaching, null, 2)}\n`, () => gate(FIXTURE)),
+      'soak-availability-budget-breached',
+    )
+
+    // 204f. And the other half, which is brief rule 23 as a RULE: the same breaching figure taken on an
+    //       agent container does not fail. `availability-perf.itest.ts` measured this container six
+    //       times — 192 to 231 ms alone and 315 to 417 ms inside a full run against a 300 ms budget — so
+    //       a gate enforcing it here would fail on correct work, and a gate that fails on correct work
+    //       is one somebody deletes.
+    const container = {
+      ...breaching,
+      machine: { ...committed.machine, measuredOn: 'agent_container' },
+    }
+    const tolerated = withFixture(FIXTURE, `${JSON.stringify(container, null, 2)}\n`, () =>
+      run('pnpm', ['perf-budget', '--report', FIXTURE]),
+    )
+    check(
+      'and the same figure on an agent container is recorded rather than enforced',
+      !tolerated.failed && tolerated.output.includes('not_judged'),
+      tolerated.output,
+    )
+  }
+
+  // 204g. No artefact at all is a named refusal and not a pass.
+  checkRejectedBy(
+    'the perf gate refuses to report success when no soak has been recorded',
+    gate('artifacts/soak/__gate_fixture__absent.json'),
+    'soak-report-malformed',
+  )
+
+  // 204h. The control for everything above: the committed report passes, so the seven refusals are
+  //       about the defect rather than about a gate that rejects everything.
+  {
+    const clean = run('pnpm', ['perf-budget'])
+    check(
+      'the committed soak report passes the perf gate',
+      !clean.failed && clean.output.includes('Budget verdict'),
+      clean.output,
+    )
+  }
+
+  // 204i. What the artefact must SAY. Three static reads, each one a rule this unit's dispatch is about:
+  //       the load that was applied, the machine it was applied on, and what it does not establish.
+  check(
+    'the committed report names the machine its latency figures came from',
+    committed.machine?.measuredOn === 'agent_container' ||
+      committed.machine?.measuredOn === 'chosen_machine',
+    `machine.measuredOn is ${JSON.stringify(committed.machine?.measuredOn)}`,
+  )
+  check(
+    'and states what the applied load does not establish, in more than one sentence',
+    Array.isArray(committed.notProved) && committed.notProved.length >= 3,
+    `notProved holds ${JSON.stringify(committed.notProved)}`,
+  )
+  check(
+    'and carries every sample, so the percentile in it is recomputable rather than quotable',
+    Array.isArray(committed.availability?.samples) &&
+      committed.availability.samples.length >= committed.availability.concurrency,
+    `${committed.availability?.samples?.length} sample(s) at concurrency ${committed.availability?.concurrency}`,
+  )
+
+  // 204j. The committed figures are stated twice — in `packages/core/src/ops/soak.ts` and as literals in
+  //       `availability-perf.itest.ts` — and this is the check that holds the two equal, which the brief
+  //       asks for in the same commit as the second statement. Without it the soak would go on judging
+  //       against 300 ms after B-AVAIL-07's own budget had moved.
+  {
+    const core = readFileSync('packages/core/src/ops/soak.ts', 'utf8')
+    const perf = readFileSync(PERF_ITEST, 'utf8')
+    const budget = /export const AVAILABILITY_P95_BUDGET_MS = (\d+)/.exec(core)?.[1]
+    const concurrency = /export const AVAILABILITY_BUDGET_CONCURRENCY = (\d+)/.exec(core)?.[1]
+    const perfBudget = /const P95_BUDGET_MS = (\d+)/.exec(perf)?.[1]
+    const perfConcurrency = /const CONCURRENT_QUERIES = (\d+)/.exec(perf)?.[1]
+    check(
+      'the soak and B-AVAIL-07 agree on the committed p95 budget and the concurrency it holds at',
+      budget !== undefined &&
+        concurrency !== undefined &&
+        budget === perfBudget &&
+        concurrency === perfConcurrency,
+      `core says ${budget} ms at ${concurrency} and ${PERF_ITEST} says ${perfBudget} ms at ` +
+        `${perfConcurrency}. A second statement of a fact drifts, and the one that drifts here makes ` +
+        'the soak judge against a budget nobody holds',
+    )
+  }
+
+  // 204k. The soak's own floor, end to end: a reduced run is refused BY NAME rather than reported as a
+  //       smaller success. This one really runs the driver — it builds the probe salon, races two
+  //       attempts and drains two events — because the floor living in the shared judgement is only
+  //       half the claim; the other half is that the driver applies it to the run it just performed.
+  checkRejectedBy(
+    'the soak refuses a run smaller than the acceptance figures, by name',
+    runExpectingFailure('pnpm', [
+      'soak',
+      '--attempts',
+      '2',
+      '--events',
+      '2',
+      '--concurrency',
+      '1',
+      '--batches',
+      '1',
+      '--invariants',
+      'off',
+    ]),
+    'soak-examined-nothing',
+  )
+
+  // 204l. And the gate spells no rule name, so every case above would notice a rule renamed in one
+  //       place only.
+  {
+    const text = readFileSync(BUDGET, 'utf8')
+    const body = text.slice(text.indexOf('*/') + 2)
+    check(
+      `${BUDGET} takes its rule names from the registry rather than spelling them`,
+      !/'soak-[a-z-]+'/.test(body),
+      'a rule name is written as a literal, so renaming it in packages/core would leave the gate ' +
+        'printing the old one and every case above would still pass',
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -63408,6 +63624,10 @@ export function chargebackNetEffectFils(`,
     // NOT registered and is not in CI, for `go-live-payments.mjs`'s reason: it exits non-zero while no
     // penetration test has been performed, which is the honest answer and not a build failure.
     'pnpm findings',
+    // H-HARD-11's gate over the committed soak, in the position `pnpm verify` runs it. `pnpm soak`
+    // itself is NOT registered and is not in CI: it writes into a database it builds a probe salon in
+    // and drains the whole outbox, which is a side effect no shared database should get from a gate.
+    'pnpm perf-budget',
     // H-MIG-09's driver as a CI step, which that unit deferred to H-HARD-04 for want of a restore drill.
     // CI-only by construction: it creates and drops a database, which `pnpm verify` runs against one that
     // already exists. Declared in `scripts/check-gate-registry.mjs`'s CI_ONLY with that reason.

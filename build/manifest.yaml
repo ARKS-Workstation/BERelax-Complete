@@ -21675,7 +21675,7 @@ units:
       rather than only under property tests, that the worker drains a large backlog exactly once per handler,
       and that the invariants still hold afterwards.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-AVAIL-01
@@ -21710,10 +21710,60 @@ units:
       room over capacity, balanced journal'
     - the measured numbers are written to a committed report so a regression appears as a diff
     files:
+    - packages/core/src/ops/soak.ts
+    - packages/core/src/ops/soak.test.ts
+    - packages/fixtures/src/soak.ts
     - scripts/soak.mjs
-    - artifacts/soak/report.json
-    - apps/web/e2e/last-slot-contention.spec.ts
     - scripts/check-perf-budget.mjs
+    - artifacts/soak/report.json
+    - scripts/test-gates.mjs
+    - docs/adr/0126-a-soak-proves-counts-of-rows-and-a-p95-from-this-container-is-not-a-product-figure.md
+    notes:
+    - 'NOTE: THE LOAD THAT WAS APPLIED, and what it does and does not establish. 200 booking attempts in
+      flight for ONE capacity-1 room: 1 committed, 199 refused slot_taken, 0 untyped rejections, 0 raw
+      23xxx or 40P01, 0 rooms over capacity, in 2,140 ms. A 10,000-event outbox backlog drained by TWO
+      concurrent drainOutbox calls in batches of 200: 20,000 outbox_delivery rows over 20,000 DISTINCT
+      (event, handler) pairs, 0 unpublished, in 6,715 ms, with each handler called exactly 10,000 times.
+      pnpm money-invariants exit 0 against the post-soak database. 150 availability queries at
+      concurrency 50 with the cache OFF: p95 237 ms, median 117 ms. Every figure is in
+      artifacts/soak/report.json with the machine beside it.'
+    - 'NOTE: THE p95 IS NOT A PRODUCT FIGURE and the report says so in a FIELD rather than a comment.
+      machine.measuredOn is agent_container — four cores shared with other agents, load 1.98 at the time
+      — and soakProblems enforces the committed budget only for chosen_machine, so budgetVerdict answers
+      not_judged with the reason. B-AVAIL-07 committed 300 ms at concurrency 50 ON THE CI POSTGRES and
+      availability-perf.itest.ts has six readings of this same container (192-231 ms alone, 315-417 ms
+      inside a full run), so a pass here would be a claim about the container. What IS enforced on every
+      run is the arithmetic: every sample is in the report and the percentile is recomputed from them, so
+      a hand-edited p95 fails. No budget is stated at any concurrency but 50 (Y13-perf-budget). Gate
+      cases 204e and 204f prove both halves. ADR 0126 records it.'
+    - 'NOTE: apps/web/e2e/last-slot-contention.spec.ts IS NOT BUILT and is not declared above. A
+      Playwright spec needs a built application, which this unit''s dispatch forbids for disk, and
+      vitest.integration.config.ts includes apps/**/*.itest.ts so a .spec.ts is a file nothing runs
+      (H-MIG-10 hit exactly that). The contention claim is made at the SERVICE boundary, which is where
+      the room lock is: "zero unhandled constraint-violation 5xx" is proved as "every rejection carried a
+      refusal name and no raw SQLSTATE reached a caller". What is NOT proved is that the HTTP layer turns
+      a typed refusal into a 409 rather than a 500.'
+    - 'NOTE: pnpm soak is NOT in pnpm verify and not a CI step. It builds a probe salon, races 200
+      bookings and drains the WHOLE outbox — which publishes other suites'' pending events, a side effect
+      no shared database should get from a gate. What is in verify is pnpm perf-budget, which re-judges
+      the committed artefact with the same function the run applies, registered in gate case 29''s array
+      and in .github/workflows/ci.yml in the same commit. Gate case 204k runs the driver end to end at
+      reduced scale and asserts its floor fires by name.'
+    - 'NOTE: a defect the soak found in its own first run. drainOutbox drains the WHOLE outbox and the
+      second probe handler takes ''*'', so a pending event left by something else produced 51 handler
+      calls over 50 events — which read for a moment as a handler invoked twice, the exact defect the run
+      exists to detect. Calls for events the run did not publish are now counted and reported separately.'
+    - 'NOTE: B-AVAIL-07''s committed figures are now stated TWICE — AVAILABILITY_P95_BUDGET_MS and
+      AVAILABILITY_BUDGET_CONCURRENCY in packages/core/src/ops/soak.ts, and the literals P95_BUDGET_MS
+      and CONCURRENT_QUERIES in packages/fixtures/src/availability-perf.itest.ts. Gate case 204j holds
+      the two equal, in this commit, rather than a comment hoping somebody notices. That file was NOT
+      otherwise edited.'
+    - 'NOTE: no migration, no private SQLSTATE and no test port band. The soak writes only into tables it
+      creates rows in and removes, and starts no server. Migrations 0169/0170, the band ZY931-ZY940 and
+      the port band { start: 24_500, width: 300 } are RELEASED UNUSED; SCHEMA_VERSION is untouched.
+      packages/fixtures/src/soak.ts is added to vitest.config.ts''s coverage exclusions with a reason, on
+      the precedent of media.ts and load.ts: every line of it is a transaction against a real PostgreSQL
+      and a mock of a row lock would assert that the mock works. Gate block 204a-204l, sixteen cases.'
   - id: H-MIG-01
     order: 183
     title: 'Migration framework: staging schema, provenance and resumable idempotent importers'
