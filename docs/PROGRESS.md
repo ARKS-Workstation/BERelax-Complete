@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**174 / 211 units complete.**
+**175 / 211 units complete.**
 
 ## Next up
 
@@ -215,7 +215,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 194 | `Y-PAY-02` | payment_intent, idempotency and the capture/refund state machine | `F06`, `Y-PAY-01` | — | — |
 | [x] | 195 | `Y-PAY-03` | SAQ-A hosted-fields checkout and the PAN-never-touched gate | `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13`, `Y-PAY-02` | — | — |
 | [x] | 196 | `Y-PAY-04` | Webhook ingest: signature verification, replay protection, idempotent handlers | `F06`, `Y-PAY-02` | — | — |
-| [ ] | 197 | `Y-PAY-05` | Missed-event reconciliation job | `Y-PAY-04` | — | — |
+| [x] | 197 | `Y-PAY-05` | Missed-event reconciliation job | `Y-PAY-04` | — | — |
 | [ ] | 198 | `H-HARD-05` | Alert registry, SLOs and the insider-threat export alarm | `F06`, `H-HARD-01`, `R-REP-01`, `R-REP-02`, `R-REP-03`, `R-REP-04`, `R-REP-05`, `R-REP-06`, `R-REP-07`, `R-REP-08`, `Y-PAY-05` | — | — |
 | [ ] | 199 | `H-HARD-06` | Runbook set, machine-checked | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `G-CONN-01`, `G-CONN-02`, `G-CONN-03`, `G-CONN-04`, `G-CONN-05`, `G-CONN-06`, `G-CONN-07`, `G-CONN-08`, `G-CONN-09`, `H-HARD-04`, `H-HARD-05` | — | — |
 | [ ] | 200 | `H-HARD-09` | Documentation set, processor register and bus-factor artefacts | `H-HARD-06`, `H-HARD-07`, `H01` | — | — |

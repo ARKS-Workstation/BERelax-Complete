@@ -22268,8 +22268,16 @@ units:
       from 1 per process, so the SECOND run of `payment-intent.itest.ts` against one database collided on ids
       the first run had stored, and because nothing here can be deleted no teardown could free them.
       Double-counting WITHIN one intent is still shut by `unique (payment_intent_id, gateway_event_id)`; two
-      local intents against one remote intent is deferred to Y-PAY-05, whose acceptance line already
-      quarantines an intent the gateway does not recognise.'
+      local intents against one remote intent is deferred to Y-PAY-10, which is still todo - RE-POINTED
+      there by Y-PAY-05, and with a finding. Y-PAY-05 DID build the half this note expected: an intent the
+      gateway does not recognise is quarantined and alerted (ZY683) and never deleted. That is the
+      OPPOSITE case. Two local intents against ONE remote intent has both of them recognised, so the pass
+      reconciles both to the same gateway state and records the second as a repair - which is not wrong
+      about either row and is silent about the duplication. Detecting it needs the column 0106 could not
+      add, because a gateway intent id is unique within a MERCHANT ACCOUNT and none has been chosen
+      (Y7-mcc); Y-PAY-10 is the unit whose subject is that selection. What Y-PAY-05 leaves for it is the
+      shape: `gateway_state_observation` already holds one row per (gateway, gateway_intent_id, instant),
+      so a second local intent naming one remote intent is a GROUP BY away once an account id exists.'
     - 'NOTE: the route is `apps/web/app/api/v1/payments/intent/` and not the `apps/web/app/api/payments/intent/`
       this entry listed. Every other endpoint in the app is under `/api/v1`, and each one''s registry entry
       argues the same three reasons for it; a fifth endpoint outside that prefix would leave the public API
@@ -22594,7 +22602,7 @@ units:
       local intents, repairs divergence and reports every repair. Webhooks are at-least-once and sometimes
       zero-times; this is what makes the ledger eventually correct anyway.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - Y-PAY-04
@@ -22608,6 +22616,31 @@ units:
       by table checksum
     - an intent the gateway does not recognise at all is quarantined and alerted, never silently deleted,
       asserted by test
+    - 'NOTE: the 30% drop is in the DELIVERY loop and not inside the fake, and that is the shape of the
+      unit rather than a convenience. A lost webhook is an event the gateway SENT and nothing received,
+      so the gateway''s own stream still holds it - which is the only reason anything can be repaired. A
+      fake that dropped events from its own stream would be modelling an event that never happened, and
+      nothing could repair that. The fake emits every event TWICE deliberately, so the suite counts the
+      event IDS for which no copy arrived, which is what "consequential" means.'
+    - 'NOTE: each population in the job suite gets its own `payment_intent.gateway` value, because the
+      watermark is keyed on the gateway NAME and a fresh fake restarts its cursor sequence at
+      evt_00000001. Two populations sharing one name would have the second''s whole stream filtered out by
+      the first''s watermark. That is not a defect in the pass: in production there is one gateway and its
+      cursors are globally monotone, exactly as the port promises - so from the pass''s point of view two
+      populations ARE two gateways. The suite''s first run found this by reporting zero repairs for a
+      population it had just dropped events from.'
+    - 'NOTE: the pass posts NO journal entry, which is what makes the idempotence acceptance line
+      assertable at all. It moves an intent''s append-only rows; marking an invoice paid is Y-PAY-04''s
+      `invoice-settlement` handler, and a reconciliation that also tendered would be a second path to one
+      posting.'
+    - 'NOTE: `apps/worker` now depends on `@berelax/payments` - the pass needs applyGatewayEvents and the
+      diff, and both live there. `pnpm deps` and `pnpm boundaries` were run for that reason and are clean
+      (1,786 modules, 8,114 dependencies cruised).'
+    - 'NOTE: the migration is 0148_reconciliation_exception.sql, not the 00XX placeholder in `files`, and
+      it carries two tables the file list does not name: gateway_state_observation (the gateway''s side,
+      with the instant WE asked, without which the pass would be comparing our records with our records)
+      and payment_reconciliation_run (the durable watermark, as a row per pass rather than a mutable
+      cursor - see ADR 0101).'
     files:
     - apps/worker/src/jobs/payment-reconciliation.ts
     - packages/payments/src/reconcile.ts

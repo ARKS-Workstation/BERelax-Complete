@@ -1436,6 +1436,43 @@ export {
   reassignmentRefusalOf,
   resolveReassignmentFlag,
 } from './repositories/reassignment.ts'
+/*
+  Y-PAY-05's reconciliation side (0148). Reads and writes only; the diff is
+  `packages/payments/src/reconcile.ts`'s and this package may not import it.
+
+  `readReconciliationWatermark` reads the cursor of the last FINISHED run, which is the whole of the
+  interrupted-run property: a single mutable cursor row fails in exactly that case - it advances, the
+  process dies before the repairs commit, and the events in between are never read again and nothing says
+  so. `closeReconciliationRun` is the ONE legal UPDATE on the table and ZY681 refuses every other, so a
+  run cannot be re-attributed, re-dated or closed twice.
+
+  `recordGatewayObservation` is the gateway's side on file with the instant WE asked - without it the pass
+  would be comparing our records with our records, and the one thing it could never find is the event that
+  never arrived. `recordReconciliationException` writes the quarantine's `audit_event` in the SAME
+  transaction, because ZY683 reads it at COMMIT: an alert written afterwards can fail while the quarantine
+  commits, and the only evidence that an intent went unexplained would be the intent.
+
+  `readIntentPositions` reads every position in ONE query, because 500 intents is 500 round trips
+  otherwise - and because the positions have to be consistent with each other: read one at a time, a
+  webhook landing between the tenth and the eleventh produces a snapshot that was never true.
+*/
+export {
+  closeReconciliationRun,
+  type IntentPositionRow,
+  isReconciliationRule,
+  openReconciliationRun,
+  RECONCILIATION_SQLSTATE,
+  type ReconciliationExceptionRow,
+  type ReconciliationRule,
+  type RecordExceptionInput,
+  type RecordObservationInput,
+  readIntentPositions,
+  readReconciliationExceptions,
+  readReconciliationWatermark,
+  reconciliationError,
+  recordGatewayObservation,
+  recordReconciliationException,
+} from './repositories/reconciliation.ts'
 export {
   RESCHEDULE_REFUSALS,
   type RescheduleDeps,
@@ -5209,4 +5246,41 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // ZY671-ZY674 of the band ZY671-ZY680 are used; ZY675-ZY680 are RELEASED unused and deliberately
 // unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
 //
-export const SCHEMA_VERSION = 147 as const
+// 148 is 0148_reconciliation_exception.sql (Y-PAY-05) — the missed-event reconciliation, with BOTH
+// sides on file and each carrying its own instant.
+//
+// Three append-only tables, one view and four refusals, plus the `payment_reconciliation` agent and its
+// `agent_heartbeat` row. The reason the gateway's side is a TABLE is the whole unit: Y-PAY-04 makes a
+// delivered event land exactly once and can do nothing about one that never arrived, and from inside this
+// system a lost webhook is indistinguishable from an event that never happened. A job reading only
+// `payment_intent` would be comparing our records with our records, so `gateway_state_observation` holds
+// what the gateway said with the instant WE asked at — which is what makes "repaired from a snapshot
+// taken at 04:15" a fact rather than a reconstruction.
+//
+// **A repair is an APPLIED EVENT and never an overwrite.** The three figures are a projection of
+// append-only transaction rows held equal to them at commit (`ZY163`, ADR 0056), so there is no UPDATE
+// that could write them without fabricating a gateway event — a lie about a third party in the one table
+// a dispute is answered from. `ZY682` is what makes a recorded repair say WHICH events justified it, in
+// both directions: a `repaired` row naming no event is a figure that changed overnight, and a
+// `quarantined` row carrying no divergence is a quarantine nobody can act on.
+//
+// **The watermark is a row per RUN, not a mutable cursor**, and `payment_reconciliation_watermark` reads
+// only FINISHED runs. The obvious single-row design fails in exactly the interrupted case: the cursor
+// advances, the process dies before the repairs commit, and the events between the old cursor and the new
+// one are never read again and nothing says so. `ZY684` then refuses a finished run that closes behind
+// the watermark — not because of double-counting, which the transaction table's own unique constraint
+// makes harmless, but because the watermark would stop saying what has been read.
+//
+// **`ZY683` is the "alerted" half of "quarantined and alerted, never silently deleted"**: the
+// `audit_event` must be in the SAME transaction (0093 `ZZ004`'s argument). Nothing in this unit deletes
+// anything, and `ZY161` already makes an intent that touched money undeletable; what 0148 adds is that
+// the state is VISIBLE rather than merely safe.
+//
+// `payment_reconciliation_run` is the one table in this file with a legal UPDATE, and it is narrow: the
+// CLOSE, written once while `finished_at` was null. Everything else raises `ZY681`, so a run cannot be
+// re-attributed to another gateway or re-dated.
+//
+// ZY681-ZY684 of the band ZY681-ZY690 are used; ZY685-ZY690 are RELEASED unused and deliberately
+// unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
+//
+export const SCHEMA_VERSION = 148 as const

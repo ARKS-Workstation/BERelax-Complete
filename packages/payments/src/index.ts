@@ -114,6 +114,7 @@ export {
   revokeMandateAgreement,
   type StoredMandate,
 } from './mandate.ts'
+export * from './reconcile.ts'
 export { createRecordSink } from './record-sink.ts'
 /**
  * The card-data detector, the refusal and the redactor (Y-PAY-03).

@@ -6,6 +6,7 @@ import {
   date,
   index,
   integer,
+  jsonb,
   pgTable,
   smallint,
   text,
@@ -668,5 +669,123 @@ export const paymentWebhookHandlerRun = pgTable(
       sql`${table.outcome} in ('applied', 'skipped')`,
     ),
     index('payment_webhook_handler_run_handler_idx').on(table.handler, table.createdAt.desc()),
+  ],
+)
+
+/**
+ * What the GATEWAY said about an intent, with the instant we asked. Mirrors
+ * `0148_reconciliation_exception.sql`.
+ *
+ * The other side of Y-PAY-05's diff, and the reason that unit is not a job reading `payment_intent`
+ * twice: a job comparing our records with our records can never find the event that never arrived.
+ *
+ * `recognised` is false when the gateway does not know the intent at all, and it is a ROW rather than an
+ * absence — "we asked and it said no" and "we never asked" are different facts, and only the first is a
+ * reason to quarantine.
+ */
+export const gatewayStateObservation = pgTable(
+  'gateway_state_observation',
+  {
+    id: uuid('id').primaryKey(),
+    gateway: text('gateway').notNull(),
+    gatewayIntentId: text('gateway_intent_id').notNull(),
+    state: text('state').notNull(),
+    authorisedFils: bigint('authorised_fils', { mode: 'bigint' }).notNull(),
+    capturedFils: bigint('captured_fils', { mode: 'bigint' }).notNull(),
+    refundedFils: bigint('refunded_fils', { mode: 'bigint' }).notNull(),
+    /** The instant WE asked, not one the gateway minted. */
+    observedAt: timestamp('observed_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    recognised: boolean('recognised').notNull(),
+  },
+  (table) => [
+    check(
+      'gateway_state_observation_state_known',
+      sql`${table.state} in ('requires_authorisation', 'requires_customer_action', 'authorised', 'captured', 'voided', 'failed')`,
+    ),
+    check(
+      'gateway_state_observation_unrecognised_holds_nothing',
+      sql`${table.recognised} or (${table.authorisedFils} = 0 and ${table.capturedFils} = 0 and ${table.refundedFils} = 0)`,
+    ),
+    index('gateway_state_observation_intent_idx').on(
+      table.gateway,
+      table.gatewayIntentId,
+      table.observedAt.desc(),
+    ),
+  ],
+)
+
+/**
+ * One reconciliation pass, and the durable watermark.
+ *
+ * The watermark is the cursor of the last FINISHED run — `finished_at` null means the pass is in flight
+ * and its cursor does NOT count. A single mutable cursor row fails in exactly the interrupted case: it
+ * advances, the process dies before the repairs commit, and the events in between are never read again
+ * and nothing says so. ZY684 refuses a finished run that closes behind the watermark.
+ *
+ * The one table in this family with a legal UPDATE, and it is narrow: the CLOSE, written once while
+ * `finished_at` was null. ZY681 refuses every other.
+ */
+export const paymentReconciliationRun = pgTable(
+  'payment_reconciliation_run',
+  {
+    id: uuid('id').primaryKey(),
+    gateway: text('gateway').notNull(),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    /** Opaque: a cursor is the gateway's own bookmark and no consumer parses one. */
+    cursorFrom: text('cursor_from'),
+    cursorTo: text('cursor_to'),
+    intentsExamined: integer('intents_examined').notNull(),
+    repairs: integer('repairs').notNull(),
+    quarantines: integer('quarantines').notNull(),
+  },
+  (table) => [
+    check('payment_reconciliation_run_examined_nonneg', sql`${table.intentsExamined} >= 0`),
+    check('payment_reconciliation_run_repairs_nonneg', sql`${table.repairs} >= 0`),
+    check('payment_reconciliation_run_quarantines_nonneg', sql`${table.quarantines} >= 0`),
+    check(
+      'payment_reconciliation_run_cursor_does_not_retreat',
+      sql`${table.cursorTo} is null or ${table.cursorFrom} is null or ${table.cursorTo} >= ${table.cursorFrom}`,
+    ),
+    index('payment_reconciliation_run_watermark_idx').on(table.gateway, table.finishedAt.desc()),
+  ],
+)
+
+/**
+ * Every repair and every quarantine, with BOTH sides of the divergence and the events that explained it.
+ *
+ * A repair is an APPLIED EVENT and never an overwrite — `payment_intent`'s figures are a projection of
+ * append-only rows (ZY163), so writing them would mean fabricating a gateway event — and a divergence
+ * nothing explains is QUARANTINED rather than corrected (ADR 0070). An intent in step is NOT recorded: a
+ * row per intent examined would make this a log of runs rather than a register of divergences.
+ */
+export const reconciliationException = pgTable(
+  'reconciliation_exception',
+  {
+    id: uuid('id').primaryKey(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => paymentReconciliationRun.id),
+    paymentIntentId: uuid('payment_intent_id')
+      .notNull()
+      .references(() => paymentIntent.id),
+    gatewayIntentId: text('gateway_intent_id').notNull(),
+    observationId: uuid('observation_id')
+      .notNull()
+      .references(() => gatewayStateObservation.id),
+    kind: text('kind').notNull(),
+    /** `IntentDivergence` in `@berelax/payments`. jsonb, so eight columns cannot disagree with it. */
+    beforeState: jsonb('before_state'),
+    afterState: jsonb('after_state'),
+    /** ZY682 requires at least one for a `repaired` row. */
+    missedEventIds: text('missed_event_ids').array().notNull(),
+    detail: text('detail').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    check('reconciliation_exception_kind_known', sql`${table.kind} in ('repaired', 'quarantined')`),
+    index('reconciliation_exception_run_idx').on(table.runId, table.kind),
+    index('reconciliation_exception_intent_idx').on(table.paymentIntentId, table.createdAt.desc()),
   ],
 )

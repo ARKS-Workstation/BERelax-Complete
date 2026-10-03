@@ -55307,6 +55307,331 @@ export function chargebackNetEffectFils(`,
   }
 }
 
+// 179a-179z. Y-PAY-05 — a repair is an APPLIED EVENT, and the watermark is the last FINISHED run.
+//
+//            This unit's subject is the quietest failure in the payments estate: a capture nobody
+//            recorded. The money is at the acquirer, the invoice reads unpaid, the customer is chased for
+//            it, and nothing anywhere is wrong. So every case here breaks one of the three things that
+//            make the pass able to see it at all — and each broken version still RUNS, still reports
+//            success, and still leaves a clean-looking database.
+//
+//            179a is the one worth reading first: a pass that reads only our own table. It is the shape a
+//            reasonable person writes, it is simpler, it is faster, and it can never find a lost event —
+//            which is the only thing it was built for. The case is a SCAN, because "this module reads the
+//            gateway" is a claim about what the code does rather than about an output.
+//
+//            179b to 179d are the repair: overwriting instead of folding, trusting the gateway's own
+//            `state` field instead of the lifecycle table, and recording a repair with no evidence.
+//
+//            179e and 179f are the quarantine. Correcting an unattributable divergence is the
+//            safe-looking edit that loses the information, and it is ADR 0070's subject for the third
+//            time in this batch.
+//
+//            179g to 179i are the watermark, and 179g is the acceptance line about a kill mid-run: a
+//            watermark that counts UNFINISHED runs advances past a window whose repairs never committed,
+//            and those events are then never read again and nothing says so.
+//
+//            179j is the suite's own vacuity floor. A fuzz run that dropped nothing would hold for a pass
+//            that did nothing at all (brief rule 22).
+//
+//            179k is the cron's agent, which is the one rule in this block that is not about money: a
+//            scheduled pass whose output in the healthy case is NOTHING is invisible unless something
+//            watches for the absence of a success.
+//
+//            179l and 179m are the gates this unit had to stay inside: the SQLSTATE registry in both
+//            directions, and the migration ledger's documented run.
+//
+//            179y and 179z are the controls: every case above is satisfied by something FAILING, so one
+//            has to be satisfied by the real tree passing.
+//
+//            Nothing here edits `packages/db/migrations/0148_reconciliation_exception.sql` in order to
+//            test a DATABASE rule, for blocks 134, 154, 166, 167, 168 and 178's reason. ZY681-ZY684 are
+//            proved against a real PostgreSQL by `packages/fixtures/src/payment-reconciliation.itest.ts`,
+//            and ZY683 is DEFERRED so that file drives it through real transactions. What the migration
+//            IS edited for is 179m, where the checker reads the text.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const RECONCILE = 'packages/payments/src/reconcile.ts'
+  const PASS = 'apps/worker/src/jobs/payment-reconciliation.ts'
+  const RECON_MIGRATION = 'packages/db/migrations/0148_reconciliation_exception.sql'
+  const RECON_REGISTRY = 'packages/db/src/sqlstate-registry.ts'
+  const RECON_REPO = 'packages/db/src/repositories/reconciliation.ts'
+
+  const DIFF_SUITE = 'packages/payments/src/reconcile.test.ts'
+  const PASS_SUITE = 'apps/worker/src/jobs/payment-reconciliation.itest.ts'
+  const REFUSAL_SUITE = 'packages/fixtures/src/payment-reconciliation.itest.ts'
+
+  const diffSuite = () => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', DIFF_SUITE]
+  const passSuite = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    PASS_SUITE,
+  ]
+
+  /**
+   * One anchored edit to a shipped module, then the suite that must fail because of it.
+   *
+   * Named for this block rather than reusing block 168's or 178's helper, and the reason is mechanical
+   * rather than stylistic: two blocks defining a helper of the same shape is how git found the bodies as
+   * shared context and INTERLEAVED two blocks at a merge (block 133's note about its own helper).
+   */
+  const breakReconcile = (name, file, find, into, rule, args = diffSuite()) => {
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        file,
+        (source) => replaceOnce(source, find, into),
+        () => runExpectingFailure('pnpm', args),
+      ),
+      rule,
+    )
+  }
+
+  // ---- both sides on file ----------------------------------------------------------------------
+
+  // 179a. THE case the unit exists for, and it is a SCAN because the claim is about what the module
+  //       reads. A pass that never asks the gateway reports every intent as in step, which is the one
+  //       failure mode this unit was built to remove — and it is simpler, faster and perfectly green.
+  {
+    const withoutComments = (text) =>
+      text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ')
+    const pass = withoutComments(readFileSync(PASS).toString())
+    const required = ['eventsSince(', 'fetchIntent(', 'recordGatewayObservation(']
+    const absent = required.filter((needle) => !pass.includes(needle))
+    check(
+      'reconciliation: the pass reads the gateway and puts its answer on file',
+      absent.length === 0,
+      `the pass does not call: ${absent.join(', ')} — it would report every intent as in step`,
+    )
+    // The control: the scan must be able to SEE the absence, or it is satisfied by any file.
+    check(
+      'reconciliation: the both-sides scan fires on a pass that reads only our own table',
+      required.filter((needle) => !pass.replace('fetchIntent(', 'noop(').includes(needle))
+        .length === 1,
+      'the scan cannot detect the thing it requires',
+    )
+  }
+
+  // ---- the repair ------------------------------------------------------------------------------
+
+  // 179b. The gateway's own `state` field believed instead of the fold. It works for every gateway that
+  //       agrees with our table and silently accepts an un-capture from one that does not — the cell ADR
+  //       0056's table has a comment about.
+  breakReconcile(
+    'reconciliation: trusting the gateway state instead of folding fails by name',
+    RECONCILE,
+    '    afterState = reduceIntent([...input.stored, ...missed]).state',
+    '    afterState = input.gateway.state',
+    'computes the after-state by FOLDING',
+  )
+
+  // 179c. A one-fils difference absorbed. Y-PAY-09's argument, one subject along: a few fils between two
+  //       ledgers is either a missed event or money that went somewhere, and those are the same number.
+  breakReconcile(
+    'reconciliation: a tolerance on the figures fails by name',
+    RECONCILE,
+    "    if (field === 'captured') return local.capturedFils !== gateway.capturedFils",
+    "    if (field === 'captured') return Math.abs(local.capturedFils - gateway.capturedFils) > 5",
+    'names a one-fils difference, because there is no tolerance',
+  )
+
+  // 179d. Two different intents compared. It produces a divergence in every field and a repair that
+  //       applies one intent's events to another, and nothing downstream could tell.
+  breakReconcile(
+    'reconciliation: comparing two different intents fails by name',
+    RECONCILE,
+    '  if (local.gatewayIntentId !== gateway.gatewayIntentId) {',
+    '  if (false) {',
+    'refuses to compare two different intents',
+  )
+
+  // ---- the quarantine --------------------------------------------------------------------------
+
+  // 179e. An unattributable divergence REPAIRED instead of quarantined. The safe-looking edit, and the
+  //       one that loses the information: the figure moves, the row says it was repaired, and the event
+  //       that would have justified it never existed.
+  breakReconcile(
+    'reconciliation: repairing an unattributable divergence fails by name',
+    RECONCILE,
+    "      action: 'quarantine',\n      missed: [],\n      before,\n      afterState: null,",
+    "      action: 'none',\n      missed: [],\n      before,\n      afterState: null,",
+    'QUARANTINES a divergence nothing explains',
+  )
+
+  // 179f. A gateway stream that cannot be folded, applied anyway. Half of an internally impossible
+  //       sequence leaves a position neither side holds — and the pass would report it as repaired.
+  breakReconcile(
+    'reconciliation: applying an unfoldable stream fails by name',
+    RECONCILE,
+    "      action: 'quarantine',\n      missed,\n      before,\n      afterState: null,",
+    "      action: 'apply_missed_events',\n      missed,\n      before,\n      afterState: 'captured',",
+    'quarantines a stream that cannot be folded',
+  )
+
+  // ---- the watermark ---------------------------------------------------------------------------
+
+  // 179g. THE kill-mid-run case. A watermark that counts UNFINISHED runs advances past a window whose
+  //       repairs never committed, and those events are never read again — a lost payment with no trace.
+  {
+    const migration = readFileSync(RECON_MIGRATION).toString()
+    const view = migration.slice(migration.indexOf('create view payment_reconciliation_watermark'))
+    check(
+      'reconciliation: the watermark counts only finished runs',
+      view.includes('where r.finished_at is not null'),
+      'the watermark view admits a run still in flight, so an interrupted pass would skip its window',
+    )
+    // And the pass must not close a run it did not finish: the close is the only thing that advances it.
+    const repo = readFileSync(RECON_REPO).toString()
+    check(
+      'reconciliation: a run closes once, and only while it is open',
+      repo.includes('where id = ${input.runId}::uuid and finished_at is null'),
+      'closeReconciliationRun can close a run twice, which moves the watermark on counted evidence',
+    )
+  }
+
+  // 179h. The cursor taken as the LAST delivery rather than the largest. A gateway answering out of order
+  //       would move the watermark backwards, and `ZY684` would then refuse the close — so the symptom is
+  //       a pass that cannot complete, which is better than a silent skip and is still a defect.
+  {
+    const pass = readFileSync(PASS).toString()
+    check(
+      'reconciliation: the cursor is the largest seen, not the last',
+      pass.includes(
+        'if (cursorTo === null || delivery.cursor > cursorTo) cursorTo = delivery.cursor',
+      ),
+      'the pass takes the last cursor rather than the greatest',
+    )
+  }
+
+  // 179i. One transaction per PASS instead of per intent. An interruption then rolls back every repair,
+  //       so "killed mid-run reaches the same end state" is satisfied by a pass that did nothing — which
+  //       is brief rule 3's vacuous assertion with a database attached.
+  {
+    const withoutComments = (text) =>
+      text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ')
+    const pass = withoutComments(readFileSync(PASS).toString())
+    // `withUnitOfWork` is opened inside the per-intent function and nowhere else, so the grain is
+    // structural: a pass-level transaction would have to wrap the loop.
+    check(
+      'reconciliation: the transaction grain is one intent',
+      (pass.match(/withUnitOfWork\(/g) ?? []).length === 1 &&
+        pass.indexOf('withUnitOfWork(') > pass.indexOf('async function reconcileOneIntent'),
+      'the pass opens a transaction outside the per-intent function',
+    )
+  }
+
+  // ---- the suite's own floors ------------------------------------------------------------------
+
+  // 179j. A fuzz run that dropped nothing holds for a pass that does nothing at all. The floor is what
+  //       fails, by name — brief rule 22's arrangement.
+  breakReconcile(
+    'reconciliation: a fuzz run with nothing dropped fails the vacuity floor',
+    PASS_SUITE,
+    'const DROP_RATE = 0.3',
+    'const DROP_RATE = 0',
+    'nothing was dropped: the fuzz run proves nothing',
+    passSuite(),
+  )
+
+  // ---- the cron's agent ------------------------------------------------------------------------
+
+  // 179k. A cron with no agent. `pnpm jobs` refuses it statically, and that is the check — because a
+  //       scheduled pass whose output in the healthy case is NOTHING is invisible unless something
+  //       watches for the absence of a success.
+  withEditedFile(
+    PASS,
+    (source) =>
+      replaceOnce(source, '  agent: PAYMENT_RECONCILIATION_AGENT,', '  // agent: removed'),
+    () =>
+      checkRejectedBy(
+        'reconciliation: a cron with no agent_definition is refused',
+        runExpectingFailure('pnpm', ['jobs']),
+        'must name the agent_definition',
+      ),
+  )
+
+  // ---- the gates this unit had to stay inside --------------------------------------------------
+
+  // 179l. The registry's forward direction: a code the migration raises and the registry does not list.
+  withEditedFile(
+    RECON_REGISTRY,
+    (source) => replaceOnce(source, "    code: 'ZY684',", "    code: 'ZY997',"),
+    () =>
+      checkRejectedBy(
+        'reconciliation: a raised code missing from the SQLSTATE registry is refused',
+        runExpectingFailure('pnpm', ['sqlstate']),
+        'ZY684',
+      ),
+  )
+
+  // 179m. The ledger's documented run, the agent pair, and the released codes.
+  {
+    const ledger = readFileSync('packages/db/src/index.ts').toString()
+    check(
+      'reconciliation: the migration ledger documents 0148 in the shape gate case 90a reads',
+      ledger.includes('// 148 is 0148_reconciliation_exception.sql (Y-PAY-05)'),
+      'the paragraph for 148 is absent or opens in another shape',
+    )
+    check(
+      'reconciliation: SCHEMA_VERSION is the newest migration on disk',
+      ledger.includes('export const SCHEMA_VERSION = 148 as const'),
+      'SCHEMA_VERSION does not name 148',
+    )
+    const migration = readFileSync(RECON_MIGRATION).toString()
+    // The agent AND its heartbeat, in the migration that created the cron. 0031's convention: a new agent
+    // brings its own, because `agentsWithHeartbeat` INNER JOINs the two.
+    check(
+      'reconciliation: the migration brings the agent and its heartbeat row',
+      migration.includes('insert into agent_definition') &&
+        migration.includes('insert into agent_heartbeat') &&
+        migration.includes("'payment_reconciliation'"),
+      'the cron has no agent row, no heartbeat row, or names another agent',
+    )
+    const registry = readFileSync(RECON_REGISTRY).toString()
+    const claimed = ['ZY685', 'ZY686', 'ZY687', 'ZY688', 'ZY689', 'ZY690'].filter((code) =>
+      registry.includes(code),
+    )
+    check(
+      'reconciliation: the released codes of the band are not registered',
+      claimed.length === 0,
+      `registered without being raised: ${claimed.join(', ')}`,
+    )
+  }
+
+  // ---- the controls ----------------------------------------------------------------------------
+
+  // 179y. The committed diff suite passes, which is what makes every case above a claim about an edit
+  //       rather than about a suite that fails anyway.
+  {
+    const pure = run('pnpm', diffSuite())
+    check('reconciliation: the committed diff suite passes', !pure.failed, pure.output)
+  }
+
+  // 179z. And the two database suites, which are where the claims a pure test cannot reach are proved:
+  //       the four refusals, the five-hundred-intent fuzz run, the idempotence, the interruption
+  //       checksum and the quarantine with its alert in the same transaction.
+  {
+    const pair = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      REFUSAL_SUITE,
+      PASS_SUITE,
+    ])
+    check(
+      'reconciliation: the refusals, the fuzz run and the interruption pass against the real database',
+      !pair.failed,
+      pair.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

@@ -55,6 +55,7 @@ import {
   PACKAGE_EXPIRY_AGENT,
   runPackageExpirySweep,
 } from './jobs/package-expiry.ts'
+import { PAYMENT_RECONCILIATION_JOB_DEFINITION } from './jobs/payment-reconciliation.ts'
 import { RECONCILE_DLR_JOB } from './jobs/reconcile-dlr.ts'
 import { runRecurringCostCheck } from './jobs/recurring-cost-check.ts'
 import { REPORTING_REFRESH_JOB_DEFINITION } from './jobs/reporting-refresh.ts'
@@ -442,6 +443,13 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
     expireInSeconds: 1800,
     handler: gscUrlInspectionHandler_,
   },
+  // Y-PAY-05's hourly reconciliation, and the one payments cron in this registry. Hourly rather than
+  // nightly because the gap between a lost capture and its repair is a window in which an invoice reads
+  // unpaid and a customer is chased for money they have already handed over. It has an agent, because
+  // every cron does — and what the watchdog watches here is the ABSENCE of a success: a reconciliation
+  // that stopped running is invisible in every other way, since its output in the healthy case is
+  // nothing at all.
+  PAYMENT_RECONCILIATION_JOB_DEFINITION,
   // Y-PAY-09's settlement import, and the third queue in this registry with no cron. A payout file is
   // DELIVERED; a schedule here would be a poller looking for work whatever accepted the file already
   // announced, and it would either run constantly doing nothing or leave a payout unimported until it next
