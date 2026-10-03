@@ -1385,6 +1385,34 @@ export const ROUTES = [
       'its own path, which is what W-SITE-05 made the `indexable` field mean.',
   },
   {
+    id: 'reports-dashboard',
+    path: '/reports',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'R-REP-08s role-scoped dashboards. The dashboard, the SCOPE and the tiles all come from the ' +
+      'signed-in principals role: no query parameter chooses a principal, a role, a scope or a ' +
+      'permission, and the scope is a value the QUERY takes rather than a filter over its result - a ' +
+      'dashboard that read everything and hid rows in the view would leak through the drill-down and ' +
+      'through the export, which are the two things on this screen that return what the query returned. ' +
+      'A handler answering text/html rather than a document, for the reason the month reconciliation, ' +
+      'the compliance calendar, the Messages inbox and the five HR screens all give: a registry document ' +
+      'must be served in BOTH locales, which needs an Arabic admin document and the W-SYS-01 shell, and ' +
+      '?dir=rtl re-renders this English document mirrored so the direction half of the accessibility ' +
+      'matrix is audited without inventing an Arabic admin surface. Dynamic, and ?from= and ?to= are ' +
+      'REQUIRED with no default: a screen answering for "the last thirty days" answers a different ' +
+      'question every day, so a figure quoted from it could not be traced back. NO sampleParams, for the ' +
+      'month reconciliations reason: which windows hold data depends on which days have been refreshed. ' +
+      'It WRITES - its POST is the export, which records an audit_event with operation=export and the ' +
+      'row count and raises the registered insider-threat alert in the same transaction - and a GET that ' +
+      'exported would put an actor nobody signed in with into an append-only trail. The /reports prefix ' +
+      'in ADMIN_GROUP_PREFIXES is what makes it noindex.',
+  },
+  {
     id: 'reports-data-quality',
     path: '/reports/data-quality',
     kind: 'handler',

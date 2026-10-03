@@ -352,6 +352,19 @@ export {
   packageEntitlements,
   packageSoldLessReleasedFils,
 } from './reporting/cohort-queries.ts'
+// R-REP-08's drill-down and time-of-day reads. The scope is a value the QUERY takes and the projection
+// is the role's, because a drill-down and an export both return what the query returned rather than
+// what a view drew. Each row carries its own contribution, so `sum(amount)` over the rows is the tile's
+// figure — computed on the other side by R-REP-03's measure reducer, which is what makes the M5
+// identity two paths to one number rather than one path asserted twice.
+export {
+  DASHBOARD_COLUMN_KEYS,
+  type DashboardDrillDownArgs,
+  type DashboardDrillDownRow,
+  type DashboardTimeOfDayRow,
+  dashboardDrillDown,
+  dashboardTimeOfDay,
+} from './reporting/dashboard-queries.ts'
 // R-REP-07's data-quality readings. Two figures per check and the rows behind them; the JUDGEMENT is
 // `packages/core/src/reporting/data-quality.ts`'s, because `db` may not import `core` and because a gate
 // handed its readings is a gate a test can hand readings that disagree. `DATA_QUALITY_CHECK_IDS` is a

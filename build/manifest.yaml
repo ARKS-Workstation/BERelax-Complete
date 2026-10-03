@@ -13276,7 +13276,11 @@ units:
       bot-flagged sessions from the funnel is deferred to A-FIRST-09 — DEFERRAL SATISFIED: its
       funnelCountRows excludes bot sessions by default and includes them behind an explicit parameter,
       and the steps are MATERIALISED either way so the verdict stays recoverable. The bot-filtered share on the analytics page
-      is deferred to A-FIRST-10, and the same figure on the operations dashboard is deferred to R-REP-08, which owns that dashboard (re-pointed by R-REP-07: that unit built the data-quality GATE, which judges whether every session carries a classification, and it renders no traffic share). Each
+      is deferred to A-FIRST-10, and the same figure on the operations dashboard is deferred to A-FIRST-10 (re-pointed twice: R-REP-07 built the
+      data-quality GATE, which judges whether a session carries a classification and renders no traffic share, and
+      R-REP-08''s dashboards are folds over the KPI datasets, which hold no session at all - a traffic share there
+      would need a measure, a loader and a drill-down that unit does not have. A-FIRST-10 already owns the other
+      half of this same sentence, so the two live together). Each
       must call classifyBot and store its verdict rather than re-deriving a flag — BOT_KINDS and
       AI_CRAWLER_BOT_KINDS are exported from @berelax/core and @berelax/shared for exactly that — and the scan in
       apps/web/src/crawler-policy.test.ts refuses a crawler name written at any of those call sites. Two shapes
@@ -15436,10 +15440,27 @@ units:
       which is a state a tile must render and not a number it may fall back from. R-REP-04''s KpiOutcome
       union is already the shape R-REP-07''s typed result needs: value, no_denominator, no_data,
       not_attributable, with no numeric fallback branch.'
+    - 'NOTE: two deviations from this entry''s file list, both recorded rather than silent. (1) The tile is
+      `packages/ui/src/reporting/kpi-tile.ts` and not `.tsx`: the admin estate serves documents from a
+      `route.ts` and builds them in a `render.ts`, because a registry DOCUMENT must be served in both
+      locales and an Arabic admin document needs the W-SYS-01 shell - so a React component would have no
+      document to live in. It is exported at `@berelax/ui/reporting` and deliberately absent from that
+      package''s barrel, because it reaches `@berelax/core` for the union and a barrel export would pull
+      core into every module that imports a colour token, including the client islands whose weight
+      build/budgets.json holds to 2KB and 3KB. (2) The screen is `route.ts` + `handler.ts` + `render.ts`
+      and not `page.tsx`, for the same locale reason - the month reconciliation, the compliance calendar,
+      the Messages inbox and the five HR screens are the precedent - and the split puts everything this
+      unit decides in `handler.ts`, which `apps/web/src/data-quality.itest.ts` drives directly against
+      real PostgreSQL rather than over HTTP against whatever `.next` was last built.'
     files:
     - packages/core/src/reporting/data-quality.ts
-    - packages/ui/src/reporting/kpi-tile.tsx
-    - apps/web/app/(admin)/reports/data-quality/page.tsx
+    - packages/db/src/reporting/data-quality-queries.ts
+    - packages/db/src/reporting/kpi-input.ts
+    - packages/ui/src/reporting/kpi-tile.ts
+    - apps/web/app/(admin)/reports/data-quality/handler.ts
+    - apps/web/app/(admin)/reports/data-quality/render.ts
+    - apps/web/app/(admin)/reports/data-quality/route.ts
+    - apps/web/src/data-quality.itest.ts
     - scripts/test-gates.mjs
   - id: R-REP-08
     order: 128
@@ -15448,7 +15469,7 @@ units:
       source rows, field-level scoping enforced in the API rather than the UI, business-day and time-of-day
       views for 11:00–02:00 trading, and pushed alerts routed through the messaging compliance gate.
     owner: claude
-    status: todo
+    status: done
     size: L
     milestone: M5
     depends_on:
@@ -15479,11 +15500,35 @@ units:
     - the time-of-day view renders the trading window as 15 contiguous buckets in business-day order; axe
       reports zero serious or critical violations; screenshots at 3 viewports × 2 themes × 2 directions
       produce zero diff on re-run
+    - 'NOTE: two deviations and one thing not run, all in the sixth acceptance line. (1) The browser suite
+      is `apps/web/e2e/dashboards.itest.ts` and not `dashboards.spec.ts`: `vitest.integration.config.ts`
+      includes `apps/**/*.itest.ts` and nothing else, so a `.spec.ts` would be a suite nothing runs, which
+      is worse than no suite because it looks like coverage. `collector.itest.ts` and
+      `walk-in-speed.itest.ts` in the same directory are the convention. (2) The dashboards are route
+      handlers (`route.ts` + `handler.ts` + `render.ts`) and not `page.tsx` / `dashboards/*.tsx`: a registry
+      DOCUMENT must be served in both locales, which needs an Arabic admin document and the W-SYS-01 shell,
+      and `?dir=rtl` re-renders the English document mirrored so the direction half of the matrix is audited
+      without inventing an Arabic admin surface - the month reconciliation, the compliance calendar, the
+      Messages inbox and the five HR screens are the precedent. (3) The browser suite was WRITTEN AND NOT
+      EXECUTED in this container: it needs `pnpm --filter @berelax/web build` and the container had 1.6 GB
+      free with three other agents building, so the one build this unit was budgeted could not be spent. It
+      is read-only by construction - the window is a seeded trading day with no appointment, document,
+      journal entry or shift, so it creates nothing but its own principal and the `journal_entry`
+      no-DELETE hazard (ZL001) cannot arise. The band `dashboards` at 24_200 is declared and claimed, so
+      `test-ports.test.ts` holds. Everything that does not need a browser - the scope in the query, the
+      forbidden columns absent from the serialised payload, the drill-down identity for every tile, the
+      export''s audit row and its alert, and the bucket count, contiguity and business-day order over the
+      rendered HTML - is asserted in `apps/web/src/dashboards.itest.ts`, which ran twice.'
     files:
-    - apps/web/app/(admin)/reports/page.tsx
-    - apps/web/app/(admin)/reports/dashboards/*.tsx
+    - packages/core/src/reporting/dashboards.ts
+    - packages/db/src/reporting/dashboard-queries.ts
+    - apps/web/app/(admin)/reports/handler.ts
+    - apps/web/app/(admin)/reports/render.ts
+    - apps/web/app/(admin)/reports/route.ts
     - apps/worker/src/jobs/report-alerts.ts
-    - apps/web/e2e/dashboards.spec.ts
+    - apps/web/src/dashboards.itest.ts
+    - apps/web/e2e/dashboards.itest.ts
+    - scripts/test-gates.mjs
   - id: W-SYS-01
     order: 129
     title: Next.js app shell, Tailwind v4 token mapping and the type stack

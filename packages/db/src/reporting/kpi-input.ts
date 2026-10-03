@@ -83,6 +83,8 @@ export interface KpiInputProvenance {
   readonly daysFound: number
   readonly roomsCounted: number
   readonly roomsAreCurrentState: true
+  /** The employee every appointment and shift row was restricted to, or `null` for the business. */
+  readonly scopedToEmployeeId: string | null
 }
 
 export interface KpiInputRows {
@@ -130,6 +132,18 @@ export async function kpiInputRows(
     readonly window: DataQualityWindow
     /** The revenue account codes, from `STANDARD_SPA_CHART`. The chart lives in `core` (ADR 0001). */
     readonly revenueAccountCodes: readonly string[]
+    /**
+     * The employee the rows are restricted to, or `null` for the whole business (R-REP-08).
+     *
+     * The restriction is INSIDE the queries — `where employee_id = …` on the appointment and shift
+     * reads — and not a filter over their result, because a drill-down and an export both return what
+     * the query returned rather than what a view drew. `revenueLines` is NOT loaded for a scoped
+     * caller: revenue is not a per-employee figure, and an empty array there would be a figure of zero
+     * rather than an absent one — so the caller must not fold a revenue measure over a scoped input,
+     * which `tilesFor` in `@berelax/core` guarantees by dropping every business-wide tile for a scoped
+     * role. `provenance.scopedToEmployeeId` says which it was, so a screen cannot imply otherwise.
+     */
+    readonly scopedToEmployeeId?: string | null
   },
 ): Promise<KpiInputRows> {
   const { fromInclusive: from, toInclusive: to } = args.window
@@ -175,6 +189,7 @@ export async function kpiInputRows(
      order by d.business_day, b.room_id, lower(b.period)
   `
 
+  const scoped = args.scopedToEmployeeId ?? null
   const appointments = await sql<KpiAppointmentRow[]>`
     select business_day::text          as "businessDay",
            room_id::text               as "roomId",
@@ -184,6 +199,7 @@ export async function kpiInputRows(
            turnaround_minutes          as "turnaroundMinutes"
       from reporting.fact_appointment
      where business_day between ${from}::date and ${to}::date
+       and (${scoped}::uuid is null or employee_id = ${scoped}::uuid)
      order by business_day, appointment_id
   `
 
@@ -193,13 +209,17 @@ export async function kpiInputRows(
            rostered_minutes    as "rosteredMinutes"
       from reporting.fact_shift
      where business_day between ${from}::date and ${to}::date
+       and (${scoped}::uuid is null or employee_id = ${scoped}::uuid)
      order by business_day, shift_id, employee_id
   `
 
   // `fact_sale` carries a document's net and not a per-account split, so the account code is attached
   // from the journal lines the document's own entry wrote. Grouped, because a document may credit more
   // than one revenue account — a treatment and a retail item on one invoice.
-  const revenueLines = await sql<{ businessDay: string; accountCode: string; netFils: string }[]>`
+  const revenueLines =
+    scoped !== null
+      ? []
+      : await sql<{ businessDay: string; accountCode: string; netFils: string }[]>`
     select e.entry_date::text                                as "businessDay",
            l.account_code                                    as "accountCode",
            sum(l.credit_fils - l.debit_fils)::text           as "netFils"
@@ -232,6 +252,7 @@ export async function kpiInputRows(
       daysFound: businessDays.length,
       roomsCounted: rooms.length,
       roomsAreCurrentState: true,
+      scopedToEmployeeId: scoped,
     },
   }
 }

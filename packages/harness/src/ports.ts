@@ -269,6 +269,13 @@ export const TEST_PORT_BANDS = {
   // and `book-flow` came to share one. [22_700, 23_000) contains none of RESTRICTED_PORTS and is below
   // EPHEMERAL_PORT_FLOOR.
   'walk-in-speed': { start: 22_700, width: 300 },
+  // R-REP-08's role-scoped dashboard, which needs a real server for the two claims a pure render cannot
+  // make: axe needs a rendered DOM, and a pixel diff needs two renders of one page. 24_200 rather than
+  // the next round number after `walk-in-speed`: 23_000 onwards holds allocations claimed by units in
+  // flight in other worktrees, and a band chosen from what one worktree can see is exactly how
+  // `template-editor` and `book-flow` came to share one. [24_200, 24_500) contains none of
+  // RESTRICTED_PORTS.
+  dashboards: { start: 24_200, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

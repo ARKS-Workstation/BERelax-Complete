@@ -61239,6 +61239,295 @@ export function chargebackNetEffectFils(`,
   )
 }
 
+// 199a-199z. (R-REP-08) The role-scoped dashboards: every refusal shown to be able to stop refusing, the
+//            SCOPE shown to be able to leave the query, the forbidden column shown to be able to come
+//            back into the payload, and the drill-down identity shown to be able to stop holding.
+//
+//            Every mutation below leaves a dashboard that renders. A permission check that passes, a
+//            column that is selected again, a scope clause dropped from one of two queries, a
+//            drill-down whose rows no longer add up: each one reads as a simplification and each one
+//            puts somebody else's figures on a screen.
+//
+//            199a to 199g run the two unit suites and are fast. 199h onwards drive the integration
+//            suite, which needs a migrated and seeded database.
+{
+  const DASH_TS = 'packages/core/src/reporting/dashboards.ts'
+  const DASH_TEST = 'packages/core/src/reporting/dashboards.test.ts'
+  const ALERTS_TS = 'apps/worker/src/jobs/report-alerts.ts'
+  const ALERTS_TEST = 'apps/worker/src/jobs/report-alerts.test.ts'
+  const DASH_QUERIES = 'packages/db/src/reporting/dashboard-queries.ts'
+  const KPI_INPUT = 'packages/db/src/reporting/kpi-input.ts'
+  const DASH_HANDLER = 'apps/web/app/(admin)/reports/handler.ts'
+  const DASH_ITEST = 'apps/web/src/dashboards.itest.ts'
+  const dashUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const dashIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // The control for the whole block. Every case asserts a BROKEN tree is caught, which says nothing
+  // unless the committed tree passes.
+  {
+    const core = run('pnpm', dashUnit(DASH_TEST))
+    check(
+      'dashboards: the committed declarations suite passes, the control for 199a to 199f',
+      !core.failed,
+      `the dashboards unit suite does not pass on the committed tree:\n${core.output}`,
+    )
+    const alerts = run('pnpm', dashUnit(ALERTS_TEST))
+    check(
+      'dashboards: the committed alert suite passes, the control for 199g',
+      !alerts.failed,
+      `the report-alerts suite does not pass on the committed tree:\n${alerts.output}`,
+    )
+  }
+
+  /*
+    199a. The business-wide revenue tile put on the therapist's own dashboard.
+
+    The generous mutation: a therapist asking "how did the salon do" and somebody answering. `tilesFor`
+    drops it at runtime, so nothing visibly breaks — which is exactly why the rule reads the LAYOUT: a
+    declaration nobody can act on is a declaration somebody will later "fix" by removing the filter.
+  */
+  checkRejectedBy(
+    'dashboards: 199a a scoped dashboard publishing a business-wide tile is caught',
+    withEditedFile(
+      DASH_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  therapist: ['treatment_minutes', 'rostered_minutes'],",
+          "  therapist: ['treatment_minutes', 'net_revenue'],",
+        ),
+      () => runExpectingFailure('pnpm', dashUnit(DASH_TEST)),
+    ),
+    'a-scoped-role-publishes-no-business-wide-tile',
+  )
+
+  /*
+    199b. A tile naming a measure the registry does not hold.
+
+    A plausible rename — `net_revenue_fils` reads better than `treatment_net_revenue_fils` — and the
+    consequence is a tile whose figure is not a registered fold, so there is no declaration of what it
+    reads and therefore no drill-down that can be asserted to equal it.
+  */
+  checkRejectedBy(
+    'dashboards: 199b a tile naming an unregistered measure is caught',
+    withEditedFile(
+      DASH_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "    measureId: 'treatment_net_revenue_fils',",
+          "    measureId: 'net_revenue_fils',",
+        ),
+      () => runExpectingFailure('pnpm', dashUnit(DASH_TEST)),
+    ),
+    'tile-names-a-registered-measure',
+  )
+
+  /*
+    199c. The permission check dropped from the tile grant.
+
+    The layout still says what each dashboard is for, so every screen looks right — and the accountant's
+    financial tile is now on the marketer's dashboard, because the layout was never the authorisation.
+  */
+  checkRejectedBy(
+    'dashboards: 199c a tile grant that stopped asking the F07 matrix is caught',
+    withEditedFile(
+      DASH_TS,
+      (text) => replaceOnce(text, '      can(role, tile.requires) &&', '      true &&'),
+      () => runExpectingFailure('pnpm', dashUnit(DASH_TEST)),
+    ),
+    'refuses a tile whose PERMISSION the role lacks',
+  )
+
+  /*
+    199d. The field-group grant dropped from the column projection.
+
+    `return true` for every column, which is what somebody writes to make a drill-down "complete". The
+    screen is unchanged - the UI draws the columns it is given - and the PROJECTION now selects a wage
+    and a clinical note for every role, which is the acceptance line's whole subject.
+  */
+  checkRejectedBy(
+    'dashboards: 199d a column projection that stopped asking the field groups is caught',
+    withEditedFile(
+      DASH_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "      return group === 'operational' || canReadFieldGroup(role, group)",
+          '      return true',
+        ),
+      () => runExpectingFailure('pnpm', dashUnit(DASH_TEST)),
+    ),
+    'never selects a wage or a clinical note',
+  )
+
+  /*
+    199e. The trading buckets numbered from midnight instead of from opening.
+
+    The mutation that looks like a simplification and silently reorders the chart: the hours become
+    0..14 rather than 11..23,0,1, so the two busiest hours of the evening move to the START of the
+    chart. Trading runs 11:00-02:00, which is the whole reason business-day order exists.
+  */
+  checkRejectedBy(
+    'dashboards: 199e trading buckets in clock order rather than business-day order are caught',
+    withEditedFile(
+      DASH_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '      const startHour = (args.opensAtHour + index) % 24',
+          '      const startHour = index % 24',
+        ),
+      () => runExpectingFailure('pnpm', dashUnit(DASH_TEST)),
+    ),
+    'contiguous hours in business-day order',
+  )
+
+  /*
+    199f. The therapist's scope widened to the whole business.
+
+    One role name changed in one condition. Every tile still renders, every permission still holds, and
+    the therapist's screen is now the salon's figures under a per-person label.
+  */
+  checkRejectedBy(
+    'dashboards: 199f a scoped role whose scope became the business is caught',
+    withEditedFile(
+      DASH_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (role !== 'therapist') return { kind: 'business' }",
+          "  if (role !== 'receptionist') return { kind: 'business' }",
+        ),
+      () => runExpectingFailure('pnpm', dashUnit(DASH_TEST)),
+    ),
+    'scopes the therapist to their own employee id',
+  )
+
+  /*
+    199g. The staff alert's class changed to promotional.
+
+    It reads as respecting quiet hours. What it does is hold the one message that says the salon's
+    figures cannot be trusted today until 07:00 - by which time the trading day it is about has closed,
+    because trading runs 11:00-02:00 and the alert is raised at 01:30.
+  */
+  checkRejectedBy(
+    'dashboards: 199g a staff operational alert reclassified as promotional is caught',
+    withEditedFile(
+      ALERTS_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "export const REPORT_ALERT_CLASS: MessageClass = 'transactional'",
+          "export const REPORT_ALERT_CLASS: MessageClass = 'promotional'",
+        ),
+      () => runExpectingFailure('pnpm', dashUnit(ALERTS_TEST)),
+    ),
+    'permits a staff operational alert',
+  )
+
+  // 199h onwards need the database.
+  {
+    const committed = run('pnpm', dashIntegration(DASH_ITEST))
+    check(
+      'dashboards: the committed integration suite passes, the control for 199h to 199k',
+      !committed.failed,
+      `the dashboards integration suite does not pass on the committed tree:\n${committed.output}`,
+    )
+  }
+
+  /*
+    199h. The scope clause dropped from ONE of the two scoped queries.
+
+    The appointment read loses its restriction and the shift read keeps it, which is what a partial edit
+    looks like. The therapist's rostered minutes stay their own and their delivered minutes become the
+    salon's - two figures on one screen, one of them somebody else's, with nothing saying which.
+  */
+  checkRejectedBy(
+    'dashboards: 199h a scoped query that stopped restricting is caught',
+    withEditedFile(
+      KPI_INPUT,
+      (text) =>
+        replaceOnce(
+          text,
+          '      from reporting.fact_appointment\n     where business_day between ${from}::date and ${to}::date\n       and (${scoped}::uuid is null or employee_id = ${scoped}::uuid)',
+          '      from reporting.fact_appointment\n     where business_day between ${from}::date and ${to}::date',
+        ),
+      () => runExpectingFailure('pnpm', dashIntegration(DASH_ITEST)),
+    ),
+    'gives a therapist strictly less than the business',
+  )
+
+  /*
+    199i. A role hard-coded into the column projection.
+
+    `selectableColumnsFor('owner')` rather than the request's own role, which is what a debugging edit
+    leaves behind. Every screen still draws the columns it is given, so nothing looks different - and
+    the serialised payload a second client or an export reads now offers every column to everybody.
+  */
+  checkRejectedBy(
+    'dashboards: 199i a role hard-coded into the column projection is caught',
+    withEditedFile(
+      DASH_HANDLER,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const columns = selectableColumnsFor(args.role)',
+          "  const columns = selectableColumnsFor('owner')",
+        ),
+      () => runExpectingFailure('pnpm', dashIntegration(DASH_ITEST)),
+    ),
+    'carries no salary and no clinical key',
+  )
+
+  /*
+    199j. The export's alert raised under a name the registry does not hold.
+
+    The audit row is still written, so the trail is intact and the export looks fully recorded. What is
+    gone is the only alert that reaches a person: `alertDefinition` is bypassed, nothing routes the
+    event, and a bulk export of the roster notifies nobody.
+  */
+  checkRejectedBy(
+    'dashboards: 199j an export alert raised outside the registry is caught',
+    withEditedFile(
+      DASH_HANDLER,
+      (text) =>
+        replaceOnce(text, '        alertId: definition.id,', "        alertId: 'report_export',"),
+      () => runExpectingFailure('pnpm', dashIntegration(DASH_ITEST)),
+    ),
+    'raises the insider-threat alert',
+  )
+
+  /*
+    199k. The drill-down's contribution changed so the rows no longer add up to the tile.
+
+    Turnaround dropped from the occupied-room-minute rows. It reads as a correction - turnaround is not
+    treatment - and it is the one thing that makes the M5 identity false: the measure includes it
+    because the next client cannot be in the room while it is being reset.
+  */
+  checkRejectedBy(
+    'dashboards: 199k a drill-down whose rows no longer equal the tile is caught',
+    withEditedFile(
+      DASH_QUERIES,
+      (text) =>
+        replaceOnce(
+          text,
+          '                 (a.treatment_minutes + a.turnaround_minutes)::text        as amount,',
+          '                 a.treatment_minutes::text                                 as amount,',
+        ),
+      () => runExpectingFailure('pnpm', dashIntegration(DASH_ITEST)),
+    ),
+    'does not equal its rows',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

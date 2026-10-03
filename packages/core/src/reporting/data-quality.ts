@@ -1,5 +1,5 @@
 import { AppError } from '@berelax/shared'
-import type { KpiDataset, KpiExpr, KpiInput, KpiResult } from './kpi-expression.ts'
+import type { KpiDataset, KpiExpr, KpiInput, KpiResult, Measure } from './kpi-expression.ts'
 import { formatFigure, KPI_DATASETS, KPI_UNIT_DECIMALS, referencesOf } from './kpi-expression.ts'
 import type { Kpi, KpiRegistry } from './kpi-registry.ts'
 import { KPI_REGISTRY } from './kpi-registry.ts'
@@ -427,6 +427,19 @@ export const checksGating = (
   checks: readonly DataQualityCheck[] = DATA_QUALITY_CHECKS,
 ): readonly DataQualityCheck[] =>
   checks.filter((check) => check.attests.some((subject) => subjects.includes(subject)))
+
+/**
+ * The datasets one MEASURE reads, from its own `reads` declaration.
+ *
+ * R-REP-08's headline tiles are measures rather than KPIs — a fold has a drill-down that can equal it
+ * and a ratio does not — so the gate needs the same derivation one level down. It is the declaration and
+ * not a walk, because a measure is a reducer and `measure-reads-exactly-the-fields-it-declares` already
+ * holds that declaration equal to what the reducer touches, in both directions.
+ */
+export const datasetsOfMeasure = (measure: Measure): readonly DataQualitySubject[] => {
+  const datasets = new Set(measure.reads.map((read) => read.slice(0, read.indexOf('.'))))
+  return Object.freeze(DATA_QUALITY_SUBJECTS.filter((subject) => datasets.has(subject)))
+}
 
 /**
  * The KPIs every one of whose datasets is in `loaded`, in registry order.
