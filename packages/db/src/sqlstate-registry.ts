@@ -2756,6 +2756,64 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['assert_parallel_run_decision_evidence'],
     translators: ['packages/db/src/services/parallel-run.ts'],
   },
+  // ZY751-ZY755 are C-AUTO-10's, of the band ZY751-ZY760; ZY756 through ZY760 are left free and
+  // deliberately unregistered, because an entry for a code no migration raises is refused.
+  //
+  // ZY753 is the one that carries the unit. A spend cap bounded by a CHECK is still a cap anything may
+  // move the column of, and the symptom of a hand-moved spend is a campaign whose recorded figure is
+  // correct and whose sends were not counted. The three layers are: the CHECK bounds the column,
+  // claim_campaign_recipient closes the check-then-record window two workers race in, and this names the
+  // only two writers.
+  {
+    code: 'ZY751',
+    rule: 'A campaign recipient may be claimed only from a running campaign, against a whole reservation.',
+    migration: '0154',
+    raisedBy: ['claim_campaign_recipient'],
+    translators: ['packages/db/src/repositories/campaign.ts'],
+  },
+  {
+    code: 'ZY752',
+    rule: 'A campaign recipient may be settled only from the claimed state, into a terminal one.',
+    migration: '0154',
+    raisedBy: ['settle_campaign_recipient'],
+    translators: ['packages/db/src/repositories/campaign.ts'],
+  },
+  {
+    code: 'ZY753',
+    rule: "A campaign's recorded spend may be moved only by the claim and settle functions.",
+    migration: '0154',
+    raisedBy: ['refuse_campaign_spend_move'],
+    translators: ['packages/db/src/repositories/campaign.ts'],
+  },
+  {
+    code: 'ZY754',
+    rule: "A campaign's cap may not be lowered below the spend already recorded against it.",
+    migration: '0154',
+    raisedBy: ['refuse_campaign_cap_below_spend'],
+    translators: ['packages/db/src/repositories/campaign.ts'],
+  },
+  {
+    code: 'ZY755',
+    rule: 'A campaign recipient that has been sent to may not be edited or deleted.',
+    migration: '0154',
+    raisedBy: ['refuse_sent_campaign_recipient_change'],
+    translators: ['packages/db/src/repositories/campaign.ts'],
+  },
+  // ZY771 is Y-PAY-10's, of the band ZY771-ZY780; ZY772 through ZY780 are left free and deliberately
+  // unregistered, because an entry for a code no migration raises is refused.
+  //
+  // It is the structural half of the go-live gate. `parseConfig` refuses PAYMENT_PROVIDER=real outside
+  // production and `createPaymentGateways` refuses it again unless the MCC is confirmed, and both are
+  // code somebody can edit; this holds when they are. SCOPED to the gateway, and the scope is what makes
+  // it safe: a blanket refusal would stop the manual till adapter and the card fake, which are the only
+  // two payment paths that work today.
+  {
+    code: 'ZY771',
+    rule: 'A payment intent may not be recorded against an unshipped gateway until the MCC is confirmed.',
+    migration: '0156',
+    raisedBy: ['refuse_intent_without_confirmed_mcc'],
+    translators: [],
+  },
   {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',

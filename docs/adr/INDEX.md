@@ -4,7 +4,7 @@
 
 # ADR index
 
-97 records, generated from the front matter of each one. Every column below is read
+100 records, generated from the front matter of each one. Every column below is read
 out of the record it describes, so a row cannot be wrong without the record being wrong — which is
 the whole reason this file is not maintained by hand. For the argument behind any of them, read
 [README.md](README.md) and then the record.
@@ -108,3 +108,6 @@ the whole reason this file is not maintained by hand. For the argument behind an
 | [0105](0105-a-reconciliation-report-is-a-reading-and-a-variance-is-named-or-it-fails.md) | a reconciliation report is a READING, its run instant lives outside the compared content, and a variance is named or it fails | accepted | 2026-10-03 | H-MIG-08 | docs/01 decisions — none new. It is the reporting-shaped consequence of |
 | [0106](0106-a-dry-run-is-a-fresh-database-and-three-recorded-runs-or-the-gate-is-decoration.md) | a dry run is a FRESH database, a recorded run carries its own digest, and the gate must be able to refuse one | accepted | 2026-10-03 | H-MIG-09 | docs/01 decisions — none new. It is the rehearsal-shaped consequence of |
 | [0107](0107-the-paper-side-is-a-named-persons-claim-and-the-cutover-decision-is-not-a-function-of-it.md) | the paper side of a parallel run is a named person's CLAIM, a day outside the window has no figure, and the cutover decision is not a function of either | accepted | 2026-10-03 | H-MIG-10 | docs/01 decisions — none new. It is the cutover-shaped record of docs/12's parallel-run step |
+| [0108](0108-a-spend-cap-is-the-databases-or-it-is-a-cap-until-two-workers-run.md) | a spend cap is the DATABASE's, or it is a cap until two workers run | accepted | 2026-10-03 | C-AUTO-10 | docs/01 decisions — none; this is the mechanism behind docs/03 §5's campaigns, and it stands |
+| [0109](0109-a-journey-that-cannot-be-expressed-is-a-finding-and-a-birthday-has-no-year.md) | a journey the DSL cannot express is a FINDING, not a second DSL; and a birthday has no year | accepted | 2026-10-03 | C-AUTO-11 | docs/01 decisions — none; this is the mechanism behind docs/03 §5's stock journeys and |
+| [0110](0110-discreet-is-a-narrow-privacy-claim-and-the-mcc-gate-is-three-layers.md) | "discreet" is a NARROW privacy claim, and the MCC gate is three layers with no invented value | accepted | 2026-10-03 | Y-PAY-10 | docs/01 decisions — none; this is the go-live-shaped consequence of |

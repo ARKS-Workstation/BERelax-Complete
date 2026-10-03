@@ -67,17 +67,40 @@ describe('PAYMENT_PROVIDER=real is refused outside production (ADR 0005)', () =>
 })
 
 describe('PAYMENT_PROVIDER=real resolves to an adapter that refuses, never to the fake', () => {
+  /** A production `real` configuration, which is the only one `parseConfig` will accept. */
+  const realInProduction = () =>
+    parseConfig({
+      APP_ENV: 'production',
+      DATABASE_URL: 'postgres://localhost/berelax',
+      PAYMENT_PROVIDER: 'real',
+    })
+
+  /**
+   * An MCC confirmed in writing, as `legal_entity` would hold it.
+   *
+   * Y-PAY-10 put a second gate in front of `notImplemented`: `real` is refused unless the MCC is on
+   * file. So this fixture is what lets the ORIGINAL claim below still be about the fallback — without
+   * it, the construction refuses for the MCC and the "never the fake" assertion would be satisfied by a
+   * refusal that has nothing to do with it.
+   *
+   * The code is `0000`, which is not a real MCC and is not meant to be: no acquirer has issued one
+   * (`Y7-mcc`), and a plausible four digits here would be a fixture somebody copied into a settings
+   * screen. What the gate checks is that the three columns are present together, not what they say.
+   */
+  const CONFIRMED_MCC = {
+    mcc: '0000',
+    confirmedAtIso: '2026-10-03T00:00:00.000Z',
+    confirmedBy: 'Fixture: no acquirer has issued an MCC (Y7-mcc)',
+  }
+
   it('throws at construction, naming the unit and what it needs', () => {
     // A silent fallback to the fake is the worst outcome available: a production deploy that looks
     // connected, takes no money, and sends a receipt for it.
     try {
       createPaymentGateways({
-        config: parseConfig({
-          APP_ENV: 'production',
-          DATABASE_URL: 'postgres://localhost/berelax',
-          PAYMENT_PROVIDER: 'real',
-        }),
+        config: realInProduction(),
         clock: fixedClock(CLOCK),
+        mcc: CONFIRMED_MCC,
       })
       expect.unreachable('expected a refusal')
     } catch (error) {
@@ -88,6 +111,61 @@ describe('PAYMENT_PROVIDER=real resolves to an adapter that refuses, never to th
         expect(String(error.details['needs'])).toMatch(/merchant account/i)
       }
     }
+  })
+
+  /**
+   * Y-PAY-10's acceptance line: *"config refuses `PAYMENT_PROVIDER=real` unless `APP_ENV=production` and
+   * `legal_entity` carries a non-null `mcc_confirmed_at` with the recorded MCC"*.
+   *
+   * Both halves, and they are refused in different places because they are different kinds of fact:
+   * `parseConfig` refuses the environment (the case at the top of this file), and this refuses the ROW —
+   * which `parseConfig` cannot, because it reads no database.
+   */
+  it('refuses when the MCC confirmation is absent, naming which of the three is missing', () => {
+    const cases: readonly { readonly mcc: unknown; readonly expect: string }[] = [
+      { mcc: undefined, expect: 'mcc-not-confirmed' },
+      { mcc: { mcc: null, confirmedAtIso: null, confirmedBy: null }, expect: 'mcc-not-confirmed' },
+      {
+        mcc: { mcc: null, confirmedAtIso: '2026-10-03T00:00:00.000Z', confirmedBy: 'Owner' },
+        expect: 'mcc-not-recorded',
+      },
+      {
+        mcc: { mcc: '0000', confirmedAtIso: '2026-10-03T00:00:00.000Z', confirmedBy: null },
+        expect: 'mcc-confirmation-has-no-recorder',
+      },
+    ]
+    for (const scenario of cases) {
+      let caught: unknown
+      try {
+        createPaymentGateways({
+          config: realInProduction(),
+          clock: fixedClock(CLOCK),
+          ...(scenario.mcc === undefined
+            ? {}
+            : { mcc: scenario.mcc as { mcc: null; confirmedAtIso: null; confirmedBy: null } }),
+        })
+      } catch (error) {
+        caught = error
+      }
+      expect(isAppError(caught), scenario.expect).toBe(true)
+      if (!isAppError(caught)) continue
+      // The REASONS, not the prose: a message assertion passes until somebody rewords it, and the
+      // whole point of naming three separate refusals is that an operator fixing a go-live needs to
+      // know which column is missing.
+      expect(caught.details['reasons'], scenario.expect).toContain(scenario.expect)
+      // And NOT the pending-integration refusal: the MCC gate runs first, so this is a go-live
+      // refusal rather than a missing adapter.
+      expect(caught.details['unit']).toBeUndefined()
+    }
+  })
+
+  it('an absent MCC argument is refused, never read as nothing to check', () => {
+    // The direction that matters: a caller that forgot to read the row must get the same answer as a
+    // business with no MCC on file. The alternative is a registry that selects a live acquirer because
+    // nobody told it not to.
+    expect(() =>
+      createPaymentGateways({ config: realInProduction(), clock: fixedClock(CLOCK) }),
+    ).toThrow(/mcc_confirmed_at is null/)
   })
 
   it('the control: production with the fake builds both gateways', () => {

@@ -15,9 +15,9 @@
  * `agent_definition` row a job belongs to, and its registry-completeness gate enumerates
  * `cronRegistrations()` and fails naming any cron with no such row.
  */
-import { type Config, loadConfig } from '@berelax/config'
+import { type Config, loadConfig, WINBACK_INTERVAL_DAYS_SETTING_KEY } from '@berelax/config'
 import { instantFromIso } from '@berelax/core'
-import { DEFAULT_QUEUE_OPTIONS, MAINTENANCE_JOBS, type Sql } from '@berelax/db'
+import { DEFAULT_QUEUE_OPTIONS, MAINTENANCE_JOBS, readSetting, type Sql } from '@berelax/db'
 import { AppError } from '@berelax/shared'
 import type { Job, PgBoss } from 'pg-boss'
 import { FLOW_TICK_JOB } from './automation/interpreter.ts'
@@ -75,6 +75,7 @@ import {
   SEND_SCHEDULED_STEP_JOB,
 } from './jobs/send-scheduled-step.ts'
 import { SETTLEMENT_IMPORT_JOB_DEFINITION } from './jobs/settlement-import.ts'
+import { readPremisesHours, runStockJourneySweep } from './jobs/stock-journey-sweep.ts'
 
 export type { JobContext, JobDefinition, JobHandler } from './job.ts'
 
@@ -365,6 +366,33 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
     // blocked on a lock rather than slow, and the pass writes nothing a reclaim could double.
     expireInSeconds: 60,
     handler: packageExpiryHandler,
+  },
+  {
+    name: 'automation.stock-journey-sweep',
+    purpose:
+      'Enters the three stock journeys once a day (C-AUTO-11): review solicitation for every ' +
+      'appointment that COMPLETED and whose invoice is settled, win-back for every consented contact ' +
+      'whose last completed visit is older than the configured interval measured on BUSINESS DAYS, and ' +
+      'the birthday journey for every consented contact whose recorded day and month are today. A ' +
+      'sweep and not an event dispatcher because nothing in this build consumes outbox_event into an ' +
+      'enrolment, and because a contact becoming lapsed and a birthday arriving are facts about dates ' +
+      'rather than things that happen. It enrols and never sends: every message a journey reaches goes ' +
+      'through the interpreter and then the messaging choke point.',
+    // 10:00 Asia/Dubai, which is C-AUTO-11's provisional birthday send hour and is inside the
+    // promotional window (07:00-21:00) with eleven hours to spare. Not 03:00 with the other nightly
+    // passes: a birthday enrolment at 03:00 would be held by the promotional window until 07:00 and the
+    // hold would be the first thing anybody saw. Asia/Dubai is UTC+4 with no DST, so this is 06:00 UTC
+    // every day of the year; `registerJobs` passes the zone to pg-boss rather than this file
+    // pre-computing an offset.
+    cron: '0 10 * * *',
+    agent: 'stock_journey_triggers',
+    retryLimit: 3,
+    retryDelaySeconds: 120,
+    retryBackoff: true,
+    // Three passes over the contact table, each enrolling in its own transaction. Ten minutes is
+    // generous for a fixture-sized salon and the pass is idempotent, so a reclaim enrols nobody twice.
+    expireInSeconds: 600,
+    handler: stockJourneySweepHandler,
   },
   {
     name: 'google-connection.health',
@@ -842,6 +870,52 @@ async function reverseChargeHandler(_data: never, context: JobContext): Promise<
   console.log(
     `vat.reverse-charge-exceptions ${result.from}..${result.asOf}: ` +
       `${result.exceptions.length} exception(s) — ${summary}`,
+  )
+}
+
+/**
+ * The stock journey sweep's pass.
+ *
+ * Thin, like the package expiry sweep's: the business day, the hours and the interval are resolved by
+ * `runStockJourneySweep`, which takes its instant as an argument so the integration suite can drive it at
+ * a frozen clock. What this wrapper adds is the connection, the two reads it needs and the log line — and
+ * the log line reports the counts, which on a quiet day are zero. Zero is the evidence, not the silence: a
+ * pass that printed nothing when nobody was due would be indistinguishable from a pass that had stopped,
+ * which is docs/10 §6's failure and the reason `agent_heartbeat` exists.
+ */
+async function stockJourneySweepHandler(_data: never, context: JobContext): Promise<void> {
+  const sql = maintenanceSql
+  if (sql === undefined) {
+    throw new AppError(
+      'invariant_violated',
+      'The stock journey sweep ran before setMaintenanceSql() supplied a connection. run.ts calls it ' +
+        'before startWorkers().',
+    )
+  }
+  const hoursFor = await readPremisesHours(sql)
+  // Read per pass and not captured at boot, for the reason every other setting reader in this worker
+  // gives: Y9-crm-pipeline is answered by an audited settings change with no deploy, and a figure
+  // captured at boot would go on enforcing yesterday's interval while every screen showed today's.
+  const stored = await readSetting<unknown>(sql, WINBACK_INTERVAL_DAYS_SETTING_KEY)
+  const result = await runStockJourneySweep(
+    sql,
+    {
+      hoursFor,
+      ...(typeof stored === 'number' && Number.isInteger(stored)
+        ? { winbackIntervalDays: stored }
+        : {}),
+    },
+    // `JobContext.now()` is an ISO string; the sweep takes an `Instant`, because every date it resolves
+    // goes through `resolveTradingDate`. `instantFromIso` is the one conversion, as it is everywhere
+    // else in this file.
+    instantFromIso(context.now()),
+  )
+  console.log(
+    `automation.stock-journey-sweep for ${result.tradingDate}: ` +
+      `review ${result.review.enrolled} enrolled of ${result.review.considered}, ` +
+      `win-back ${result.winback.enrolled} of ${result.winback.considered} ` +
+      `(${result.winback.notMeasurable} with no datable last visit), ` +
+      `birthday ${result.birthday.enrolled} of ${result.birthday.considered}`,
   )
 }
 

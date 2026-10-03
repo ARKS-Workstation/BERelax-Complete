@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**190 / 211 units complete.**
+**193 / 211 units complete.**
 
 ## Next up
 
 1. **B-M1 — M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop**
-1. **C-AUTO-10 — Segments, campaigns, spend caps and window-aware scheduling**  — **needs owner input:** Y6-sender-ids
 1. **P-HR-14 — Therapist self-service portal and staff notifications**
+1. **A-FIRST-10 — The /analytics admin page**
 
 ## All units
 
@@ -101,8 +101,8 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 80 | `C-AUTO-05` | Marketing kill switch and promotional-identity containment | `C-AUTO-04`, `H02` | — | — |
 | [x] | 81 | `C-AUTO-07` | The interpreter on pg-boss: idempotency, loop detection and dry run | `C-AUTO-04`, `C-AUTO-06`, `F06` | — | — |
 | [x] | 82 | `C-AUTO-09` | Node-graph journey builder, with misrouting made impossible | `C-AUTO-06`, `C-AUTO-07`, `H04` | — | — |
-| [ ] | 83 | `C-AUTO-10` | Segments, campaigns, spend caps and window-aware scheduling | `C-AUTO-03`, `C-AUTO-04`, `H04` | — | Y6-sender-ids |
-| [ ] | 84 | `C-AUTO-11` | Stock journeys - review solicitation, win-back, birthday - and the M3 proof | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `C-AUTO-07`, `C-AUTO-10`, `H03` | — | Y2-gbp-status, Y9-windows |
+| [x] | 83 | `C-AUTO-10` | Segments, campaigns, spend caps and window-aware scheduling | `C-AUTO-03`, `C-AUTO-04`, `H04` | — | Y6-sender-ids |
+| [x] | 84 | `C-AUTO-11` | Stock journeys - review solicitation, win-back, birthday - and the M3 proof | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `C-AUTO-07`, `C-AUTO-10`, `H03` | — | Y2-gbp-status, Y9-windows |
 | [x] | 85 | `C-CRM-06` | Duplicate review queue and merge preview | `C-CRM-05`, `H04` | — | — |
 | [x] | 86 | `C-CRM-07` | Preference centre, public and login-free | `C-CRM-04`, `F11` | — | — |
 | [x] | 87 | `C-CRM-08` | Clinical intake templates and encrypted submissions behind the boundary | `C-CRM-01`, `F08` | — | Y5-residency, Y1-licence |
@@ -223,7 +223,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 202 | `Y-PAY-07` | Card-on-file mandates and the no-show / late-cancellation fee path | `Y-PAY-06` | — | Y9-windows |
 | [x] | 203 | `Y-PAY-08` | Refunds, partial refunds and chargebacks in the append-only journal | `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13`, `Y-PAY-04` | — | — |
 | [x] | 204 | `Y-PAY-09` | Settlement import and reconciliation to the fils | `M-VAT-01`, `M-VAT-02`, `M-VAT-03`, `M-VAT-04`, `M-VAT-05`, `M-VAT-06`, `M-VAT-07`, `M-VAT-08`, `M-VAT-09`, `M-VAT-10`, `M-VAT-11`, `M-VAT-12`, `M-VAT-13`, `Y-PAY-08` | — | — |
-| [ ] | 205 | `Y-PAY-10` | Discreet statement descriptor, MCC gate and the payments go-live guard | `F09`, `W-SITE-01`, `W-SITE-02`, `W-SITE-03`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07`, `W-SITE-08`, `W-SITE-09`, `W-SITE-10`, `W-SITE-11`, `Y-PAY-09` | — | Y7-mcc |
+| [x] | 205 | `Y-PAY-10` | Discreet statement descriptor, MCC gate and the payments go-live guard | `F09`, `W-SITE-01`, `W-SITE-02`, `W-SITE-03`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07`, `W-SITE-08`, `W-SITE-09`, `W-SITE-10`, `W-SITE-11`, `Y-PAY-09` | — | Y7-mcc |
 | [ ] | 206 | `H-MIG-11` | Freeze, go/no-go check and the cutover runbook with rollback | `H-HARD-06`, `H-HARD-09`, `H-HARD-10`, `H-MIG-10`, `Y-PAY-10` | — | Y13-pentest, Y11-tax-agent, Y10-consent, Y6-sender-ids, Y7-mcc |
 
 ## Legend

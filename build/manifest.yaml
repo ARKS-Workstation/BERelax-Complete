@@ -9942,7 +9942,7 @@ units:
       than only at launch, and refuse to be scheduled outside 07:00-21:00 Asia/Dubai. A campaign still running
       at 21:00 stops at the boundary and holds the remainder.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - C-AUTO-03
@@ -9972,6 +9972,15 @@ units:
     - packages/core/src/automation/segment-compile.ts
     - apps/worker/src/automation/campaign-sender.ts
     - apps/web/app/(admin)/crm/campaigns/
+    note: 'The campaigns screen is READ-ONLY: it shows every campaign with its segment''s DATED contact
+      count, its pre-launch estimate, what it has spent of its cap and how its recipients ended, and it
+      has no POST. Creating, estimating and launching a campaign belong to the sender and the API, because
+      a screen that could launch one would be a second place the spend cap and the promotional window are
+      decided - which is what migration 0154''s one-statement reservation and promotional-window.ts exist
+      to stop there being. No campaign can leave this build at all while Y6-sender-ids is open. The
+      authoring-time window refusal and the clinical-schema refusal are asserted in the two core unit
+      suites rather than in the integration suite, because both are judgements about a document and need
+      no database.'
   - id: C-AUTO-11
     order: 84
     title: Stock journeys - review solicitation, win-back, birthday - and the M3 proof
@@ -9980,7 +9989,7 @@ units:
       M3: booking event to enrolment to consented send to opt-out to suppression blocking the next send,
       every step asserted on rows.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-MSG-01
@@ -10016,6 +10025,33 @@ units:
     - apps/worker/src/automation/triggers/
     - packages/core/src/automation/winback.ts
     - packages/db/src/schema/customer.ts
+    note: 'THREE ACCEPTANCE CLAUSES HAVE NO DSL VOCABULARY and became arrangements rather than DSL
+      extensions; ADR 0109 records each. (1) FLOW_TRIGGER_EVENTS is appointment-level, so there is no
+      booking.created and the review journey and the M3 proof are both entered by appointment.completed.
+      (2) FLOW_CONDITION_FACTS holds no fact about money, so "COMPLETED and paid" is the TRIGGER''s
+      eligibility query over invoice_settlement.outstanding_fils rather than a condition node. (3) There
+      is no rating fact and nothing in this build collects a rating, so the private path branches on a
+      TAG (LOW_INTERNAL_RATING_TAG) that whoever collects one writes - which also means the provisional
+      "internal rating threshold 3 or below out of 5" is NOT configured anywhere: there is no rating to
+      threshold, and a setting for one would be a figure applied to nothing.
+      TWO OF THE THREE JOURNEYS SEND NOTHING. The only promotional template this build ships is
+      review.request and it ships draft precisely so unapproved words cannot reach a customer, so the
+      win-back and birthday journeys end in an action_tag and the front desk acts. Writing win-back or
+      birthday copy here would invent exactly what packages/messaging/src/templates.ts refuses to invent
+      (brief rule 15). The message node is one edge away the day copy is approved.
+      THE REVIEW LINK SETTING IS NOT BUILT. The provisional says the review link is a configured URL
+      setting; review.request declares {{link}}, a flow node carries no values, and the interpreter
+      already refuses such a node by name (template_variables_unresolved). Since the template is draft the
+      choke point refuses it before any value would be needed, so a resolver and a URL setting would both
+      be code with no reachable path (ADR 0003). Deferred to whoever approves the review copy: it is one
+      setting plus a values resolver in apps/worker/src/automation/nodes/message.ts, whose own comment
+      already names this unit as the owner.
+      M3''S FINAL REFUSAL IS RECORDED refused_no_consent, NOT refused_suppressed. A preference-centre
+      opt-out writes both a consent withdrawal and a suppression row, and evaluateGate reads consent
+      first. Both are asserted on rows, and a THIRD contact - suppressed with consent still standing - is
+      what proves the refused_suppressed path the clause names.
+      ZY761-ZY770 ARE RELEASED UNUSED: two CHECKs say everything migration 0155 has to say, and pnpm
+      sqlstate refuses an entry for a code no migration raises.'
   - id: C-CRM-06
     order: 85
     title: Duplicate review queue and merge preview
@@ -22620,7 +22656,7 @@ units:
       rather than stored as an event nothing can fold. That is ADR 0089 holding: a chargeback is not a
       gateway movement of the intent, it is a row with its own received_at and journal entry. What is still
       open is the ROUTING - no handler puts a notice into the chargeback table, because no gateway has been
-      chosen and a notice''s format is unknown (Y7-gateway) - and that is deferred to Y-PAY-10, whose
+      chosen and a notice''s format is unknown (Y7-gateway) - and that is BLOCKED ON Y7-gateway rather than on any unit (Y-PAY-10 shipped the go-live guard and correctly refused to invent a provider), whose
       subject is the payments go-live guard and the provider selection a format depends on.'
     - 'NOTE: deferred to Y-PAY-04 (RE-POINTED by Y-PAY-03; DEFERRAL SATISFIED in part) — the 3DS path. The fake exposes
       completeCustomerAction as its stand-in for a customer returning from a challenge, and it is NOT on the
@@ -22639,7 +22675,7 @@ units:
       path that can move an intent (ADR 0056). What is still true is the narrow half: nothing calls the
       fake''s completeCustomerAction, because the webhook path does not need it - the fake''s event stream
       is what a delivery is built from. A caller for that method would be a demo of the FAKE rather than of
-      the system, and it is deferred to Y-PAY-10 with the rest of the gateway-selection work.'
+      the system, and it is BLOCKED ON Y7-gateway with the rest of the gateway-selection work, and names no unit because none can discharge it until a gateway is chosen.'
     - 'NOTE: no test port band was used. Nothing here starts a server: the port is pure and both adapters are
       in-memory, so every suite in this unit is a unit suite. The band 16_700 allocated to this unit is
       unused and unclaimed, which apps/web/src/test-ports.test.ts requires of a band nobody declares.'
@@ -22699,7 +22735,7 @@ units:
       from 1 per process, so the SECOND run of `payment-intent.itest.ts` against one database collided on ids
       the first run had stored, and because nothing here can be deleted no teardown could free them.
       Double-counting WITHIN one intent is still shut by `unique (payment_intent_id, gateway_event_id)`; two
-      local intents against one remote intent is deferred to Y-PAY-10, which is still todo - RE-POINTED
+      local intents against one remote intent is BLOCKED ON Y7-gateway (not on a unit; Y-PAY-10 is done and refused to invent a provider), re-pointed off Y-PAY-10 by the integrator when that unit went done, which is still todo - RE-POINTED
       there by Y-PAY-05, and with a finding. Y-PAY-05 DID build the half this note expected: an intent the
       gateway does not recognise is quarantined and alerted (ZY683) and never deleted. That is the
       OPPOSITE case. Two local intents against ONE remote intent has both of them recognised, so the pass
@@ -23481,7 +23517,7 @@ units:
     - refunding more than was captured, or refunding a voided intent, is refused with a named error
     - a chargeback received at 01:30 resolves to the previous trading date, asserted against the business_day
       primitive
-    - 'NOTE: the chargeback INGEST path is deferred to Y-PAY-10, which is still todo - RE-POINTED there by
+    - 'NOTE: the chargeback INGEST path is BLOCKED ON Y7-gateway (not on a unit; Y-PAY-10 is done and refused to invent a provider), re-pointed off Y-PAY-10 by the integrator when that unit went done, which is still todo - RE-POINTED there by
       Y-PAY-04, which owns the webhook ingest and is the unit this NOTE originally named. A
       dispute arrives by webhook, so nothing routes a notice into the chargeback table yet; what this unit
       ships is the table, the entries, the cap and the refusals, plus the two properties that handler will
@@ -23580,7 +23616,7 @@ units:
       guard that refuses to run a real provider until the MCC is recorded in writing and the acquirer's
       public-site prerequisites are actually live.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F09
@@ -23617,6 +23653,38 @@ units:
     - packages/config/src/env.ts
     - scripts/go-live-payments.mjs
     - packages/db/migrations/00XX-legal-entity-mcc.sql
+    note: 'NEITHER THE DESCRIPTOR NOR ITS LIMIT IS SET, and the proposed values were REFUSED under brief
+      rule 15. ''BR SPA AUH'' contains ''SPA'', which lintStatementDescriptor blocks by name because it
+      tells a shared bank statement what was bought; 22 characters is true of some card schemes and not
+      others, and a descriptor silently cut to the wrong length is still a valid statement line. Both are
+      now Y7-descriptor in docs/OPEN-QUESTIONS.md. payments.statement_descriptor holds a MARKER
+      is_placeholder_text() refuses (app_setting.value is NOT NULL, so unset cannot be a null) and
+      payments.statement_descriptor_limit holds 0, which is not a legal length.
+      FILE PATHS DIFFER FROM THE ENTRY, and deliberately. The lint lives in
+      packages/core/src/payments/descriptor.ts rather than only in the script, and the go-live
+      prerequisite list and verdict in packages/core/src/payments/go-live.ts, because a judgement that
+      lives in a .mjs script is a judgement no test reaches - the same reason ALERT_REGISTRY is in
+      @berelax/shared. packages/db/src/settings/descriptor.ts is the reader, as declared. The migration is
+      0156_legal_entity_mcc.sql.
+      THE MCC HALF OF THE CONFIG REFUSAL IS NOT IN packages/config/src/env.ts, because parseConfig reads
+      no database. The environment half stays there (ADR 0005); the ROW half is createPaymentGateways,
+      which takes the three columns as an argument and refuses with no argument - proven by
+      packages/payments/src/registry.test.ts, whose existing no-fallback case now supplies a confirmed MCC
+      so it is still about the fallback. ZY771 is the third layer.
+      TWO OF THE FIVE PUBLIC PAGES DO NOT EXIST. This application serves no route at /refunds and none at
+      /privacy, so the route test asserts the honest state - both reported MISSING by name, the three that
+      exist reported unpublished, the verdict not ok - rather than asserting they are live. pnpm
+      go-live:payments exits non-zero today for six reasons including the MCC. It is deliberately NOT in
+      pnpm verify: a gate that fails every commit on a business fact nobody can fix in code is a gate
+      somebody deletes. pnpm descriptor-lint IS in verify, in CI and in gate case 29.
+      THE RECEIPT COPY IS NOT WRITTEN. What is built is DESCRIPTOR_PRIVACY_CLAIM, the one sentence a screen
+      may show about what a discreet descriptor conceals - and its NEGATIVE half is tested, because that is
+      the half somebody paraphrases away: it names the business and not the treatment, and hides neither the
+      payment, nor its amount, nor its date, nor the business from anyone who looks the name up. A
+      customer-facing receipt line is copy no human has approved and it cannot be written before
+      Y7-descriptor is answered (brief rule 15).
+      ZY772-ZY780 ARE RELEASED UNUSED: the remaining rules are CHECKs, and pnpm sqlstate refuses an entry
+      for a code no migration raises.'
   - id: H-MIG-11
     order: 206
     title: Freeze, go/no-go check and the cutover runbook with rollback

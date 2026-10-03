@@ -1,6 +1,12 @@
-import type { Config } from '@berelax/config'
+import { type Config, isProduction } from '@berelax/config'
 import type { Clock, PaymentGateway, PaymentRecordSink, TenderKind } from '@berelax/core'
-import { TENDER_KINDS, TENDER_TYPES } from '@berelax/core'
+import {
+  MCC_OPEN_QUESTION,
+  mayUseRealPaymentProvider,
+  realProviderRefusalDetail,
+  TENDER_KINDS,
+  TENDER_TYPES,
+} from '@berelax/core'
 import { FailureScript } from '@berelax/providers/failure'
 import { notImplemented } from '@berelax/providers/not-implemented'
 import { AppError } from '@berelax/shared'
@@ -42,6 +48,26 @@ export interface PaymentGatewayRegistryOptions {
   readonly records?: PaymentRecordSink
   /** Shared with `@berelax/providers` so one `failNext` arms every provider at once. */
   readonly failures?: FailureScript
+
+  /**
+   * The MCC confirmation as `legal_entity` holds it, for the `real` gate (Y-PAY-10).
+   *
+   * Injected and not read here, because this package reads no database and `parseConfig` cannot either:
+   * the environment half of the gate is refused in `packages/config/src/env.ts` (ADR 0005) and the ROW
+   * half has to arrive from a caller that has a connection. `apps/web` and `apps/worker` read it with
+   * `readMccConfirmation` from `@berelax/db`.
+   *
+   * **Absent means REFUSE, never "nothing to check".** A caller that forgot to read the row gets the
+   * same answer as a business with no MCC on file, which is the only safe direction: the alternative is
+   * a registry that selects a live acquirer because nobody told it not to. `notImplemented` makes the
+   * point moot today — no gateway exists — and the gate is here for the day one does, because that is
+   * the day the check stops being free.
+   */
+  readonly mcc?: {
+    readonly mcc: string | null
+    readonly confirmedAtIso: string | null
+    readonly confirmedBy: string | null
+  }
 }
 
 export interface PaymentGatewayRegistry {
@@ -85,7 +111,7 @@ export function createPaymentGateways(
 
   const cards: PaymentGateway =
     config.PAYMENT_PROVIDER === 'real'
-      ? notImplemented('card-gateway')
+      ? realCardGateway(config, options.mcc)
       : createFakeCardGateway({ clock, records, failures })
 
   const all: readonly PaymentGateway[] = Object.freeze([till, cards])
@@ -100,6 +126,44 @@ export function createPaymentGateways(
     records,
     failures,
   }
+}
+
+/**
+ * `PAYMENT_PROVIDER=real`, judged against the MCC before it is resolved at all (Y-PAY-10).
+ *
+ * `notImplemented('card-gateway')` is still what a passing gate returns, because no gateway has been
+ * chosen — so today this function's two branches both end in a throw and the difference between them is
+ * the MESSAGE. That is the point rather than a weakness: the day a gateway exists, the day the MCC gate
+ * stops being free is the day it is already written, and the refusal it gives names the three columns
+ * that are missing rather than the pending integration.
+ *
+ * It throws rather than returning a refusal, and that matches `notImplemented`'s own shape: a registry
+ * is constructed at the edge of a process, and a `real` selection that could not be honoured must stop
+ * the deploy while somebody is watching rather than hand back a gateway that answers no (ADR 0022 rule
+ * 3).
+ */
+function realCardGateway(
+  config: Config,
+  mcc: PaymentGatewayRegistryOptions['mcc'],
+): PaymentGateway {
+  const verdict = mayUseRealPaymentProvider({
+    isProduction: isProduction(config.APP_ENV),
+    mcc: mcc?.mcc ?? null,
+    mccConfirmedAtIso: mcc?.confirmedAtIso ?? null,
+    mccConfirmedBy: mcc?.confirmedBy ?? null,
+  })
+  if (!verdict.ok) {
+    throw new AppError('invariant_violated', realProviderRefusalDetail(verdict.reasons), {
+      details: {
+        reasons: [...verdict.reasons],
+        appEnv: config.APP_ENV,
+        openQuestionId: MCC_OPEN_QUESTION,
+      },
+    })
+  }
+  // The gate passed and there is still nothing to construct: no gateway has been chosen, no merchant
+  // account exists. `notImplemented` names the unit and what it needs, as it has since ADR 0022.
+  return notImplemented('card-gateway')
 }
 
 /**

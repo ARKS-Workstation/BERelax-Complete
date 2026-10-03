@@ -213,6 +213,96 @@ export const COMMISSION_ENABLED_SETTING_KEY = 'hr.commission_enabled'
  * both — and a second spelling is a reader that silently falls back to the declared default, which for
  * the percentage would be invisible because the fallback is a number.
  */
+/**
+ * The two campaign setting keys (C-AUTO-10).
+ *
+ * Spelled once here for the deposit keys' reason: `packages/db/src/settings/campaign.ts` reads them, the
+ * campaigns screen reads the second, and the Unconfirmed Assumptions panel lists both \u2014 and a second
+ * spelling is a reader that silently falls back to the declared default. For the cap that fallback would
+ * be invisible, because the fallback is a number and the number is a budget.
+ */
+/**
+ * How many days since a contact's last completed visit before the win-back journey enters them.
+ *
+ * Spelled once here, for the campaign keys' reason: the worker's sweep reads it and the Unconfirmed
+ * Assumptions panel lists it, and a second spelling is a reader that silently falls back to the declared
+ * default — which here is a number, so the mistake would be invisible.
+ */
+/**
+ * The statement descriptor and the provider's limit on its length (Y-PAY-10).
+ *
+ * Spelled once here for the deposit keys' reason: `packages/db/src/settings/descriptor.ts` reads both,
+ * `scripts/check-descriptor-lint.mjs` reads both, and the Unconfirmed Assumptions panel lists both. A
+ * second spelling is a reader that silently falls back to the declared default, and for the LIMIT that
+ * fallback would be invisible — the fallback is a number, and the symptom is a descriptor truncated to
+ * somebody else's length.
+ */
+export const STATEMENT_DESCRIPTOR_SETTING_KEY = 'payments.statement_descriptor'
+export const STATEMENT_DESCRIPTOR_LIMIT_SETTING_KEY = 'payments.statement_descriptor_limit'
+
+/** Both, for a panel or a test that has to prove neither was forgotten. */
+export const STATEMENT_DESCRIPTOR_SETTING_KEYS = [
+  STATEMENT_DESCRIPTOR_SETTING_KEY,
+  STATEMENT_DESCRIPTOR_LIMIT_SETTING_KEY,
+] as const
+
+/** The open question both descriptor settings stand in for. */
+export const STATEMENT_DESCRIPTOR_OPEN_QUESTION_ID = 'Y7-descriptor'
+
+/**
+ * The descriptor's default: a MARKER the schema refuses, not a plausible line and not a blank.
+ *
+ * `app_setting.value` is NOT NULL, so "unset" cannot be a null — and that is the better arrangement in
+ * any case, which brief rule 15 states as a rule: *provisional values carry a marker the schema refuses*.
+ * `is_placeholder_text()` (migration 0026) matches `pending`, so this value is refused by every
+ * constraint in the schema that uses it, is refused by `lintStatementDescriptor` as
+ * `descriptor-not-configured`, and is visibly unanswered on the Unconfirmed Assumptions panel. A
+ * plausible descriptor in its place would be indistinguishable from one a processor accepted, and the
+ * place it would be read is a line on a customer's bank statement.
+ *
+ * It is also deliberately NOT sendable in a second, independent way: it contains no character a card
+ * network would carry in that order, it is longer than any scheme's field, and `DESCRIPTOR-` is not a
+ * business name. Three reasons it cannot reach a statement, which is what a marker is for.
+ */
+export const PROVISIONAL_STATEMENT_DESCRIPTOR = 'DESCRIPTOR-PENDING-Y7-DESCRIPTOR'
+
+/**
+ * The limit's default: **zero, which is not a length.**
+ *
+ * A number cannot carry a placeholder marker, so the sentinel has to be a value that is not legal — and
+ * for a LENGTH, zero is exactly that: a descriptor of zero characters is not a short descriptor, it is
+ * no descriptor. That is the opposite of `payments.deposit_percent_bp`, where 0 IS a legal policy
+ * meaning "no deposit", and the difference is why a coercing reader is safe here and dangerous there.
+ * `lintStatementDescriptor` refuses anything under 1 as `descriptor-limit-not-configured`.
+ */
+export const PROVISIONAL_STATEMENT_DESCRIPTOR_LIMIT = 0
+
+export const WINBACK_INTERVAL_DAYS_SETTING_KEY = 'crm.winback_interval_days'
+
+/** 90 days, which is `build/manifest.yaml`'s own provisional value for C-AUTO-11. */
+export const PROVISIONAL_WINBACK_INTERVAL_DAYS = 90
+
+export const CAMPAIGN_SPEND_CAP_FILS_SETTING_KEY = 'crm.campaign_spend_cap_fils'
+export const SEGMENT_COUNT_STALENESS_SECONDS_SETTING_KEY = 'crm.segment_count_staleness_seconds'
+
+/** Both, for a panel or a test that has to prove neither was forgotten. */
+export const CAMPAIGN_SETTING_KEYS = [
+  CAMPAIGN_SPEND_CAP_FILS_SETTING_KEY,
+  SEGMENT_COUNT_STALENESS_SECONDS_SETTING_KEY,
+] as const
+
+/** The open question both campaign settings stand in for. */
+export const CAMPAIGN_SPEND_CAP_OPEN_QUESTION_ID = 'Y6-sender-ids'
+
+/**
+ * AED 500 in fils, which is `build/manifest.yaml`'s provisional value for C-AUTO-10 and not a budget
+ * this build chose. 100 fils is AED 1 (ADR 0007).
+ */
+export const PROVISIONAL_CAMPAIGN_SPEND_CAP_FILS = 50_000
+
+/** Fifteen minutes, which is C-AUTO-10's own provisional value for the staleness window. */
+export const PROVISIONAL_SEGMENT_COUNT_STALENESS_SECONDS = 15 * 60
+
 export const DEPOSIT_ENABLED_SETTING_KEY = 'payments.deposit_enabled'
 export const DEPOSIT_PERCENT_BP_SETTING_KEY = 'payments.deposit_percent_bp'
 
@@ -618,6 +708,174 @@ export const SETTINGS = [
     provisional: {
       openQuestionId: 'Y9-frequency-cap',
       note: 'No figure supplied; 6 per rolling 30 days assumed.',
+    },
+  }),
+  /**
+   * The two campaign settings (C-AUTO-10), and both are provisional for different reasons.
+   *
+   * The CAP is a figure nobody has agreed. The STALENESS WINDOW is a figure nobody has agreed either, and
+   * it is here rather than hard-coded for a sharper reason: the number it governs is shown on a screen
+   * with a send button under it, and a window this build chose and did not declare would be a staleness
+   * judgement made on the owner's behalf about the size of their own marketing list.
+   */
+  define({
+    /**
+     * What a cardholder's bank statement says the money went to. **UNSET.**
+     *
+     * Null, and that is the answer rather than a gap. `Y7-descriptor` is open: no acquirer has been
+     * chosen, nobody has approved a statement line, and a descriptor is not a cosmetic string — it is
+     * the one line about this visit that appears on an account somebody else may share. A plausible
+     * value written into a default would be indistinguishable from one a processor accepted (brief rule
+     * 15), and the place it would be read is a customer's statement.
+     *
+     * The stored value is {@link PROVISIONAL_STATEMENT_DESCRIPTOR} — a marker the schema refuses, for
+     * the reason that constant's own note gives — rather than a null, because `app_setting.value` is
+     * NOT NULL and because brief rule 15 asks for a marker rather than a blank.
+     *
+     * **Unset is a first-class state and the whole payment path already handles it.** `PAYMENT_PROVIDER`
+     * resolves `real` to `notImplemented('card-gateway')`, the manual adapter takes cash, the terminal
+     * and a bank transfer and sends no descriptor at all, and `lintStatementDescriptor` in
+     * `@berelax/core` answers `descriptor-not-configured` by name. Nothing degrades quietly.
+     *
+     * `compliance_locked` and **OWNER_ONLY**, deliberately not the accountant's. What appears on a
+     * customer's bank statement is a privacy decision with a dispute consequence rather than an
+     * accounting policy, and `registry.test.ts` enumerates the accountant's compliance-locked settings
+     * one by one precisely so that the list cannot grow by default — which it would have, had this
+     * copied the deposit percentage beside it. `invalidates: []` because nothing is prerendered from it.
+     */
+    key: STATEMENT_DESCRIPTOR_SETTING_KEY,
+    tier: 'compliance_locked',
+    schema: z.string().min(1).max(64),
+    defaultValue: PROVISIONAL_STATEMENT_DESCRIPTOR,
+    label: 'Statement descriptor',
+    help: 'The line a cardholder sees on their bank statement. It names the BUSINESS and never the treatment: a statement is read by whoever shares the account, and naming what was bought is a disclosure the customer did not choose to make. It does not hide that a payment was made, its amount or its date. Unset until an acquirer is chosen and somebody approves the wording.',
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: STATEMENT_DESCRIPTOR_OPEN_QUESTION_ID,
+      note: 'UNSET. Y7-descriptor asks what this business\u2019s statement descriptor should be, and no acquirer has been chosen to tell it how long one may be. Y-PAY-10\u2019s manifest entry proposed \u2018BR SPA AUH\u2019 with a 22-character limit and both were REFUSED under brief rule 15: the proposed value contains \u2018SPA\u2019, which the descriptor lint blocks by name because it tells a shared bank statement what was bought, and a plausible length is indistinguishable from a contracted one in the one place a truncation is invisible. What is needed: the acquirer\u2019s descriptor field length, and an approved line that names the business and not the treatment.',
+    },
+  }),
+  define({
+    /**
+     * How long a statement descriptor may be, in characters. **UNSET.**
+     *
+     * Every card network and every acquirer has its own, and this business has neither. The reason this
+     * is a refusal rather than a figure is the failure mode: a descriptor over the limit is not rejected
+     * by a processor, it is TRUNCATED — and the characters that go are the ones at the end, which is
+     * where the city and the branch are. So an assumed limit produces a valid statement line that is no
+     * longer recognisable, which is the shape a cardholder disputes.
+     *
+     * Y-PAY-10's manifest entry proposed 22. It is not written here: 22 is a figure that is true of some
+     * schemes and not others, and the one place it would be read is a truncation nobody can see.
+     */
+    key: STATEMENT_DESCRIPTOR_LIMIT_SETTING_KEY,
+    tier: 'compliance_locked',
+    schema: z.number().int().min(0).max(64),
+    defaultValue: PROVISIONAL_STATEMENT_DESCRIPTOR_LIMIT,
+    label: 'Statement descriptor length limit',
+    help: 'How many characters the acquirer will carry on a statement line. Unset until an acquirer says. A descriptor over the limit is not refused by the processor \u2014 it is truncated, and what goes is the end of the line, so an assumed limit produces a statement nobody recognises.',
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: STATEMENT_DESCRIPTOR_OPEN_QUESTION_ID,
+      note: 'UNSET. No acquirer has been chosen, so nobody has said how long a descriptor may be. Y-PAY-10\u2019s manifest entry assumed 22 characters; it is refused here because 22 is true of some schemes and not others, and a descriptor silently cut to the wrong length is still a valid statement line \u2014 the part that was cut is the part that made it recognisable.',
+    },
+  }),
+  define({
+    /**
+     * Days since a contact's last completed visit before the win-back journey enters them. **90.**
+     *
+     * `build/manifest.yaml`'s own provisional value for C-AUTO-11 — *"win-back trigger at 90 days since
+     * last completed visit"* — and not an interval this build chose. Nothing in the handover says how
+     * long a customer has to be away before this business considers them lapsed, and the answer is a
+     * judgement about this business rather than a default: a spa whose customers come monthly and one
+     * whose customers come twice a year want different numbers, and 90 days is the middle of nothing.
+     *
+     * **The figure lives here and not in `winback.ts`.** That module takes the interval as an argument
+     * and holds no number at all, which is what lets `WINBACK_WORKED_EXAMPLE` be a committed example
+     * rather than a second statement of the setting. What the module owns is that the interval is
+     * measured from the BUSINESS day of the last visit: a visit that ended at 01:30 belongs to the
+     * session that opened at 11:00 the previous calendar day, and a win-back dated on the calendar date
+     * would fire a day early for roughly one visit in three with nothing looking wrong.
+     *
+     * `operational` and OWNER_MANAGER: when a customer counts as lapsed is a marketing judgement, and it
+     * has no compliance consequence — the thing with one is the promotional window. `invalidates: []`
+     * because nothing is prerendered from it, and the sweep reads it per pass rather than at boot so an
+     * audited change takes effect the next night with no deploy.
+     */
+    key: WINBACK_INTERVAL_DAYS_SETTING_KEY,
+    tier: 'operational',
+    schema: z.number().int().min(7).max(730),
+    defaultValue: PROVISIONAL_WINBACK_INTERVAL_DAYS,
+    label: 'Win-back interval (days)',
+    help: 'How long since a contact\u2019s last completed visit before the win-back journey picks them up. Measured from the BUSINESS day the visit ended on, so a treatment that finished at 01:30 counts from the session that opened at 11:00 the day before. The journey tags the contact for the front desk; it sends nothing, because no win-back copy has been approved.',
+    editableBy: OWNER_MANAGER,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: CAMPAIGN_SPEND_CAP_OPEN_QUESTION_ID,
+      note: '90 days assumed, which is build/manifest.yaml\u2019s own provisional value for C-AUTO-11 and not an interval anybody has stated. How long a customer has to be away before this business considers them lapsed is a judgement about this business: a spa whose customers come monthly and one whose customers come twice a year want different numbers.',
+    },
+  }),
+  define({
+    /**
+     * What one campaign may spend, in fils. **AED 500 gross per campaign**, and provisional.
+     *
+     * `build/manifest.yaml`'s own provisional value for C-AUTO-10 — *"default campaign spend cap AED 500
+     * gross per campaign, marked provisional"* — and not a figure this build chose. Nothing in the
+     * handover states a marketing budget; `Y6-sender-ids` is open, so no campaign can leave this build at
+     * all yet, and the number that matters on the day one can is the one somebody authorised.
+     *
+     * **It is a DEFAULT and not the cap.** `campaign.cap_fils` is NOT NULL with no default in migration
+     * 0154, so every campaign carries the cap it was created with and changing this can never alter a
+     * campaign that is already running. That is PACKAGE_VALIDITY_MONTHS' arrangement and its reason: a
+     * setting that could move a cap mid-send would be a budget that changed under a send nobody
+     * re-authorised.
+     *
+     * `operational` and OWNER_MANAGER: it is a marketing budget, which is the manager's to set and the
+     * owner's to overrule, and it has no compliance consequence — the thing with a compliance consequence
+     * is the promotional window above, which is `compliance_locked`. `invalidates: []` because nothing is
+     * prerendered from it.
+     */
+    key: CAMPAIGN_SPEND_CAP_FILS_SETTING_KEY,
+    tier: 'operational',
+    schema: z.number().int().min(0).max(10_000_000),
+    defaultValue: PROVISIONAL_CAMPAIGN_SPEND_CAP_FILS,
+    label: 'Default campaign spend cap (fils)',
+    help: 'What a new campaign is created with as its ceiling, in fils \u2014 100 fils is AED 1. The cap is copied onto the campaign when it is created and enforced by the database from then on, so changing this never alters a campaign that has already launched. A campaign that reaches its cap stops and holds the rest of its list.',
+    editableBy: OWNER_MANAGER,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: CAMPAIGN_SPEND_CAP_OPEN_QUESTION_ID,
+      note: 'AED 500 gross per campaign assumed, which is build/manifest.yaml\u2019s own provisional value for C-AUTO-10 and not a budget anybody has stated. Nothing in the handover names a marketing spend. Y6-sender-ids is open, so no campaign can leave this build yet; the figure matters on the day one can, and until then a cap this build invented must be visibly an assumption rather than a configured budget (brief rule 15).',
+    },
+  }),
+  define({
+    /**
+     * How old a segment's cached count may be before a screen must call it stale. **15 minutes.**
+     *
+     * C-AUTO-10's own provisional value — *"segment cached-count staleness window 15 minutes with the
+     * timestamp shown next to the number rather than hidden"*. The second half of that sentence is the
+     * part this setting cannot enforce, and `segmentCountFreshness` in `@berelax/core` is what does:
+     * it returns the AGE on both verdicts, so a caller that has the verdict has the age and there is
+     * nothing for a screen to omit without omitting the number too.
+     */
+    key: SEGMENT_COUNT_STALENESS_SECONDS_SETTING_KEY,
+    tier: 'operational',
+    schema: z.number().int().min(60).max(86_400),
+    defaultValue: PROVISIONAL_SEGMENT_COUNT_STALENESS_SECONDS,
+    label: 'Segment count staleness window (seconds)',
+    help: 'How old a segment\u2019s cached contact count may be before the screen shows it as stale. The count is always shown with the instant it was taken, whichever side of this it falls on \u2014 a count with no date is a number beside a send button with nothing saying how old it is.',
+    editableBy: OWNER_MANAGER,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: CAMPAIGN_SPEND_CAP_OPEN_QUESTION_ID,
+      note: '15 minutes assumed, which is build/manifest.yaml\u2019s own provisional value for C-AUTO-10. Nobody has said how current a recipient count has to be before a send, and the answer depends on how fast this list changes \u2014 which nobody can know before the business has run a campaign.',
     },
   }),
   /**

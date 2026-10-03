@@ -60182,6 +60182,772 @@ export function chargebackNetEffectFils(`,
   }
 }
 
+// 186a-186z. (C-AUTO-10) The spend cap shown to be the DATABASE's, the clinical refusal shown to be
+//            three independent layers, and the 21:00 boundary shown to be asked per message.
+//
+//            The unit's claim is that a cap in application code is a cap until two workers run. Three
+//            things defend it — the one-statement reservation, the CHECK underneath it and ZY753 above
+//            it — and the registry entry for ZY753 is what makes the third one findable, so a case here
+//            removes the raise from the migration and requires `pnpm sqlstate` to notice.
+//
+//            Every case is a mutation a reviewer would wave through: a schema check reordered, a layer
+//            that "cannot fire anyway" deleted, a window verdict asked once instead of per message. Each
+//            leaves a system that WORKS, which is why none of them would be caught by a review.
+//
+//            186a to 186f run the two unit suites and are fast. 186g onwards drive the integration suite
+//            or a repository gate.
+{
+  const SEGMENT_TS = 'packages/core/src/automation/segment-compile.ts'
+  const SEGMENT_TEST = 'packages/core/src/automation/segment-compile.test.ts'
+  const CAMPAIGN_TS = 'packages/core/src/automation/campaign.ts'
+  const CAMPAIGN_TEST = 'packages/core/src/automation/campaign.test.ts'
+  const SENDER_TS = 'apps/worker/src/automation/campaign-sender.ts'
+  const CAMPAIGN_SQL = 'packages/db/migrations/0154_campaign_and_segment.sql'
+  const CAMPAIGN_ITEST = 'apps/worker/src/automation/campaign.itest.ts'
+  const CHOKE_POINT_TS = 'packages/messaging/src/send.ts'
+  const CHOKE_POINT_TEST = 'packages/messaging/src/send.test.ts'
+  const campaignUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const campaignIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // The control for the whole block. Every case asserts that a BROKEN tree is caught, and that says
+  // nothing unless the committed tree passes.
+  {
+    const clean = run('pnpm', campaignUnit(SEGMENT_TEST))
+    check(
+      'campaign: the committed segment suite passes, which is the control for 186a to 186c',
+      !clean.failed,
+      `the segment suite does not pass on the committed tree:\n${clean.output}`,
+    )
+    const window = run('pnpm', campaignUnit(CAMPAIGN_TEST))
+    check(
+      'campaign: the committed campaign suite passes, which is the control for 186d to 186f',
+      !window.failed,
+      `the campaign suite does not pass on the committed tree:\n${window.output}`,
+    )
+  }
+
+  /*
+    186a. The schema check moved BELOW the registry lookup.
+
+    Not deleted — reordered, which is the version that survives a review because every refusal still
+    fires. `clinical.contraindication_flag.flag_key` is both outside the permitted schemas and
+    unregistered, so with the order swapped it is reported as `segment-unknown-attribute` and a reader
+    goes looking for a typo in a reference whose problem is exactly that it is understood. The mutation
+    makes the schema branch unreachable by returning the unknown-attribute refusal first.
+  */
+  checkRejectedBy(
+    'campaign: 186a a clinical reference reported as merely unknown is caught',
+    withEditedFile(
+      SEGMENT_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '    if (!isPermittedSchema(parsed.schema)) {',
+          '    if (false as boolean) {',
+        ),
+      () => runExpectingFailure('pnpm', campaignUnit(SEGMENT_TEST)),
+    ),
+    'segment-attribute-outside-the-permitted-schemas',
+  )
+
+  /*
+    186b. The registry-fault layer answering "clean" unconditionally.
+
+    This is the layer the other two cannot see. Layers 1 and 2 are both about what a DEFINITION may say;
+    neither has anything to say about what somebody adds to `SEGMENT_ATTRIBUTES`, and an entry naming the
+    clinical schema would leave every refusal passing while the compiler emitted a join into it. The
+    plausible wrong implementation is exactly this: a filter nobody expects to match.
+  */
+  checkRejectedBy(
+    'campaign: 186b a registry check that can never report a fault is caught',
+    withEditedFile(
+      SEGMENT_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '    .filter(([, attribute]) => !isPermittedSchema(attribute.schema))',
+          '    .filter(() => false)',
+        ),
+      () => runExpectingFailure('pnpm', campaignUnit(SEGMENT_TEST)),
+    ),
+    'segment-registry-entry-outside-the-permitted-schemas',
+  )
+
+  /*
+    186c. The count query written separately from the rows query.
+
+    The acceptance line is that the cached count equals a live recount, and that equality is only worth
+    asserting while the number a screen shows and the set a send enumerates are the SAME predicate. A
+    separately composed count is the shape that drifts, and it drifts silently: the two agree on the day
+    it is written. The mutation is the plausible one — count every contact, since the segment is "just a
+    filter" — and the suite's own assertion is that `count.text` CONTAINS `rows.text`.
+  */
+  checkRejectedBy(
+    'campaign: 186c a count query that is not the rows query is caught',
+    withEditedFile(
+      SEGMENT_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '      text: `select count(*)::int as "count" from (\\n${rowsText}\\n    ) as matched`,',
+          '      text: `select count(*)::int as "count" from customer`,',
+        ),
+      () => runExpectingFailure('pnpm', campaignUnit(SEGMENT_TEST)),
+    ),
+    'compileSegment',
+  )
+
+  /*
+    186d. A schedule accepted whatever the window says.
+
+    The plausible wrong implementation, and the one a reviewer reads as a simplification: the gate holds
+    an out-of-window message anyway, so why refuse at authoring time? Because a held campaign is
+    indistinguishable from a campaign nobody scheduled, which is how "the February campaign went to
+    nobody" becomes unanswerable.
+  */
+  checkRejectedBy(
+    'campaign: 186d a 22:30 schedule accepted rather than refused is caught',
+    withEditedFile(
+      CAMPAIGN_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (decision.kind === 'open') {\n    return { kind: 'accepted', scheduledAt: args.at, hours: decision.hours }\n  }",
+          "  if (decision.kind === 'open' || decision.kind === 'queue') {\n    return { kind: 'accepted', scheduledAt: args.at, hours: args.ceiling }\n  }",
+        ),
+      () => runExpectingFailure('pnpm', campaignUnit(CAMPAIGN_TEST)),
+    ),
+    'campaign-scheduled-outside-the-promotional-window',
+  )
+
+  /*
+    186e. The refusal carrying the HOURS instead of the next valid instant.
+
+    The mutation that leaves a working, readable refusal and makes it useless in the one case it matters:
+    an author told "07:00-21:00" at 22:30 on the night before a narrowed day schedules 07:00 and is
+    refused again, because the narrowing is a dated row they cannot see. `nextPromotionalOpen` already
+    resolves the overrides on every day it looks at, which is why the answer is an INSTANT.
+  */
+  checkRejectedBy(
+    'campaign: 186e a refusal that names the hours rather than the next valid instant is caught',
+    withEditedFile(
+      CAMPAIGN_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '      nextValidInstant: decision.releaseAt,',
+          '      nextValidInstant: args.at,',
+        ),
+      () => runExpectingFailure('pnpm', campaignUnit(CAMPAIGN_TEST)),
+    ),
+    'nextValidInstant',
+  )
+
+  /*
+    186f. The send-time boundary answering "open" for a closed window.
+
+    `campaignSendWindowVerdict` exists only because the SCHEDULE cannot answer for the next message: a
+    campaign scheduled at 20:55 is legitimate and nothing about it is wrong at 21:00. The mutation is the
+    one that makes the whole function inert while every other case still passes.
+  */
+  checkRejectedBy(
+    'campaign: 186f a 21:00 boundary that never halts is caught',
+    withEditedFile(
+      CAMPAIGN_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (decision.kind === 'open') return { kind: 'open', hours: decision.hours }",
+          "  if (decision.kind !== 'expire') return { kind: 'open', hours: args.ceiling }",
+        ),
+      () => runExpectingFailure('pnpm', campaignUnit(CAMPAIGN_TEST)),
+    ),
+    'campaignSendWindowVerdict',
+  )
+
+  /*
+    186g. The choke point's cap check forgetting what has already been spent.
+
+    `new CampaignSpend(capFils)` instead of `new CampaignSpend(capFils, spentFils)` compiles, because the
+    second argument defaults to zero — and this is the mutation in the class itself, which is where the
+    claim lives: a resumed campaign's choke point then believes nothing has been spent, every per-message
+    check passes, and the only thing still holding the cap is the database. That is the arrangement
+    C-AUTO-10 deliberately does NOT have (ADR 0108): the choke point's check stays and reads the row's
+    figure, so the cap is visible at the place a reader looks for it.
+  */
+  checkRejectedBy(
+    'campaign: 186g a choke-point cap check that forgets what has been spent is caught',
+    withEditedFile(
+      CHOKE_POINT_TS,
+      (text) => replaceOnce(text, '    this.spent = spentFils', '    this.spent = 0'),
+      () => runExpectingFailure('pnpm', campaignUnit(CHOKE_POINT_TEST)),
+    ),
+    'campaign_cap_exceeded',
+  )
+
+  /*
+    186h. A sent recipient settled with no gate decision.
+
+    The acceptance line is that a regulator question is answerable from one query, and the plausible
+    wrong implementation is a null: the gate allowed it, so there is nothing to record. The database
+    refuses the row (`campaign_recipient_sent_row_is_answerable`), which is what makes this case fail at
+    the INSERT rather than at an assertion somebody could delete.
+  */
+  checkRejectedBy(
+    'campaign: 186h a sent recipient row with no gate decision is caught',
+    withEditedFile(
+      SENDER_TS,
+      (text) => replaceOnce(text, "      gateDecision: 'allow',", '      gateDecision: null,'),
+      () => runExpectingFailure('pnpm', campaignIntegration(CAMPAIGN_ITEST)),
+    ),
+    'campaign_recipient_sent_row_is_answerable',
+  )
+
+  /*
+    186i. ZY753 removed from the migration.
+
+    The layer whose absence is invisible: the CHECK still bounds the column and the reservation is still
+    one statement, so every behavioural assertion about the cap passes. What stops being true is that
+    `spent_fils` has two writers — and the registry entry is what makes that findable, so `pnpm sqlstate`
+    is the gate that notices. This is also the control on the registry entry itself: an entry for a code
+    no migration raises is refused, which is the direction that lets the registry shrink.
+  */
+  checkRejectedBy(
+    'campaign: 186i the ZY753 raise removed from the migration is caught',
+    withEditedFile(
+      CAMPAIGN_SQL,
+      (text) =>
+        replaceOnce(text, "      using errcode = 'ZY753';", "      using errcode = 'ZY759';"),
+      () => runExpectingFailure('pnpm', ['sqlstate']),
+    ),
+    'ZY753',
+  )
+
+  /*
+    186j. A cap that binds and does not halt the campaign.
+
+    The quiet one, and the reason `claim_campaign_recipient` returns the recipient it HELD rather than
+    nothing: a worker that got nothing back cannot tell "the cap bound" from "there was nothing left".
+    With the halt removed the drain keeps claiming, each claim holds the next recipient with
+    `cap_exceeded`, the campaign stays `running` for ever and the recorded spend is correct the whole
+    time — so nothing looks wrong and nobody is told the budget ran out. The mutation is the plausible
+    simplification: the recipient is already held, so carry on.
+  */
+  checkRejectedBy(
+    'campaign: 186j a cap that binds without halting the campaign is caught',
+    withEditedFile(
+      SENDER_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "          reason: 'spend_cap_reached',\n          detail:",
+          "          reason: 'operator',\n          detail:",
+        ),
+      () => runExpectingFailure('pnpm', campaignIntegration(CAMPAIGN_ITEST)),
+    ),
+    'spend_cap_reached',
+  )
+}
+
+// 187a-187z. (C-AUTO-11) The three stock journeys: the business day shown to be load-bearing, the two
+//            journeys with no approved copy shown to be unable to grow one quietly, the review
+//            eligibility shown to be able to stop excluding, and the birthday pass shown to be one
+//            statement that never reaches the clinical schema.
+//
+//            The unit's claim is that the engine identifies a contact on a FACT — paid, lapsed by
+//            business days, a birthday today — and that two of the three cannot message anybody because
+//            nobody has approved the words. Every mutation below leaves a system that WORKS: a review
+//            request to a no-show, a win-back a day early, a journey that quietly grew a message node.
+//            None would be caught by a review.
+//
+//            187a to 187d run the two core unit suites and are fast. 187e onwards drive the integration
+//            suites, which need a database.
+{
+  const WINBACK_TS = 'packages/core/src/automation/winback.ts'
+  const WINBACK_TEST = 'packages/core/src/automation/winback.test.ts'
+  const JOURNEYS_TS = 'packages/core/src/automation/journeys.ts'
+  const JOURNEYS_TEST = 'packages/core/src/automation/journeys.test.ts'
+  const REVIEW_TRIGGER_TS = 'apps/worker/src/automation/triggers/review-solicitation.ts'
+  const BIRTHDAY_TRIGGER_TS = 'apps/worker/src/automation/triggers/birthday.ts'
+  const SEED_FLOWS_TS = 'packages/db/src/seed/flows.ts'
+  const BIRTHDAY_SQL = 'packages/db/migrations/0155_customer_birthday.sql'
+  const STOCK_ITEST = 'apps/worker/src/automation/stock-journeys.itest.ts'
+  const journeyUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const journeyIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // The control for the whole block. Every case asserts that a BROKEN tree is caught, and that says
+  // nothing unless the committed tree passes.
+  {
+    const winback = run('pnpm', journeyUnit(WINBACK_TEST))
+    check(
+      'journeys: the committed win-back suite passes, which is the control for 187a and 187b',
+      !winback.failed,
+      `the win-back suite does not pass on the committed tree:\n${winback.output}`,
+    )
+    const journeys = run('pnpm', journeyUnit(JOURNEYS_TEST))
+    check(
+      'journeys: the committed journeys suite passes, which is the control for 187c and 187d',
+      !journeys.failed,
+      `the journeys suite does not pass on the committed tree:\n${journeys.output}`,
+    )
+  }
+
+  /*
+    187a. The win-back measured from the CALENDAR date instead of the business day.
+
+    The defect the whole module is shaped against, and the one that would be invisible: trading runs
+    11:00-02:00, so a visit that ends at 01:30 belongs to the previous session — and a calendar-dated
+    win-back fires a day early for roughly one visit in three, with a plausible message to a plausibly
+    lapsed customer and a date column reading one off for evidence. The mutation is the plausible wrong
+    implementation: use the instant's own calendar date and stop thinking about it.
+  */
+  checkRejectedBy(
+    'journeys: 187a a win-back measured from the calendar date is caught',
+    withEditedFile(
+      WINBACK_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const dueOn = addCalendarDays(resolved.date, args.intervalDays)',
+          '  const dueOn = addCalendarDays(localDate(instantToIso(args.lastVisitEndedAt).slice(0, 10)), args.intervalDays)',
+        ),
+      () => runExpectingFailure('pnpm', journeyUnit(WINBACK_TEST)),
+    ),
+    'PREVIOUS business day',
+  )
+
+  /*
+    187b. An undatable last visit dated on the calendar instead of refused.
+
+    A visit whose end instant falls in no trading session has no business day to measure from, and the
+    plausible simplification is to fall back. It produces a due date that reconciles perfectly against a
+    day nothing happened on, which is ADR 0070's subject one unit along.
+  */
+  checkRejectedBy(
+    'journeys: 187b an undatable visit dated on the calendar rather than refused is caught',
+    withEditedFile(
+      WINBACK_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "      kind: 'not_measurable',",
+          "      kind: 'never_visited' as 'not_measurable',",
+        ),
+      () => runExpectingFailure('pnpm', journeyUnit(WINBACK_TEST)),
+    ),
+    'not_measurable',
+  )
+
+  /*
+    187c. The review journey sending the public link on the LOW-rating branch.
+
+    The two edges swapped, which is a one-line change that typechecks, publishes and runs — and sends
+    every unhappy customer the public review link. That is the clause the journey exists for and the
+    mistake nothing else in the system would catch: the document is valid, the condition fires, and the
+    message leaves.
+  */
+  checkRejectedBy(
+    'journeys: 187c the public review link on the low-rating branch is caught',
+    withEditedFile(
+      JOURNEYS_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "      'rating_low:true': 'private_follow_up',\n      'rating_low:false': 'ask_for_review',",
+          "      'rating_low:true': 'ask_for_review',\n      'rating_low:false': 'private_follow_up',",
+        ),
+      () => runExpectingFailure('pnpm', journeyUnit(JOURNEYS_TEST)),
+    ),
+    'action_tag',
+  )
+
+  /*
+    187d. A journey that quietly grew a message node.
+
+    Two of the three send nothing because no human has approved win-back or birthday copy, and the way
+    that stops being true is not a decision — it is somebody binding a template because one is to hand.
+    The mutation binds the review template to the win-back journey, which is valid, publishable and
+    exactly what brief rule 15 refuses.
+  */
+  checkRejectedBy(
+    'journeys: 187d a win-back journey that grew a message node is caught',
+    withEditedFile(
+      JOURNEYS_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '      flag: tagStep({\n        tag: WINBACK_DUE_TAG,',
+          '      flag: tagStep({\n        tag: REVIEW_REQUEST_TEMPLATE_KEY,',
+        ),
+      () => runExpectingFailure('pnpm', journeyUnit(JOURNEYS_TEST)),
+    ),
+    'winback_due',
+  )
+
+  /*
+    187e. A review request offered for an appointment that was not paid for.
+
+    `outstanding_fils <= 0` is the half of the eligibility that is cheapest to drop, because dropping it
+    makes the pass offer MORE contacts and every one of them had a real visit. The acceptance clause
+    names it, and the only thing that would notice is a case about a completed visit nobody settled.
+  */
+  checkRejectedBy(
+    'journeys: 187e a review request for an unpaid completion is caught',
+    withEditedFile(
+      REVIEW_TRIGGER_TS,
+      (text) => replaceOnce(text, '       and s.outstanding_fils <= 0', '       and true'),
+      () => runExpectingFailure('pnpm', journeyIntegration(STOCK_ITEST)),
+    ),
+    'unpaid completion',
+  )
+
+  /*
+    187f. A review request offered for a CONFIRMED appointment.
+
+    The status filter widened to the one the acceptance clause names in so many words: a review request
+    for a visit that has not happened yet. It is the mistake a `status <> 'cancelled'` reads as.
+  */
+  checkRejectedBy(
+    'journeys: 187f a review request for a CONFIRMED appointment is caught',
+    withEditedFile(
+      REVIEW_TRIGGER_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "     where a.status = 'completed'",
+          "     where a.status in ('completed', 'confirmed', 'no_show')",
+        ),
+      () => runExpectingFailure('pnpm', journeyIntegration(STOCK_ITEST)),
+    ),
+    'CONFIRMED appointment',
+  )
+
+  /*
+    187g. The birthday pass reading more than it needs to.
+
+    The clinical claim is made by COUNTING the statements the pass issues, so the mutation that matters is
+    one that adds a read. A join into the clinical schema is what the case is about; a join into anything
+    is what the case can see, which is the stronger shape — a pass whose statement count depends on its
+    input could not be held to a list of tables at all.
+  */
+  checkRejectedBy(
+    'journeys: 187g a birthday pass that reads the clinical schema is caught',
+    withEditedFile(
+      BIRTHDAY_TRIGGER_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '       and c.birth_month = ${args.month}',
+          '       and c.birth_month = ${args.month}\n       and not exists (select 1 from clinical.contraindication_flag f where f.customer_id = c.id)',
+        ),
+      () => runExpectingFailure('pnpm', journeyIntegration(STOCK_ITEST)),
+    ),
+    'clinical',
+  )
+
+  /*
+    187h. A seeder that publishes a version every time it runs.
+
+    `flow_definition` is append-only, so an unconditional publish adds a version on every `pnpm seed` —
+    and every enrolment pins the version that was live when it arrived, so two seeds leave two cohorts
+    pinned to two documents. The mutation is the obvious implementation, and the thing it breaks is the
+    acceptance clause about seeding twice.
+  */
+  checkRejectedBy(
+    'journeys: 187h a seeder that republishes an unchanged journey is caught',
+    withEditedFile(
+      SEED_FLOWS_TS,
+      (text) => replaceOnce(text, '    if (live?.same === true) {', '    if (false as boolean) {'),
+      () => runExpectingFailure('pnpm', journeyIntegration(STOCK_ITEST)),
+    ),
+    'publishes nothing',
+  )
+
+  /*
+    187i. A birth-year column introduced through the Drizzle mirror.
+
+    The one mutation in this block that is a schema change, and the reason the absence is asserted against
+    `information_schema` rather than stated in prose: a column is one line away, nothing about the system
+    stops working when it arrives, and from that moment every query in the build can derive an age.
+
+    The MIRROR is what gets edited rather than the migration, because `pnpm db:drift` is the check that
+    fires on it — a column in the mirror the database lacks would otherwise be discovered at runtime, on
+    whichever query first selected it. A migration adding the column is caught by the
+    `information_schema` case in `stock-journeys.itest.ts`, which needs the migration applied and so
+    cannot be driven from here.
+  */
+  checkRejectedBy(
+    'journeys: 187i a birth-year column introduced through the Drizzle mirror is caught',
+    withEditedFile(
+      'packages/db/src/schema/customer.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          "    birthMonth: smallint('birth_month'),",
+          "    birthMonth: smallint('birth_month'),\n    birthYear: smallint('birth_year'),",
+        ),
+      () => runExpectingFailure('pnpm', ['db:drift']),
+    ),
+    'birth_year',
+  )
+}
+
+// 188a-188z. (Y-PAY-10) The statement descriptor and the MCC gate: the privacy claim shown to be able to
+//            widen, the blocking lexicon shown to be able to stop blocking, the sentinels shown to be
+//            able to become plausible values, and the three-layer gate shown to be able to lose a layer.
+//
+//            The unit has no gateway, no merchant account and no MCC, so everything it ships is a shape
+//            and a refusal — which means every mutation below leaves a system that WORKS. A descriptor
+//            lint that accepts one more word, a privacy sentence with one more reassurance in it, a
+//            sentinel that is a plausible length: each reads as an improvement and each is read by a
+//            customer on a bank statement.
+//
+//            188a to 188e run the two unit suites and the two scripts, and are fast. 188f onwards drive
+//            the integration suite, which needs a database.
+{
+  const DESCRIPTOR_TS = 'packages/core/src/payments/descriptor.ts'
+  const DESCRIPTOR_TEST = 'packages/core/src/payments/descriptor.test.ts'
+  const GO_LIVE_TS = 'packages/core/src/payments/go-live.ts'
+  const GO_LIVE_TEST = 'apps/web/src/payments-go-live.test.ts'
+  const SETTINGS_TS = 'packages/config/src/settings/registry.ts'
+  const PAYMENTS_ITEST = 'packages/fixtures/src/payments-go-live.itest.ts'
+  const payUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const payIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // The control for the whole block. Every case asserts that a BROKEN tree is caught, and that says
+  // nothing unless the committed tree passes.
+  {
+    const descriptor = run('pnpm', payUnit(DESCRIPTOR_TEST))
+    check(
+      'payments: the committed descriptor suite passes, which is the control for 188a to 188c',
+      !descriptor.failed,
+      `the descriptor suite does not pass on the committed tree:\n${descriptor.output}`,
+    )
+    const lint = run('pnpm', ['descriptor-lint'])
+    check(
+      'payments: the committed tree passes the descriptor lint, which is the control for 188d',
+      !lint.failed,
+      `the descriptor lint does not pass on the committed tree:\n${lint.output}`,
+    )
+  }
+
+  /*
+    188a. The privacy claim widened into a reassurance the mechanism cannot deliver.
+
+    The mutation nobody would review as a defect: one more sentence, saying the thing a customer would
+    like to hear. A descriptor conceals what was bought and nothing else, so "your visit stays private"
+    is a claim this build cannot keep — and the person who finds out is the one whose shared statement
+    carries a recognisable business name.
+  */
+  checkRejectedBy(
+    'payments: 188a a privacy claim that promises more than a descriptor can deliver is caught',
+    withEditedFile(
+      DESCRIPTOR_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  'The statement line names the business, not the treatment. It does not hide that a payment was ' +",
+          "  'Your visit stays private. The statement line names the business, not the treatment. It does not hide that a payment was ' +",
+        ),
+      () => runExpectingFailure('pnpm', payUnit(DESCRIPTOR_TEST)),
+    ),
+    'DESCRIPTOR_PRIVACY_CLAIM',
+  )
+
+  /*
+    188b. A term dropped from the blocking lexicon.
+
+    `massage` is the first entry and the one word the descriptor exists not to say. Dropping it leaves
+    every other refusal firing, every test about the lexicon's shape passing, and a statement line that
+    tells whoever shares the account exactly what was bought.
+  */
+  checkRejectedBy(
+    'payments: 188b a blocking lexicon that lost the word the unit is about is caught',
+    withEditedFile(
+      DESCRIPTOR_TS,
+      (text) => replaceOnce(text, "  'massage',\n", ''),
+      () => runExpectingFailure('pnpm', payUnit(DESCRIPTOR_TEST)),
+    ),
+    'descriptor-contains-a-blocked-term',
+  )
+
+  /*
+    188c. The length rule reading "at least" instead of "more than".
+
+    An off-by-one that makes the refusal fire one character early, which looks like strictness — and
+    then does not fire for the descriptor that is one character too LONG if the comparison is inverted.
+    The mutation is the inversion, because that is the version that still refuses something and so still
+    looks like a working rule.
+  */
+  checkRejectedBy(
+    'payments: 188c a descriptor length rule that accepts an overlong descriptor is caught',
+    withEditedFile(
+      DESCRIPTOR_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '    if (descriptor.length > input.limit) {',
+          '    if (descriptor.length > input.limit * 2) {',
+        ),
+      () => runExpectingFailure('pnpm', payUnit(DESCRIPTOR_TEST)),
+    ),
+    'descriptor-exceeds-provider-limit',
+  )
+
+  /*
+    188d. The descriptor given a plausible default instead of a marker.
+
+    The mutation this unit exists against, and the one that is hardest to see in a diff: a sensible
+    short string where a refused marker was. Every test about the lint still passes — the value is
+    perfectly legal — and from that commit the build has a configured descriptor nobody approved, which
+    is brief rule 15's whole subject. `pnpm descriptor-lint` is what notices, because it holds the
+    declared default to being a marker `is_placeholder_text()` refuses.
+  */
+  checkRejectedBy(
+    'payments: 188d a plausible descriptor default instead of a refused marker is caught',
+    withEditedFile(
+      SETTINGS_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "export const PROVISIONAL_STATEMENT_DESCRIPTOR = 'DESCRIPTOR-PENDING-Y7-DESCRIPTOR'",
+          "export const PROVISIONAL_STATEMENT_DESCRIPTOR = 'BR AUH'",
+        ),
+      () => runExpectingFailure('pnpm', ['descriptor-lint']),
+    ),
+    'declared-descriptor-is-not-a-marker',
+  )
+
+  /*
+    188e. A go-live verdict that treats an unpublished page as live.
+
+    An absent route and a route nobody published are different states, and the second is the dangerous
+    one: the page is there and looks finished. The mutation accepts any recorded state, which is the
+    plausible simplification — "it exists, that is what the acquirer looks for" — and it is wrong
+    because an approved-but-unpublished page is not on the site.
+  */
+  checkRejectedBy(
+    'payments: 188e a go-live verdict that accepts an unpublished page is caught',
+    withEditedFile(
+      GO_LIVE_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "    if (state !== 'published') {",
+          "    if (state === 'nothing-is-ever-this') {",
+        ),
+      () => runExpectingFailure('pnpm', payUnit(GO_LIVE_TEST)),
+    ),
+    'unpublished',
+  )
+
+  /*
+    188f. The real-provider gate losing its production half.
+
+    Both halves are the acceptance line, and this is the half ADR 0005 is about: a real provider outside
+    production can take a real payment from a test run. The mutation leaves the MCC half working, so
+    every case about the three columns still passes.
+  */
+  checkRejectedBy(
+    'payments: 188f a real-provider gate that no longer checks the environment is caught',
+    withEditedFile(
+      DESCRIPTOR_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (!input.isProduction) reasons.push('not-production')",
+          '  // the production half, removed',
+        ),
+      () => runExpectingFailure('pnpm', payUnit(DESCRIPTOR_TEST)),
+    ),
+    'not-production',
+  )
+
+  /*
+    188g. The MCC gate reading the confirmation as a boolean rather than as three facts.
+
+    The plausible simplification, and it loses the thing an operator needs: which of the three columns is
+    missing. A gate that answers "no" tells somebody to go and find out; a gate that answers
+    `mcc-confirmation-has-no-recorder` tells them what to do.
+  */
+  checkRejectedBy(
+    'payments: 188g an MCC gate that cannot say which column is missing is caught',
+    withEditedFile(
+      DESCRIPTOR_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (input.mccConfirmedBy === null || input.mccConfirmedBy.trim() === '') {\n    reasons.push('mcc-confirmation-has-no-recorder')\n  }",
+          '  // the recorder half, removed',
+        ),
+      () => runExpectingFailure('pnpm', payUnit(DESCRIPTOR_TEST)),
+    ),
+    'mcc-confirmation-has-no-recorder',
+  )
+
+  /*
+    188h. ZY771 widened to permit any gateway.
+
+    The layer whose absence is invisible: the config refusal and the registry refusal both still fire, so
+    nothing about a `PAYMENT_PROVIDER=real` deploy changes — and a writer that does not go through the
+    registry can record an intent against a live acquirer with no MCC on file. `pnpm sqlstate` is what
+    notices, because the registry entry for ZY771 names the function that raises it, and this is also
+    the control on that entry: an entry for a code no migration raises is refused.
+  */
+  checkRejectedBy(
+    'payments: 188h the ZY771 raise removed from the migration is caught',
+    withEditedFile(
+      'packages/db/migrations/0156_legal_entity_mcc.sql',
+      (text) => replaceOnce(text, "    using errcode = 'ZY771';", "    using errcode = 'ZY779';"),
+      () => runExpectingFailure('pnpm', ['sqlstate']),
+    ),
+    'ZY771',
+  )
+
+  /*
+    188i. The Unconfirmed Assumptions branch that stops reporting the MCC.
+
+    The panel is where somebody decides what to chase, so a row that quietly leaves it is a question
+    nobody asks again. The mutation makes the branch match nothing, which is what a reworded condition
+    looks like.
+  */
+  checkRejectedBy(
+    'payments: 188i an MCC that no longer reaches the Unconfirmed Assumptions panel is caught',
+    withEditedFile(
+      'packages/db/src/settings-store.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          '        from legal_entity where mcc_confirmed_at is null',
+          '        from legal_entity where mcc_confirmed_at is not null',
+        ),
+      () => runExpectingFailure('pnpm', payIntegration(PAYMENTS_ITEST)),
+    ),
+    'Unconfirmed Assumptions',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -61040,6 +61806,7 @@ export function chargebackNetEffectFils(`,
     'pnpm processors',
     'pnpm docs-set',
     'pnpm dry-runs',
+    'pnpm descriptor-lint',
     'pnpm egress',
     // And the SAQ-A scan beside it, for the same reason in the other direction: it is the one check that
     // says no card number can reach anything this build renders, logs or stores, and its whole value is

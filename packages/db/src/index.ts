@@ -570,6 +570,33 @@ export {
   type StoredBookingGrantRow,
 } from './repositories/booking-token.ts'
 export {
+  CAMPAIGN_AUDIT_ACTIONS,
+  CAMPAIGN_REFUSALS,
+  CAMPAIGN_SQLSTATE,
+  type CampaignOutcome,
+  type CampaignRecipientRow,
+  type CampaignRefusal,
+  type CampaignRow,
+  type CompiledSegmentQuery,
+  type CreateCampaignInput,
+  type CreateSegmentInput,
+  campaignRefusalOf,
+  claimCampaignRecipient,
+  createCampaign,
+  createSegment,
+  haltCampaign,
+  type LaunchCampaignInput,
+  launchCampaign,
+  readCampaignByKey,
+  readCampaignOutcome,
+  readSegmentByKey,
+  recountSegment,
+  type SegmentRecount,
+  type SegmentRow,
+  type SettleRecipientInput,
+  settleCampaignRecipient,
+} from './repositories/campaign.ts'
+export {
   CANCELLATION_REFUSALS,
   CANCELLATION_STATUSES,
   type CancelAppointmentInput,
@@ -1987,6 +2014,12 @@ export {
   type StoredPricePoint,
 } from './seed/fixtures/prices-docs-13.ts'
 export {
+  type SeedFlowsInput,
+  type SeedFlowsResult,
+  type StockFlowSeed,
+  seedStockFlows,
+} from './seed/flows.ts'
+export {
   PROVISIONAL_OPENING_DATE,
   PROVISIONAL_OPENING_LINES,
   seedProvisionalOpeningBalances,
@@ -2470,6 +2503,12 @@ export {
   readObligationEscalationOffsets,
   readObligationReminderOffsets,
 } from './settings/compliance.ts'
+export {
+  readMccConfirmation,
+  readStatementDescriptor,
+  type StoredMccConfirmation,
+  type StoredStatementDescriptor,
+} from './settings/descriptor.ts'
 export {
   PACKAGE_POLICY_SETTING_KEYS,
   PACKAGE_TRANSFERABLE_SETTING_KEY,
@@ -5771,4 +5810,122 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // broken. 0033's argument, restated by 0110 and by the two analytics partition jobs. 86400 seconds is the
 // pass's own cron, held equal to it by `pnpm jobs`.
 //
-export const SCHEMA_VERSION = 153 as const
+// 154 is 0154_campaign_and_segment.sql (C-AUTO-10) — segments, campaigns, and a spend cap the DATABASE
+// enforces. Three tables: `customer_segment` (a definition document plus a DATED cached count),
+// `campaign` (a segment, a template, a cap and a schedule) and `campaign_recipient` (one contact's
+// outcome and the evidence it was lawful). Mirrored in `packages/db/src/schema/campaign.ts`, so
+// `pnpm db:drift` compares the two.
+//
+// The cap is the decision the rest follows from, and it is three layers rather than one.
+// `CampaignSpend` in `packages/messaging/src/send.ts` has checked a cap before every send since
+// C-AUTO-04, and that check holds a counter in ONE PROCESS: two workers draining one campaign each read
+// a spend of 400 of a 500 cap, each decide one more message fits, and both send — so the cap is exceeded
+// by exactly as many workers as are running. So `claim_campaign_recipient` reserves the estimate against
+// `cap_fils` and claims the next pending recipient in ONE statement under the campaign row's lock, which
+// closes the window; `campaign_spend_within_cap` is a CHECK, so the column cannot exceed the cap by any
+// route at all including a hand-written UPDATE; and ZY753 names the only two writers of `spent_fils`,
+// because a bounded column is still a column anything may move and the symptom of a hand-moved spend is
+// a recorded figure that is correct over sends nobody counted. That is the two-layer shape
+// `frequency_cap_value_is_a_cap()` has in 0080, with a third layer for the writer.
+//
+// `campaign_recipient_sent_row_is_answerable` is the acceptance line as a constraint: a `sent` row must
+// carry its gate decision, the id of the consent record the send rested on, its cost and its segment
+// count. A test asserting it would be a test about the rows that exist; the CHECK is a statement about
+// every row that ever will, which is what makes "which consent did this message go out under" one query.
+// `consent_record_id` is a plain uuid and NOT a foreign key, for `consent.contact_customer_id`'s stated
+// reason: the consent ledger is not joined to by reference, so an erasure cannot cascade a regulator's
+// evidence away.
+//
+// ZY755 makes a `sent` row immutable, and the consequence is deliberate rather than incidental: a
+// campaign that reached a provider can no longer be deleted at all, because the cascade from `campaign`
+// hits the refusal. A campaign that spent money and sent messages is the record of both.
+//
+// The promotional window is NOT in this migration. `messaging.promotional_window` is the ceiling and
+// `packages/core/src/messaging/promotional-window.ts` is the rule; a CHECK on `scheduled_at` would be a
+// second answer to when a message may be sent, and the symptom of two answers is a 21:30 campaign that
+// every screen says was compliant. No spend figure is written either: `cap_fils` is NOT NULL with no
+// default, and the AED 500 provisional lives in the F09 settings registry where it can say it is
+// provisional and reach the Unconfirmed Assumptions panel.
+//
+// ZY751 through ZY755 are used of the band ZY751-ZY760; ZY756 through ZY760 are released UNUSED and
+// deliberately unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
+//
+// 155 is 0155_customer_birthday.sql (C-AUTO-11) — two `smallint` columns on `customer`, and the agent row
+// the daily stock-journey sweep heartbeats under. Mirrored in `packages/db/src/schema/customer.ts`.
+//
+// THERE IS NO BIRTH-YEAR COLUMN, and that is the whole migration. A date of birth is personal data this
+// business has no use for: nothing in docs/03 or docs/06 asks for an age and no treatment in the
+// catalogue is age-restricted in a way the booking path checks, so a marketing journey that greeted
+// somebody from a full date of birth would be holding an identity-grade field in order to send one SMS a
+// year. Two columns leave the year nowhere to live, which a policy cannot — a query cannot derive an age
+// from data that is not there — and `customer-birthday`'s case in `stock-journeys.itest.ts` asserts the
+// absence against `information_schema` beside the presence of the two that do exist, which is the
+// direction that fails the day somebody adds one.
+//
+// A `date` column holding 1900-05-14 was the obvious alternative and is worse in both directions: the
+// year is a lie every reader has to know to ignore, and the moment one row holds a real year the column
+// is a date of birth with no way to tell the two apart.
+//
+// `customer_birthday_is_whole_or_absent` moves the pair together — a month with no day is a birthday
+// nobody can send on, a day with no month fires twelve times a year — and
+// `customer_birthday_is_a_real_date` refuses 30 February and 31 April without needing a year at all. 29
+// February IS a real birthday and is permitted; whether it is greeted on 28 February or 1 March in a
+// common year is `Y9-birthday-leap`'s, because that is a business decision nobody has made, so the ROW is
+// accepted and the SENDING rule is the open question.
+//
+// The agent row exists because the three journeys are entered by a daily SWEEP rather than by an event
+// dispatcher: nothing in this build consumes `outbox_event` into an enrolment, so a review request
+// triggered "on appointment.completed" would be triggered by nothing — and a contact becoming lapsed and
+// a birthday arriving are facts about dates rather than things that happen. The sweep is idempotent by
+// construction, because `enrolOnLiveVersion` answers `already_enrolled` for a contact already running.
+// `budget_fils_per_run` is 0: the pass enrols and performs no outbound call of any kind.
+//
+// NO PRIVATE SQLSTATE IS RAISED HERE. The band ZY761-ZY770 was allocated to this unit and every code in
+// it is RELEASED UNUSED and deliberately unregistered: two CHECKs say everything this schema has to say,
+// `pnpm sqlstate` refuses an entry for a code no migration raises, and a trigger written to carry a code
+// that a CHECK already enforces would be a second statement of one rule.
+//
+// 156 is 0156_legal_entity_mcc.sql (Y-PAY-10) — three columns on `legal_entity`, one STABLE function and
+// one trigger. Mirrored in `packages/db/src/schema/identity.ts`.
+//
+// THE MCC IS NULL AND THERE IS NO DEFAULT. A merchant category code decides which acquirer will take
+// this business, what it is charged, and — the part that decided this migration — what a cardholder's
+// bank statement says the money went to. Picking one would be this build deciding how somebody's spa
+// visit appears on an account they may share, which is a privacy consequence it has no standing to
+// choose. `legal_entity_mcc_is_not_a_placeholder` additionally refuses a provisional-looking value
+// through `is_placeholder_text()` (0026), so the column cannot be filled with a marker and then read as
+// configured (brief rule 15). `Y7-mcc` is the open question.
+//
+// A CONFIRMATION IS THREE FACTS OR NONE. `legal_entity_mcc_confirmation_is_whole` requires the code, the
+// instant and who recorded it to move together: a code with no instant is a number somebody typed, an
+// instant with no code confirms nothing, and either without a recorder is a fact with nobody behind
+// it — which is the one question an acquirer dispute asks. `mayUseRealPaymentProvider` in `@berelax/core`
+// names the three separately, because an operator fixing a go-live needs to know which column is missing.
+//
+// ZY771 IS SCOPED TO THE GATEWAY, AND THE SCOPE IS WHAT MAKES IT SAFE. `parseConfig` refuses
+// `PAYMENT_PROVIDER=real` outside production (ADR 0005) and `createPaymentGateways` refuses it again
+// unless the MCC is on file, and both of those are code somebody can edit. The trigger is the layer that
+// holds when they are: a `payment_intent` against any gateway other than `manual-till` and
+// `fake-card-gateway` cannot be recorded at all while `mcc_confirmed_at` is null. A BLANKET refusal would
+// have stopped the manual till adapter and the card fake — the only two payment paths that work today —
+// so the rule names the two gateways that are not a live acquirer and refuses everything else. A third
+// gateway is then a diff somebody has to justify.
+//
+// `mcc_confirmed()` is STABLE rather than IMMUTABLE because it reads a table, which is why ZY771 is a
+// trigger and not a CHECK: a CHECK may not contain a subquery and may not call a non-immutable function,
+// which 0142's header records being refused for twice.
+//
+// THE DESCRIPTOR IS NOT A COLUMN HERE. `payments.statement_descriptor` is an F09 setting carrying
+// `provisional: true` against `Y7-descriptor`, because a provisional value has to be able to say that it
+// is one and reach the Unconfirmed Assumptions panel — which a column on this singleton cannot, since
+// `legal_entity` carries no provenance trio. Its stored value is a MARKER `is_placeholder_text()` refuses
+// rather than a null, because `app_setting.value` is NOT NULL and because brief rule 15 asks for a marker
+// rather than a blank. The MCC reaches that panel through a new branch in `unconfirmedAssumptionRows`
+// keyed on `mcc_confirmed_at is null` rather than through the existing `singleton` clause: that clause
+// matches `is_placeholder_text(value)`, and an absent MCC is NULL rather than a placeholder, so it would
+// not have been seen.
+//
+// ZY772 through ZY780 are released UNUSED and deliberately unregistered, because `pnpm sqlstate` refuses
+// an entry for a code no migration raises.
+//
+export const SCHEMA_VERSION = 156 as const

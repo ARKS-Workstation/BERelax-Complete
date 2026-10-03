@@ -137,17 +137,32 @@ export interface ClassRoutedTransport {
 // --- the campaign spend cap --------------------------------------------------------------------
 
 /**
- * A campaign's spend, in fils.
+ * A campaign's spend, in fils, as the choke point sees it.
  *
  * Checked *before* the send, because an SMS cannot be un-sent and a cap discovered on an invoice is
  * not a cap. Recorded from what the provider accepted rather than from the estimate, so the two can
  * be reconciled.
+ *
+ * ## This object is NOT where the cap is enforced, and `spentFils` is why
+ *
+ * An instance of this class holds a counter in one process, so two workers draining one campaign would
+ * each read a spend of 400 of a 500 cap, each decide one more message fits, and both send — the cap
+ * exceeded by exactly as many workers as are running. C-AUTO-10 therefore moved the enforcement into the
+ * database: `claim_campaign_recipient` (migration 0154) reserves the estimate against `cap_fils` and
+ * claims the recipient in ONE statement under the campaign row's lock, and `campaign_spend_within_cap`
+ * bounds the column by any route at all.
+ *
+ * `spentFils` on the constructor is what keeps this from becoming a SECOND statement of the cap. The
+ * sender builds an instance from the figures it read out of the campaign row, so the per-message refusal
+ * here and the reservation in the database are two readings of one number rather than two numbers. An
+ * instance constructed with no starting spend is a fresh campaign, which is the only case where zero is
+ * the truth.
  */
 export class CampaignSpend {
   readonly capFils: number
-  private spent = 0
+  private spent: number
 
-  constructor(capFils: number) {
+  constructor(capFils: number, spentFils = 0) {
     if (!Number.isInteger(capFils) || capFils < 0) {
       throw new AppError(
         'validation',
@@ -155,7 +170,16 @@ export class CampaignSpend {
           'a float cap rounds a per-message check into a different answer every time.',
       )
     }
+    if (!Number.isInteger(spentFils) || spentFils < 0) {
+      throw new AppError(
+        'validation',
+        `A campaign's spend so far must be a whole non-negative number of fils, received ${spentFils}. ` +
+          'It is read from `campaign.spent_fils`, which the database holds between 0 and the cap, so a ' +
+          'value outside that range means the caller computed it rather than reading it.',
+      )
+    }
     this.capFils = capFils
+    this.spent = spentFils
   }
 
   get spentFils(): number {

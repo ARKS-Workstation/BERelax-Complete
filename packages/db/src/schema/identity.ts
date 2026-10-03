@@ -44,6 +44,21 @@ export const legalEntity = pgTable('legal_entity', {
   vatRegistered: boolean('vat_registered').notNull(),
   vatRegistrationDate: date('vat_registration_date'),
   smallBusinessRelief: boolean('small_business_relief').notNull(),
+  /**
+   * The acquirer's merchant category code, confirmed in writing (0156, Y-PAY-10).
+   *
+   * All three NULL, and there is no default. An MCC decides which acquirer will take this business, what
+   * it is charged, and what a cardholder's bank statement says the money went to — a privacy consequence
+   * this build has no standing to choose. The three move together by constraint
+   * (`legal_entity_mcc_confirmation_is_whole`): a code with no instant is a number somebody typed, an
+   * instant with no code confirms nothing, and either without a recorder is a fact with nobody behind it.
+   *
+   * While `mccConfirmedAt` is null, `ZY771` refuses a `payment_intent` against any gateway but the manual
+   * till and the card fake, and `createPaymentGateways` refuses `PAYMENT_PROVIDER=real`.
+   */
+  mcc: text('mcc'),
+  mccConfirmedAt: timestamp('mcc_confirmed_at', { withTimezone: true }),
+  mccConfirmedBy: text('mcc_confirmed_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
 })

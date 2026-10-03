@@ -813,6 +813,25 @@ export const ROUTES = [
       'first ISR page that renders NAP.',
   },
   {
+    id: 'crm-campaigns',
+    path: '/crm/campaigns',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'C-AUTO-10s campaigns screen: every campaign with its segments DATED contact count, its ' +
+      'pre-launch estimate, what it has spent of its cap and how its recipients ended. A handler ' +
+      'answering text/html rather than a document, for the reason the pipeline board, the Messages ' +
+      'inbox, the template editor and the compliance calendar give: a registry document must be served ' +
+      'in BOTH locales, which needs an Arabic admin document and the W-SYS-01 shell. It is READ-ONLY ' +
+      'and has no POST - launching a campaign is the senders, and a screen that could launch one would ' +
+      'be a second place the spend cap and the promotional window are decided, which is precisely what ' +
+      'migration 0154s reservation and promotional-window.ts exist to prevent.',
+  },
+  {
     id: 'flow-builder',
     path: '/crm/flows/[id]/builder',
     kind: 'handler',
