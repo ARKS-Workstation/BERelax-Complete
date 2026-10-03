@@ -60,7 +60,23 @@ export const ALERT_SURFACES = ['admin_banner', 'compliance_panel', 'operator_rev
 export type AlertSurface = (typeof ALERT_SURFACES)[number]
 
 /** What a threshold counts, so a figure is never a bare number. */
-export const THRESHOLD_UNITS = ['subjects', 'seconds', 'messages', 'attempts', 'days'] as const
+export const THRESHOLD_UNITS = [
+  'subjects',
+  'seconds',
+  'messages',
+  'attempts',
+  'days',
+  /*
+   * `batches` is G-AGT-02's, added with the settlement alert H-HARD-05 deliberately left out.
+   *
+   * A sixth unit rather than counting batches in `attempts`, which is the nearest existing word and
+   * would be a lie about what is being measured: an attempt is something this build did and a batch is
+   * a file an acquirer sent. A threshold's unit is printed beside its figure, and "1 attempts" on a
+   * screen about a payout that does not tie is the kind of wrong label that makes somebody distrust the
+   * whole panel.
+   */
+  'batches',
+] as const
 export type ThresholdUnit = (typeof THRESHOLD_UNITS)[number]
 
 /**
@@ -328,13 +344,16 @@ export const AUTH_FAILURE_THRESHOLD_SETTING_KEY = 'alerts.auth_failures_per_cred
 /**
  * The conditions this build alerts on.
  *
- * Six, and the seventh in the acceptance list — an unreconciled settlement batch — is deliberately
- * ABSENT rather than present-and-unobservable. Nothing in this schema yet records a settlement batch or
- * its reconciliation state: Y-PAY-05 is the missed-event reconciliation job and it is `todo`. An entry
- * whose observer could only ever answer "nothing to see" is the green dashboard this file's header
- * refuses, so the obligation is handed to that unit in `build/manifest.yaml` instead, and the gate makes
- * it cheap to discharge: a row here needs an observer, a runbook heading, a severity, an audience and a
- * threshold, and the commit that adds one without them fails.
+ * Seven. Six were H-HARD-05's; the seventh — an unreconciled settlement batch — was deliberately ABSENT
+ * rather than present-and-unobservable, because at the time nothing in this schema recorded a settlement
+ * batch or its reconciliation state, and an entry whose observer could only ever answer "nothing to see"
+ * is the green dashboard this file's header refuses.
+ *
+ * The rows exist now: `settlement_batch` and `settlement_variance` (0136), with `state` exclusive between
+ * `posted` and `quarantined` and `difference_fils` non-zero by CHECK. So G-AGT-02 discharges the
+ * deferral, which cost exactly what this file's design predicted it would — one row here, one observer in
+ * `packages/db/src/alerts.ts`, one runbook heading and one threshold unit. A row with any of those
+ * missing does not compile or does not pass the gate.
  */
 export const ALERT_REGISTRY = [
   {
@@ -483,6 +502,47 @@ export const ALERT_REGISTRY = [
         'date the calendar uses.',
       measuredFrom: ['obligation_instance.due_on', 'obligation_instance.completed_at'],
       windowDays: 365,
+      target: null,
+      openQuestionId: ALERT_SLO_OPEN_QUESTION_ID,
+    },
+    doesNotCover: ['the-pass-cannot-report-its-own-absence'],
+  },
+  {
+    id: 'unreconciled_settlement_batch',
+    rule:
+      'A settlement batch that does not tie to the figures this build holds: quarantined because its ' +
+      'declared net and the sum of its lines disagree, or carrying a settlement_variance row. The ' +
+      'acquirer has said it paid a different amount from the one the till recorded.',
+    severity: 'same_day',
+    threshold: {
+      kind: 'structural',
+      value: 1,
+      unit: 'batches',
+      /*
+       * ONE, and the figure belongs to 0136 rather than to this file. `settlement_variance_difference_nonzero`
+       * is a CHECK — ZY447, "a variance of nought fils is not a variance" — so a variance row EXISTS only
+       * when two figures disagree, and there is no band of tolerable disagreement for a threshold to be
+       * inside. A setting here would be a tolerance on money that somebody could widen from a settings
+       * screen with nothing recording that they had.
+       */
+      statedIn: 'packages/db/migrations/0136_settlement_batch.sql',
+    },
+    // The owner and the accountant, and not the manager: a payout that does not tie is reconciled against
+    // the till roll and the payout advice, which is the accountant's work, and the remedy may be a
+    // corrected file from the acquirer, which is the owner's conversation.
+    route: { audience: ['owner', 'accountant'], surface: 'operator_review' },
+    runbook: 'alerting#a-settlement-batch-does-not-reconcile',
+    slo: {
+      measure:
+        'The share of imported settlement batches that tied on the day they arrived, and how long an ' +
+        'untied one stayed quarantined before it was explained.',
+      measuredFrom: [
+        'settlement_batch.state',
+        'settlement_batch.settled_on',
+        'settlement_batch.imported_at',
+        'settlement_variance.difference_fils',
+      ],
+      windowDays: 90,
       target: null,
       openQuestionId: ALERT_SLO_OPEN_QUESTION_ID,
     },

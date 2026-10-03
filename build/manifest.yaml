@@ -19375,7 +19375,7 @@ units:
       switch. It shows the real reason per agent, so a paused autoresponder says it needs Google re-authorising
       rather than showing a generic error.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - G-AGT-01
@@ -19406,11 +19406,63 @@ units:
       for a role without the permission (deny-by-default from F07), asserted for receptionist
     - Playwright captures the console at 3 viewports x 2 themes x 2 directions with zero pixel diff on an
       unchanged rerun; axe reports zero violations
+    - 'NOTE: the screen is a route handler returning bytes (route.ts + render.ts), not page.tsx and
+      agent-row.tsx. The reason every other admin screen records: apps/web/src/routes/registry.ts is in
+      exact bijection with the filesystem and requires every DOCUMENT in BOTH locales, which would need an
+      Arabic admin document and the W-SYS-01 shell. The kill switch IS its own route, as the manifest
+      names it, and that is not only convention: a toggle reachable by GET is togglable by a crawler, a
+      link preview and a browser prefetch, and this one stops an agent.'
+    - 'NOTE: "cost to date against its budget" is built as a MECHANISM and the figure is filed, because
+      there is no figure. agent_definition.budget_fils_per_run is the only budget this schema holds and it
+      is a ceiling for ONE run; there is no per-day, per-week or per-month budget anywhere. So `spent` is
+      measured (sum of agent_run.cost_fils for the trading date) and the ceiling is DERIVED as
+      budget_fils_per_run x runs, which the screen says is a derivation rather than a figure somebody set.
+      Y13-agent-period-budget records the gap (brief rule 15). An agent with a nought budget has NO share
+      rather than 100%: twenty-nine of the thirty-two seeded agents spend nothing because their passes
+      read this build''s own tables, which is a measured nought and not a missing figure.'
+    - 'NOTE: "a test asserts constructing the cost cell from a float is a type error" is satisfied by the
+      TYPE and not by a test case, which is the stronger form. AgentCost carries `Money` from F05, whose
+      `fils` is `Brand<number, ''Fils''>` — so `{ fils: 1.5 }` does not typecheck at all and `aed(1.5)`
+      is a compile error through `IntegerLiteral`. A vitest case cannot assert a compile failure; what
+      would assert it is a gate fixture, and gate case 2 already proves tsc fails on a type error. The
+      renderer never divides by 100 either: `formatAmount` is @berelax/core''s.'
+    - 'NOTE: the UNRECONCILED SETTLEMENT BATCH alert H-HARD-05 deferred is DISCHARGED here — one
+      ALERT_REGISTRY entry, one ALERT_OBSERVERS observer, one runbook heading and one new THRESHOLD_UNITS
+      member (`batches`, because counting a payout file in `attempts` would be a wrong label beside a
+      figure). The observer counts BATCHES and not fils: variances net off, and a
+      settlement_variance.difference_fils is non-zero by CHECK (ZY447), so the question is "is there a
+      batch that does not tie". `state = quarantined OR a variance row`, because a posted batch can still
+      carry an unexplained line. reconciliation_exception is a DIFFERENT subject (a payment intent
+      diverging from the gateway, Y-PAY-05, ADR 0070) and its quarantined count is carried on the alert''s
+      detail as context rather than as the firing figure — folding the two would put "the acquirer paid a
+      different amount" and "an intent is in a state we cannot explain" on one screen with the same words.'
+    - 'NOTE: the screenshot matrix renders a SUBSET of six rows and not all thirty-two. createCaptureHarness
+      screenshots fullPage, thirty-two cards is about 13,000 CSS pixels, and at deviceScaleFactor 2 that is
+      past Chromium''s own texture limit — the first run failed with "Unable to capture screenshot", which
+      names neither the height nor the scale. Six rows is also the better specimen: the matrix is about the
+      layout in two directions and two themes, and twenty-six more identical cards test the same CSS
+      twenty-six more times. The row-count claim is a different case, against the whole screen.'
+    - 'NOTE: migration 0162 is released unused — every table this screen reads exists (0021, 0136, 0148,
+      0151) and the alert needs no row of its own, because an alert is a measurement over rows that already
+      exist. SQLSTATE ZY831-ZY840 is released unregistered: no migration here raises one. ADR 0116 is USED.
+      No test port band was needed: the console is driven through its own GET and POST with a minted
+      ADMIN_SESSION_COOKIE, and the matrix renders with page.setContent.'
     files:
-    - apps/web/app/(admin)/agents/page.tsx
-    - apps/web/app/(admin)/agents/agent-row.tsx
+    - apps/web/app/(admin)/agents/route.ts
+    - apps/web/app/(admin)/agents/render.ts
+    - apps/web/app/(admin)/agents/queries.ts
     - apps/web/app/(admin)/agents/kill-switch/route.ts
-    - apps/web/e2e/agent-console.spec.ts
+    - packages/core/src/agents/console-reason.ts
+    - packages/core/src/agents/console-reason.test.ts
+    - packages/core/src/agents/index.ts
+    - packages/shared/src/alerts/registry.ts
+    - packages/db/src/alerts.ts
+    - docs/runbooks/alerting.md
+    - apps/web/src/agent-console-render.test.ts
+    - apps/web/src/agent-console-screen.itest.ts
+    - apps/web/src/routes/registry.ts
+    - docs/adr/0116-a-reason-is-a-declared-consequence-or-the-agents-own-words.md
+    - scripts/test-gates.mjs
   - id: G-CONN-08
     order: 159
     title: Non-dismissible re-auth banner, escalating notification ladder, one-click reconnect
@@ -20169,7 +20221,12 @@ units:
       the same bytes it lints against rather than a second spelling of them. Several fixtures quote a term the
       reply must not contain (cupping, full service, nurse); each is a term of a shipped lexicon, quoted from
       it, and none is a claim about this business'
-    - 'NOTE deferred to G-AGT-02 (RE-POINTED from G-REV-07 by G-REV-07, which did NOT build it; RE-POINTED
+    - 'NOTE re-pointed by G-AGT-02 to B-M1 (RE-POINTED from G-AGT-02, which did NOT build it either —
+      the agent console carries a kill switch and no configuration surface, and a reply signature is not
+      a thing it shows; FOUR units have now declined it and the blocker has never been a unit''s work:
+      Y9-reply-signature is a VALUE nobody has supplied, and a plausible sign-off would publish under the
+      owner''s name. B-M1 is the milestone that either closes an unreachable path or records it as a stop,
+      which is what this is. RE-POINTED from G-REV-07 by G-REV-07, which did NOT build it; RE-POINTED
       from G-REV-06 by G-REV-06, which did not either): the SOURCE
       of the auto-appended signature. The cap criterion needs the
       mechanism, so renderFinalReply is the one implementation both linters measure and deliverApprovedReply
@@ -23270,7 +23327,16 @@ units:
       on one account, and an overdue blocking obligation
     - every registry entry declares severity, threshold and a runbook id, and an entry naming an unknown
       runbook id fails a gate
-    - 'NOTE: the UNRECONCILED SETTLEMENT BATCH alert is deferred to G-AGT-02, re-pointed by the integrator at the Y-PAY-09/04/05 merge. Y-PAY-05 was the original owner and shipped the rows the alert would read (settlement_variance, reconciliation_exception) but added no ALERT_REGISTRY entry and no ALERT_OBSERVERS observer, so the deferral is undischarged rather than satisfied - checked by grepping both files for a settlement entry before re-pointing. G-AGT-02 owns the console that reads alerts and is still todo, which is why it takes this and is deliberately ABSENT
+    - 'NOTE: the UNRECONCILED SETTLEMENT BATCH alert is deferred to G-AGT-02 — DEFERRAL SATISFIED:
+      G-AGT-02 added one ALERT_REGISTRY entry (`unreconciled_settlement_batch`, same_day, structural
+      threshold of 1 batch pointing at 0136, routed to the owner and the accountant), one
+      ALERT_OBSERVERS observer in packages/db/src/alerts.ts, one runbook heading
+      (alerting#a-settlement-batch-does-not-reconcile) and one THRESHOLD_UNITS member (`batches`). The
+      observer counts BATCHES and not fils, because variances net off and ZY447 makes a variance row exist
+      only when two figures disagree; it reads `state = quarantined OR a variance row`, because a posted
+      batch can still carry an unexplained line. reconciliation_exception stays Y-PAY-05''s subject and
+      its quarantined count is carried on the alert''s detail as context rather than as the firing figure.
+      The original wording, which was true when written: re-pointed by the integrator at the Y-PAY-09/04/05 merge. Y-PAY-05 was the original owner and shipped the rows the alert would read (settlement_variance, reconciliation_exception) but added no ALERT_REGISTRY entry and no ALERT_OBSERVERS observer, so the deferral is undischarged rather than satisfied - checked by grepping both files for a settlement entry before re-pointing. G-AGT-02 owns the console that reads alerts and is still todo, which is why it takes this and is deliberately ABSENT
       from ALERT_REGISTRY rather than present and unobservable. Nothing in this schema records a settlement
       batch or its reconciliation state — Y-PAY-05 owns reconciliation_exception and is todo — so an entry
       for it would have an observer that could only ever answer "nothing to see", which is exactly the

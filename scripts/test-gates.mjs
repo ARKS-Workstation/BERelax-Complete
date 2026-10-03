@@ -49383,6 +49383,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     HOURS_SUITE,
   ]
   const renderSuite = () => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', RENDER_SUITE]
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
   const dbSuites = () => [
     'exec',
     'vitest',
@@ -61357,6 +61358,276 @@ export function chargebackNetEffectFils(`,
       () => runExpectingFailure('pnpm', unit(TAXONOMY_SUITE)),
     ),
     'holds exactly these six names, in this order, at this version',
+  )
+}
+
+// 194a-194z. (G-AGT-02) The agent console: every way a reason could come to be generic, every way a
+//            figure could come to be invented, and the one way a kill switch could come to be unaudited.
+//
+//            This unit's defects are mostly SENTENCES, which is unusual and is why it needs a gate. A
+//            console that says "an error occurred" about a paused autoresponder passes every behavioural
+//            test, renders, looks finished, and sends somebody after a stack trace for a Google grant
+//            that has a button on the screen above. Collapsing the two Google dependences into one is the
+//            same shape: "paused" about an agent that is running sends somebody after a stopped worker.
+//
+//            The figures fail the other way — towards being present when they should be absent. A nought
+//            budget with a computed share reads as 100% of nothing; a cost grouped by the calendar date
+//            moves a night's spend onto the wrong day; a pending count read through a capped list reports
+//            the cap. Each of those is a number on a screen and none of them errors.
+//
+//            194a to 194c run the render suite and are fast. 194d to 194g drive the integration suite,
+//            narrowed with `-t` so none of them pays for the screenshot matrix. 194h runs the alert gate.
+{
+  const REASON = 'packages/core/src/agents/console-reason.ts'
+  const REASON_SUITE = 'packages/core/src/agents/console-reason.test.ts'
+  const QUERIES = 'apps/web/app/(admin)/agents/queries.ts'
+  const KILL_SWITCH = 'apps/web/app/(admin)/agents/kill-switch/route.ts'
+  const OBSERVERS = 'packages/db/src/alerts.ts'
+  const RENDER_SUITE = 'apps/web/src/agent-console-render.test.ts'
+  const SCREEN_ITEST = 'apps/web/src/agent-console-screen.itest.ts'
+  const renderSuite = () => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', RENDER_SUITE]
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const screenItest = (name) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    SCREEN_ITEST,
+    '-t',
+    name,
+  ]
+
+  // The control for the whole block. Every case asserts a BROKEN tree is caught, which says nothing
+  // unless the committed tree passes.
+  {
+    const committed = run('pnpm', renderSuite())
+    check(
+      'agents: the committed console render suite passes, which is the control for 194a and 194c',
+      !committed.failed,
+      `the agent console render suite does not pass on the committed tree:\n${committed.output}`,
+    )
+    const reasons = run('pnpm', unit(REASON_SUITE))
+    check(
+      'agents: the committed reason suite passes, which is the control for 194b',
+      !reasons.failed,
+      `the agent reason suite does not pass on the committed tree:\n${reasons.output}`,
+    )
+    const alerts = run('pnpm', ['alerts'])
+    check(
+      'agents: the committed alert registry passes its gate, which is the control for 194h',
+      !alerts.failed,
+      `the alert registry gate does not pass on the committed tree:\n${alerts.output}`,
+    )
+  }
+
+  /*
+    194a. A generic sentence for the one case that has no words.
+
+    `failing_without_words` is the member the whole design rests on: an agent whose heartbeat records a
+    failure and no error text, which is what a worker killed mid-attempt leaves behind. It is exactly the
+    branch somebody reaches for a fallback on, and the fallback reads as defensive programming.
+  */
+  checkRejectedBy(
+    'agents: 194a a generic error sentence in the one case with no words is caught',
+    withEditedFile(
+      REASON,
+      (text) =>
+        replaceOnce(
+          text,
+          "export const FAILING_WITHOUT_WORDS_REASON =\n  'failing, and agent_heartbeat.last_error is empty",
+          "export const FAILING_WITHOUT_WORDS_REASON =\n  'An error occurred. failing, and agent_heartbeat.last_error is empty",
+        ),
+      () => runExpectingFailure('pnpm', renderSuite()),
+    ),
+    'the console renders An error occurred',
+  )
+
+  /*
+    194b. The two Google dependences collapsed into one.
+
+    One word. The SEO agent reads through the connection and falls back to the history it keeps, so with
+    no grant it still runs and its figures are older than they look. Calling that "paused" sends somebody
+    after a stopped worker — and it hides the thing that matters, which is that this week's deltas are
+    against older data than the screen suggests.
+  */
+  checkRejectedBy(
+    'agents: 194b a Google dependence that reports a degradation as a pause is caught',
+    withEditedFile(
+      REASON,
+      (text) =>
+        replaceOnce(
+          text,
+          "  seo_agent: Object.freeze({\n    dependence: 'degrades',",
+          "  seo_agent: Object.freeze({\n    dependence: 'pauses',",
+        ),
+      /*
+        The PURE reason suite and not the render suite, and finding that out is what this case is worth.
+        Pointed at the render suite first, it exited zero: `agent-console-render.test.ts` constructs the
+        reason KIND itself and asserts the table's sentence, so a flipped `dependence` changed nothing
+        there. The derivation is `agentConsoleReason`'s, and `console-reason.test.ts` is where the facts
+        go in and the reason comes out — which is also why that suite exists at all.
+      */
+      () => runExpectingFailure('pnpm', unit(REASON_SUITE)),
+    ),
+    /*
+      The NAMED case and not the loop over the table.
+
+      `reads the declared dependence rather than the agent's name` derives its expectation FROM
+      `GOOGLE_DEPENDENT_AGENTS`, so a flipped `dependence` makes it agree with itself — and its
+      both-kinds-present control still holds, because two other agents are also `degrades`. That case is
+      worth having (it covers every entry) and it cannot catch this one, which is the difference between
+      a derived assertion and a pinned one. `degrades an agent that reads through it` names the agent and
+      the answer, so it is the case that fires.
+    */
+    'degrades an agent that reads through it',
+  )
+
+  /*
+    194c. The budget warning moved to the ceiling.
+
+    `990` to `1000`: the warning then fires only for a run that spent its whole budget, which is the run
+    that has already been stopped mid-work by `createRunBudget`. The point of 99% is the run that is
+    about to be, and a threshold at the ceiling is a warning that arrives with the incident.
+  */
+  checkRejectedBy(
+    'agents: 194c a budget warning moved from 99% to the ceiling is caught',
+    withEditedFile(
+      QUERIES,
+      (text) =>
+        replaceOnce(
+          text,
+          'export const AGENT_BUDGET_WARNING_PER_MILLE = 990',
+          'export const AGENT_BUDGET_WARNING_PER_MILLE = 1000',
+        ),
+      () => runExpectingFailure('pnpm', renderSuite()),
+    ),
+    'renders the warning variant at 99% of a run',
+  )
+
+  /*
+    194d. A share computed against a nought ceiling.
+
+    Twenty-nine of the thirty-two agents have `budget_fils_per_run = 0`, which is a MEASURED nought: those
+    passes perform no outbound call. A share against it is not 100% and is not infinity — there is nothing
+    to be a share OF — and the mutation produces a cell that reads as a budget nobody set.
+  */
+  checkRejectedBy(
+    'agents: 194d a budget share computed against a nought ceiling is caught',
+    withEditedFile(
+      QUERIES,
+      (text) =>
+        replaceOnce(
+          text,
+          '  denominator <= 0n ? null : Number((numerator * 1000n) / denominator)',
+          '  denominator <= 0n ? 0 : Number((numerator * 1000n) / denominator)',
+        ),
+      () =>
+        runExpectingFailure('pnpm', screenItest('has no share for an agent with a nought budget')),
+    ),
+    'has no share for an agent with a nought budget',
+  )
+
+  /*
+    194e. A refusal that answers 403 and records nothing.
+
+    The screen is still closed, so every behavioural assertion about the refusal passes. What goes is the
+    only record that somebody tried to stop an agent — which is the half of the acceptance line that is
+    about the insider-threat trail, and whose absence looks exactly like nobody having tried.
+  */
+  checkRejectedBy(
+    'agents: 194e a kill-switch refusal that records nothing is caught',
+    withEditedFile(
+      KILL_SWITCH,
+      (text) =>
+        replaceOnce(
+          text,
+          "      await withSql(\n        async (sql) => await record(sql, principal, { agentKey, desired, operation: 'denied' }),\n      )\n",
+          '',
+        ),
+      () => runExpectingFailure('pnpm', screenItest('refuses a receptionist')),
+    ),
+    'refuses a receptionist, records the refusal, and changes nothing',
+  )
+
+  /*
+    194f. A pending count read through a capped reader.
+
+    `settings-store.itest.ts`'s defect, applied to a queue: a limit is right for a panel and wrong for a
+    count, and a capped reader pinned at its limit reports the cap as the answer. Three drafts waiting
+    become one, the owner clears it, and two are still there.
+  */
+  checkRejectedBy(
+    'agents: 194f a pending count read through a capped reader is caught',
+    withEditedFile(
+      QUERIES,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const [drafts] = await sql<{ n: string }[]>`\n    select count(*)::text as n\n      from google_reviews',
+          '  const [drafts] = await sql<{ n: string }[]>`\n    select count(*)::text as n\n      from (select 1 from google_reviews',
+        ).replace(
+          '       and draft_quarantine_reason is null\n  `',
+          '       and draft_quarantine_reason is null limit 1) capped\n  `',
+        ),
+      () => runExpectingFailure('pnpm', screenItest('counts 3 pending review drafts')),
+    ),
+    'counts 3 pending review drafts and 5 pending SEO suggestions',
+  )
+
+  /*
+    194g. Cost grouped by the calendar date.
+
+    A run that began at 01:30 belongs to the PREVIOUS trading date (ADR 0007), so a calendar-date
+    grouping moves a night's spend onto the wrong day. For a budget that is the difference between a day
+    that was inside it and one that was not, and the figure is wrong on exactly the nights the business is
+    busiest.
+  */
+  checkRejectedBy(
+    'agents: 194g a cost grouped by the calendar date rather than the trading date is caught',
+    withEditedFile(
+      QUERIES,
+      (text) =>
+        replaceOnce(
+          text,
+          'on r.agent_key = d.agent_key and r.trading_date = ${query.tradingDate}::date',
+          'on r.agent_key = d.agent_key and r.started_at::date = ${query.tradingDate}::date',
+        ),
+      /*
+        The case this mutation breaks is the one whose fixture DISCRIMINATES, and the first pointing was
+        at the one that does not: `counts a run by its TRADING date` inserts a run on an EARLIER trading
+        date, and under `started_at::date` that run is excluded for a different reason, so the assertion
+        still holds and the gate reported nothing rejected. The sums case inserts runs whose `started_at`
+        is today and whose `trading_date` is the closed day the figures are about, so a calendar grouping
+        drops both and the figure goes to nought.
+      */
+      () =>
+        runExpectingFailure('pnpm', screenItest('sums agent_run.cost_fils for the trading date')),
+    ),
+    'sums agent_run.cost_fils for the trading date and derives the ceiling',
+  )
+
+  /*
+    194h. An observer with no registry entry.
+
+    The deferral H-HARD-05 left is discharged by a row AND an observer, and the registry's whole design is
+    that neither can exist alone: an alert with no reader reports the same thing as a quiet day, and a
+    reader with no alert has no severity, no threshold, no runbook and no audience. This breaks the second
+    direction, which is the one a `Record` alone would not catch at runtime.
+  */
+  checkRejectedBy(
+    'agents: 194h an alert observer the registry does not declare is caught',
+    withEditedFile(
+      OBSERVERS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  unreconciled_settlement_batch: observeUnreconciledSettlementBatch,\n',
+          '  unreconciled_settlement_batch: observeUnreconciledSettlementBatch,\n  not_an_alert: observeUnreconciledSettlementBatch,\n',
+        ),
+      () => runExpectingFailure('pnpm', ['alerts']),
+    ),
+    'observer-without-an-alert',
   )
 }
 

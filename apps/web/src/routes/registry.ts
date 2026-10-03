@@ -172,6 +172,59 @@ export const ROUTES = [
       'on it is an aggregate.',
   },
   {
+    id: 'agent-console',
+    path: '/agents',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      "G-AGT-02's agent console: one row per agent_definition row with a heartbeat, carrying last run, " +
+      'last success, next run, the cost measured from agent_run.cost_fils against the per-run ceiling, ' +
+      'what is waiting for a person, and the real reason it is in the state it is in. A handler ' +
+      'answering text/html rather than a document, for the reason the suggestion queue, the diary, the ' +
+      'Messages inbox and the compliance calendar all give: a registry document must be served in BOTH ' +
+      'locales, which needs an Arabic admin document and the W-SYS-01 shell. Dynamic because it is a ' +
+      'read of rows that change and because the trading date comes from the calendar at request time. NO ' +
+      'sampleParams: the path takes none, and ?dir=rtl is a presentation hint the till and the ' +
+      'quick-book screen both use. It READS on GET and the WRITE is a separate route below, which is ' +
+      'what keeps a kill switch out of reach of a crawler, a link preview and a browser prefetch. ' +
+      'Authenticated through `guardAdminRoute`, refusing on the F07 matrix unless the role holds ' +
+      '`report:read` - and the kill-switch control is rendered only for a role holding ' +
+      '`agent:configure`, which is a courtesy rather than the authority: the POST refuses on its own. ' +
+      'There is deliberately no ?role= and nothing acted on from the query string beyond the direction. ' +
+      'Not indexable and not in the sitemap: it is under the /agents prefix in ADMIN_GROUP_PREFIXES, and ' +
+      'it states noindex on its own response and in its own document. It shows no customer name, no ' +
+      'phone number and no therapist name: every figure on it is about an agent, and the money on it is ' +
+      "one agent's own spend.",
+  },
+  {
+    id: 'agent-kill-switch',
+    path: '/agents/kill-switch',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      "G-AGT-02's kill switch: POST-only, one form per agent on the console above. A separate route from " +
+      'the console rather than a POST on it, which is the shape the two revalidate endpoints and ' +
+      'test-connection already take: a toggle reachable by GET is togglable by a crawler, a link ' +
+      'preview and a browser prefetch, and this one stops an agent. The body carries the agent and the ' +
+      'state to move it TO and never "toggle", so a replayed submission writes what the form was ' +
+      'rendered for instead of flipping whatever it finds - which is what makes two operators on the ' +
+      'console at once harmless. Authenticated through `guardAdminRoute` and refused on the F07 matrix ' +
+      'unless the role holds `agent:configure`; BOTH outcomes write an audit_event, the success as ' +
+      '`update` because stopping an agent is an act somebody is accountable for and the refusal as ' +
+      '`denied` because "who tried to stop the autoresponder" is what an insider-threat trail answers. ' +
+      'It answers 303 back to the console rather than a document, so the back button cannot re-submit ' +
+      'it. Not indexable and not in the sitemap: under the /agents prefix, and it states noindex on its ' +
+      'own response.',
+  },
+  {
     id: 'seo-gbp-snapshot',
     path: '/agents/seo/gbp-snapshot',
     kind: 'handler',

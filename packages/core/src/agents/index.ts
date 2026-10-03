@@ -1,4 +1,19 @@
 export {
+  AGENT_GOOGLE_DEPENDENCE,
+  type AgentGoogleDependence,
+  type AgentReason,
+  type AgentReasonInput,
+  ALERT_OPEN_REASON,
+  agentConsoleReason,
+  agentReasonText,
+  BUDGET_EXCEEDED_REASON,
+  DISABLED_REASON,
+  FAILING_WITHOUT_WORDS_REASON,
+  GOOGLE_DEPENDENT_AGENTS,
+  type GoogleDependence,
+  KILL_SWITCH_REASON,
+} from './console-reason.ts'
+export {
   type AgentHealth,
   type AgentHealthInput,
   BudgetExceeded,

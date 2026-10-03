@@ -279,3 +279,68 @@ select o.key, o.title, o.blocking_effect, i.due_on, i.status
 
 Any licence number, permit number or TRN. None is on file (`Y1-licence`, `Y1-trn`), the obligation table
 holds none, and neither this alert's payload nor the screen prints one.
+
+## A settlement batch does not reconcile
+
+**What fired.** A `settlement_batch` that does not tie to the figures this build holds: it was imported
+and QUARANTINED because its declared net and the sum of its lines disagree, or it carries
+`settlement_variance` rows — a line whose amount disagrees with ours, a line with no local record, a
+duplicated line, a malformed amount, or a difference belonging to no line at all.
+
+This is the acquirer saying it paid a different amount from the one the till recorded. It is money, and
+it does not resolve itself: a quarantined batch has no journal entry (`settlement_batch_state_known` and
+ZY443 keep `posted` and `quarantined` exclusive), so the payout is not in the books until somebody acts.
+
+`settlement_variance.difference_fils` is non-zero by CHECK — ZY447, "a variance of nought fils is not a
+variance" — which is why the threshold is ONE. There is no band of tolerable disagreement to be inside.
+
+### Confirm
+
+```
+select b.batch_reference, b.settled_on, b.state,
+       b.declared_net_fils, b.lines_net_fils,
+       b.declared_net_fils - b.lines_net_fils as declared_minus_lines,
+       count(v.id) as variances
+  from settlement_batch b
+  left join settlement_variance v on v.batch_id = b.id
+ where b.state = 'quarantined' or v.id is not null
+ group by b.id, b.batch_reference, b.settled_on, b.state, b.declared_net_fils, b.lines_net_fils
+ order by b.settled_on desc, b.batch_reference;
+```
+
+Then the variances themselves, which name the kind and both figures:
+
+```
+select v.kind, v.file_fils, v.local_fils, v.difference_fils, v.explanation, l.line_no, l.reference
+  from settlement_variance v
+  left join settlement_line l on l.id = v.settlement_line_id
+ where v.batch_id = '<batch id>'
+ order by v.kind, l.line_no;
+```
+
+### Decide
+
+1. **The `kind` is the remedy.** `amount_disagrees` is a figure to reconcile against the till;
+   `no_local_record` is a payout for something this build has no record of; `duplicate_line` is the
+   acquirer's file, not ours; `amount_malformed` is an import to re-run against a corrected file; and
+   `unattributable` is the one fact about the BATCH rather than about a line — a difference belonging to
+   no line, which is `settlement_variance_line_only_for_a_line` as a biconditional.
+2. **Do not post the batch to clear the alert.** A `posted` batch carries a journal entry, so posting one
+   that does not tie writes a figure into the ledger that nothing supports. The quarantine IS the correct
+   state until the disagreement is explained (ADR 0070).
+3. **Re-importing the same file changes nothing.** `settlement_batch_one_per_file` is unique on the
+   content digest of the BYTES, so the second import is refused rather than producing a second batch. A
+   corrected file from the acquirer has a different digest and imports as its own batch.
+
+### What this does not tell you
+
+Which side is wrong. The alert reports that two figures disagree and carries both; it does not and cannot
+say whether the acquirer's file or this build's record is the one to correct — that is a reconciliation a
+person does against the till roll and the payout advice.
+
+It also does not cover a payment INTENT diverging from the gateway, which is a different subject with its
+own register (`reconciliation_exception`, Y-PAY-05) and its own remedy: a repair is an applied event and a
+divergence nothing explains is quarantined. The count of quarantined exceptions is carried on this alert's
+detail as context, deliberately, because an operator looking at unreconciled money wants to see both — but
+it is not the figure that fires it, and folding the two together would put "the acquirer paid a different
+amount" and "an intent is in a state we cannot explain" on one screen with the same words.
