@@ -184,6 +184,17 @@ const PERMITTED_LITERAL_KILL_SWITCHES = new Map([
       'THROW — so a promotional send through this runtime fails closed rather than reading a false.',
   ],
   [
+    'apps/worker/src/jobs/credential-expiry-notice.ts',
+    'The credential-expiry notices (P-HR-14). Transactional, and the route REFUSES anything else by ' +
+      'name: `deliverStaffNotification` throws `staff_notification_must_be_transactional` for a template ' +
+      'whose class is not transactional and for a key outside the declared four, so a promotional send ' +
+      'through this runtime is unreachable rather than merely unevaluated. The three consent evaluators ' +
+      'beside the literal THROW as well, which is the second layer. Reading the marketing control row ' +
+      'here would be worse than not reading it: an unreadable marketing table would stop the message ' +
+      'that tells a therapist a document on their file is about to lapse, after which the credential ' +
+      'sweep takes their bookings off them with no notice.',
+  ],
+  [
     'apps/worker/src/jobs/seo-weekly-report.ts',
     'The weekly website report (G-SEO-07). Transactional, and internal for the review notices’ reason: the ' +
       'recipient is the owner, the shipped resolver returns null for every caller, and the three consent ' +

@@ -58,6 +58,11 @@ const config: NextConfig = {
     '@berelax/media',
     '@berelax/db',
     '@berelax/google',
+    // P-HR-14's staff portal: `/hr/me` composes the self-only fence in `@berelax/core` with the rows in
+    // `@berelax/db`, and `packages/hr` is the only package that may see both (`packages/db` must never
+    // import `packages/core`). It arrives as untranspiled TypeScript without this entry, like every other
+    // workspace package.
+    '@berelax/hr',
     '@berelax/messaging',
     '@berelax/providers',
     '@berelax/shared',

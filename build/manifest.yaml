@@ -12879,7 +12879,7 @@ units:
       set (rota published, leave decided, credential expiring, swap requested) routed as transactional class
       only.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-MSG-01
@@ -12905,12 +12905,130 @@ units:
       a test showing both entry points call one function
     - 'field-policy test enumerates the exposed field set: no other employee''s salary, bank or identity
       field is reachable, and the therapist''s own bank detail is masked on display'
+    - 'NOTE: the PATH and the SHAPE this list got wrong, and the reason each correction was forced. The
+      portal is `apps/web/app/(admin)/hr/me/` and the on-behalf screen `apps/web/app/(admin)/hr/leave/`,
+      both `route.ts` handlers answering `text/html` rather than `page.tsx` documents: `registry.ts` is in
+      exact bijection with the filesystem and requires every DOCUMENT to be served in both locales
+      (`registry.test.ts`), so a `page.tsx` needs an Arabic admin document nobody has built — the same
+      correction P-HR-02, P-HR-06, P-HR-07 and P-HR-11 each recorded. The prefix is `/hr` and NOT a new
+      `/staff`, because `/hr` is already in `ADMIN_GROUP_PREFIXES`, which makes both routes noindex and
+      behind `requiresAdminSession` from the commit that creates them rather than from the commit that
+      remembers to add a prefix. The templates are in `packages/messaging/src/templates.ts` beside
+      `hr.rota_published` rather than in a `templates/staff/` directory, because `DEFAULT_TEMPLATES` is one
+      array that four corpus-wide claims iterate and a second file would be a second corpus. There is no
+      `me.e2e.ts`: see the H04 note below.'
+    - 'NOTE: DEFERRED — the H04 screenshot matrix and the axe gate (acceptance lines 2 and 5), and the
+      reason is structural rather than a shortfall of effort. `scripts/accessibility.mjs` and the capture
+      matrix both read `documentRoutes()`, which is `ROUTES.filter(kind === ''document'')`; an admin
+      handler has `locales: []` and is in neither. Putting the portal in the matrix therefore means making
+      it a DOCUMENT in both locales, which needs an Arabic admin surface and the W-SYS-01 shell, and whose
+      RTL half the matrix requires to be a real Arabic route rather than a mirrored English one. That is
+      the same wall every admin screen since P-HR-02 has hit, and it is one decision about the admin
+      estate rather than seven. HANDED TO W-SYS-01 (the admin shell), which is the unit that would make an
+      Arabic admin document exist. What IS built instead, and asserted: both routes carry
+      `<meta name="robots" content="noindex, nofollow, noarchive">` in their own bytes
+      (`apps/web/src/hr-me-render.test.ts`), the `/hr` prefix in `ADMIN_GROUP_PREFIXES` puts the header on
+      the live response, and both documents emit `renderAdminBanner` inside `<main>` so
+      `google-reauth-banner.test.ts`''s filesystem walk covers them. The accessibility claim is therefore
+      NOT MADE for these two routes, rather than made against a harness that cannot see them.'
+    - 'NOTE: the portal fence is SELF-ONLY with no permission in its condition, and that is deliberately
+      narrower than the screens next door. `mayReadPayslip` and `mayReadCommissionDerivation` both widen on
+      `payroll:read`, because an accountant running payroll legitimately reads somebody else''s figures;
+      nothing legitimately reads somebody else''s /hr/me. A rule of the form "self, or a permission" is one
+      grant away from a hole — a role given `payroll:read` tomorrow for a reporting screen acquires the
+      whole portal with it, in a diff about reports. So `assertPortalSubject` compares two employee ids and
+      refuses when they differ FOR EVERY ROLE INCLUDING THE OWNER, and the owner case is the one gate 195b
+      plants. The cost, stated: no manager can LOOK at a therapist''s portal, and diagnosing "the page is
+      wrong for her" means reading /hr/rota, /hr/commission and /hr/payroll. ADR 0117.'
+    - 'NOTE: a defect this unit shipped and the check that caught it. The first `judgeLeaveSubmission`
+      reserved `days * 100` for EVERY leave kind, so three days of unpaid leave deducted three days of
+      annual entitlement — against a ledger those days were never earned on, in a table that refuses
+      DELETE for every role (ZH001), so nothing could have taken the row back. `leave_movement` is the
+      ANNUAL ledger: sick leave has its own tiers and unpaid leave is by definition not drawn from an
+      accrual. Caught by the integration case asserting the balance DELTA for an unpaid request, which was
+      -300 and had to be 0; gate 195f restores the first draft''s arithmetic and requires the suite to
+      notice. Two smaller ones from the same file: the reservation passed `rule_effective_from`, which
+      `leave_movement_rule_matches_kind` refuses outside `accrual` and `carry_over_forfeited` (a
+      reservation is days somebody asked for, not a figure a policy version computed); and an opening
+      balance needs `day_basis`, which `leave_movement_day_basis_matches_kind` demands on that kind and
+      refuses on every other.'
+    - 'NOTE: what made the integration suite''s SHAPE, because it is not the usual one. This file creates
+      plain `employee` rows and uses NO `createFixturePrincipal`: that helper promises a `cleanup()`, and
+      an employee carrying a `leave_movement` cannot be deleted (`on delete restrict`), so the promise is
+      one the suite could not keep — the first draft discovered it by failing in `afterAll` three lines
+      before the statement that mattered. Five tables it writes refuse DELETE outright —
+      `rota_version` and `rota_version_assignment` (0081), `leave_movement` (ZH001), `leave_request`
+      (0030 revokes it) and `credential_expiry_notice` (ZY841) — so nothing is deleted at all and the
+      isolation is a per-run marker in every value that has to be unique, including the rota period, which
+      `rota_version_number_unique_per_period` would otherwise collide on from the previous run. That is
+      brief rule 9 and `hr-leave-approval.itest.ts`''s arrangement.'
+    - 'NOTE: the credential-expiry notice records the DECISION and the `message` row records the send, and
+      the order is forced by the table being append-only. The row is written BEFORE the send attempt:
+      sending first and recording after is a message that can leave twice, because the crash between the
+      two is the window a second worker races in and an SMS cannot be un-sent. The send''s own outcome then
+      cannot be written onto the row, since ZY841 refuses the UPDATE — so the message id is DERIVED from
+      the notice''s key `(employee, document, window)` and the choke point''s `templateKey:messageId`
+      idempotency covers a retry. `window_days` is IN the unique key and `expires_on` is OUT of it:
+      widening 60 days to 90 changes the question, while `employee_document.expires_on` cannot vary for one
+      document because 0030 makes a renewal a new row.'
+    - 'NOTE: NOTHING IS SENT, and the row says so rather than the pass reporting success. No table in this
+      build holds a staff phone number or an email address, so `NO_STAFF_CONTACT_ON_FILE` is the shipped
+      resolver and every notice is `skipped` with `no_recipient_on_file` — 0081''s answer for the rota
+      notice and 0075''s for the Google re-auth ladder. The resolver is INJECTED so the integration suite
+      can supply a recipient and drive the send path against a recording delivery, which is what makes "a
+      second run sends nothing" testable at all: a pass whose send branch could never run would have an
+      idempotency claim about a branch that does nothing. `NO_DELIVERY_WIRED` THROWS rather than skipping,
+      because "a recipient exists and nothing can send to them" is a configuration fault and a skip would
+      hide it behind the state the build ships in.'
+    - 'NOTE: a SHARED FILE edited beyond this unit''s own code, declared. `apps/worker/src/jobs/leave-accrual.ts`
+      had a private `asRules` mapping thirteen `leave_entitlement_rule` columns with a nested sick-leave
+      trio; this unit needed the same mapping and now `leaveEntitlementRulesFrom` in `@berelax/core` is the
+      ONE statement of it, with the worker''s copy deleted and its function delegating. Two copies of a
+      thirteen-field mapping is the "second statement of a fact" the brief refuses and the copy that stops
+      matching does it silently. `apps/web` gained `@berelax/hr` as a dependency (package.json and
+      `transpilePackages` in next.config.ts), because the portal composes the fence in `@berelax/core` with
+      the rows in `@berelax/db` and `packages/hr` is the only package that may see both.'
+    - 'NOTE: allocations. Migration 0163 used (`credential_expiry_notice`); 0164 and 0165 RELEASED UNUSED.
+      SQLSTATE ZY841 used (the notice is append-only); ZY842 through ZY850 RELEASED UNUSED and deliberately
+      unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises and everything
+      else this table has to say is a CHECK. ADR 0117 taken; 0118 and 0119 RELEASED UNUSED. Gate block
+      `// 195a-195z` used. The port band `{ start: 23_900, width: 300 }` is RELEASED UNUSED: no suite here
+      starts a server — the refusal is proved at the function boundary against real rows, and a declared
+      but unused band fails `test-ports.test.ts`.'
     files:
-    - apps/web/app/(admin)/staff/me/page.tsx
-    - apps/web/app/(admin)/staff/me/leave/page.tsx
-    - packages/messaging/src/templates/staff/*.ts
+    - packages/core/src/hr/self-service.ts
+    - packages/core/src/hr/self-service.test.ts
+    - packages/core/src/hr/leave-submission.ts
+    - packages/core/src/hr/leave-submission.test.ts
+    - packages/core/src/index.ts
+    - packages/db/migrations/0163_credential_expiry_notice.sql
+    - packages/db/src/repositories/staff-portal.ts
+    - packages/db/src/repositories/credential-expiry-notice.ts
+    - packages/db/src/schema/hr.ts
+    - packages/db/src/sqlstate-registry.ts
+    - packages/db/src/index.ts
+    - packages/hr/src/staff-portal.ts
+    - packages/hr/src/index.ts
+    - packages/shared/src/staff-notifications.ts
+    - packages/shared/src/index.ts
+    - packages/messaging/src/staff-notification.ts
+    - packages/messaging/src/staff-notification.test.ts
+    - packages/messaging/src/templates.ts
+    - packages/messaging/src/index.ts
     - apps/worker/src/jobs/credential-expiry-notice.ts
-    - apps/web/app/(admin)/staff/me/me.e2e.ts
+    - apps/worker/src/jobs/credential-expiry-notice.itest.ts
+    - apps/worker/src/jobs/leave-accrual.ts
+    - apps/web/app/(admin)/hr/me/route.ts
+    - apps/web/app/(admin)/hr/me/render.ts
+    - apps/web/app/(admin)/hr/leave/route.ts
+    - apps/web/app/(admin)/hr/leave/render.ts
+    - apps/web/src/hr-me-render.test.ts
+    - apps/web/src/routes/registry.ts
+    - apps/web/next.config.ts
+    - packages/fixtures/src/staff-portal.itest.ts
+    - packages/fixtures/src/leave-submission-entry-points.test.ts
+    - scripts/test-gates.mjs
+    - docs/adr/0117-the-portal-is-self-only-with-no-permission-that-widens-it-and-the-mask-is-the-absence-of-the-value.md
   - id: A-FIRST-01
     order: 104
     title: Analytics schema, monthly partitions, 90-day raw retention

@@ -67,6 +67,30 @@ export {
   type WpsContactSource,
   type WpsExportResult,
 } from './payroll-run.ts'
+/*
+  P-HR-14's staff portal. Here for `commission-run.ts`'s reason — a surface that needs the matrix and the
+  rows at once, and `packages/db` may not import `packages/core` — and for one more that is this unit's:
+  the portal's self-only fence has to sit in FRONT of P-HR-11's and P-HR-12's guarded readers, and this is
+  the only package that can see all three.
+
+  `submitLeaveRequest` is the ONE leave submission path. Both entry points call it and neither calls
+  `writeLeaveRequest`, which `packages/fixtures/src/leave-submission-entry-points.test.ts` asserts by
+  scanning the source rather than by convention.
+*/
+export {
+  assertOnBehalfAuthority,
+  type PortalLeaveView,
+  type PortalViewer,
+  readPortalBank,
+  readPortalCommission,
+  readPortalLeave,
+  readPortalPayslips,
+  readPortalSchedule,
+  type SubmitLeaveRequestArgs,
+  type SubmitLeaveRequestResult,
+  submitLeaveRequest,
+  tradingHoursFromWindows,
+} from './staff-portal.ts'
 export {
   type BankDetail,
   openBankDetail,

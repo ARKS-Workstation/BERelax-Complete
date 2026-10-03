@@ -459,6 +459,106 @@ export const DEFAULT_TEMPLATES: readonly DefaultTemplate[] = [
     variables: ['dates'],
   },
   /*
+    The other three staff notices (P-HR-14), and the reason they are beside the rota one.
+
+    `STAFF_NOTIFICATION_TEMPLATE_KEYS` in `@berelax/shared` is the set; these are its other three members.
+    All transactional and immutably so, for `hr.rota_published`'s reasons restated because they are the
+    unit's acceptance line: a decision on somebody's leave, a document on their file about to lapse and a
+    colleague asking to swap a shift are facts about their own employment, so the marketing kill switch must
+    not be able to suppress any of them and none may leave from the AD- promotional identity.
+
+    SMS, like the rota notice and for its reason: the person each is for is not at a desk. No link in any of
+    them — the Arabic body has to fit one segment at 70 UCS-2 units, and `/hr/me` is behind a sign-in a
+    therapist reaches from the front desk rather than from a lock screen.
+
+    **None of them names the colleague, the document or the decision-maker.** `hr.credential_expiring` says
+    "a document on your file" and not which: a document type is a fact about somebody's immigration or
+    professional status and it arrives on a shared handset, which is docs/06 D2's discretion rule applied to
+    staff rather than to customers. `hr.shift_swap_requested` names no colleague for the same reason ADR
+    0020 gives — nineteen employees have no name recorded, and inventing one is brief rule 15.
+
+    **Nothing is sent today**, and the reason is 0081's and 0075's: no table in this build holds a staff
+    phone or email. Each sender writes a notice row with outcome `skipped` and `no_recipient_on_file`
+    instead, which is a record of what was attempted and for whom rather than a no-op reporting success. The
+    words exist now so that the day a staff address does, the send is one branch and not one approval cycle.
+
+    The Arabic variants carry the re-auth templates' caveat verbatim: no table records which language a
+    member of staff reads, so every selector asks for `en`, and picking a locale per ROLE would be a guess
+    about a person (ADR 0020).
+  */
+  {
+    key: 'hr.leave_decided',
+    messageClass: 'transactional',
+    approvalState: 'approved',
+    purpose:
+      'Tells an employee their leave request was decided (P-HR-14). Names the dates and the outcome and ' +
+      'nobody who decided it.',
+    channel: 'sms',
+    locale: 'en',
+    body: 'Your leave for {{dates}} is {{outcome}}. Ask the front desk.',
+    variables: ['dates', 'outcome'],
+  },
+  {
+    key: 'hr.leave_decided',
+    messageClass: 'transactional',
+    approvalState: 'approved',
+    purpose:
+      'Tells an employee their leave request was decided (P-HR-14). Names the dates and the outcome and ' +
+      'nobody who decided it.',
+    channel: 'sms',
+    locale: 'ar',
+    body: 'طلب إجازتك {{dates}}: {{outcome}}. اسأل الاستقبال.',
+    variables: ['dates', 'outcome'],
+  },
+  {
+    key: 'hr.credential_expiring',
+    messageClass: 'transactional',
+    approvalState: 'approved',
+    purpose:
+      'Tells an employee a mandatory document on their file is inside the expiring-soon window ' +
+      '(P-HR-14, from P-HR-02s evaluator). Says A document and never which one.',
+    channel: 'sms',
+    locale: 'en',
+    body: 'A document on your file expires {{date}}. Please bring the renewal.',
+    variables: ['date'],
+  },
+  {
+    key: 'hr.credential_expiring',
+    messageClass: 'transactional',
+    approvalState: 'approved',
+    purpose:
+      'Tells an employee a mandatory document on their file is inside the expiring-soon window ' +
+      '(P-HR-14, from P-HR-02s evaluator). Says A document and never which one.',
+    channel: 'sms',
+    locale: 'ar',
+    body: 'مستند في ملفك ينتهي {{date}}. يرجى إحضار التجديد.',
+    variables: ['date'],
+  },
+  {
+    key: 'hr.shift_swap_requested',
+    messageClass: 'transactional',
+    approvalState: 'approved',
+    purpose:
+      'Tells an employee somebody asked to swap a shift of theirs (P-HR-14). Names the dates and no ' +
+      'colleague.',
+    channel: 'sms',
+    locale: 'en',
+    body: 'A shift swap was asked for {{dates}}. Ask the front desk.',
+    variables: ['dates'],
+  },
+  {
+    key: 'hr.shift_swap_requested',
+    messageClass: 'transactional',
+    approvalState: 'approved',
+    purpose:
+      'Tells an employee somebody asked to swap a shift of theirs (P-HR-14). Names the dates and no ' +
+      'colleague.',
+    channel: 'sms',
+    locale: 'ar',
+    body: 'طُلب تبديل وردية {{dates}}. اسأل الاستقبال.',
+    variables: ['dates'],
+  },
+  /*
     The fallback intake's two notices (G-REV-02, docs/10 §6).
 
     Both transactional, and immutably so. A review is a fact about the business that somebody has to answer,

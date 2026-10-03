@@ -75,8 +75,16 @@ const SEND_REQUEST_ACCEPTS_CHANNEL = false satisfies AcceptsRouting<SendRequest,
 const RECORDED_ACCEPTS_CLASS = false satisfies AcceptsRouting<RecordedSendRequest, 'messageClass'>
 const RECORDED_ACCEPTS_SENDER = false satisfies AcceptsRouting<RecordedSendRequest, 'senderId'>
 
-/** The send entry points this file probes. Compared with the barrel below rather than trusted. */
-const PROBED_SEND_APIS = ['sendMessage', 'deliverMessage'] as const
+/**
+ * The send entry points this file probes. Compared with the barrel below rather than trusted.
+ *
+ * `deliverStaffNotification` is P-HR-14's staff notification route and it is PROBED rather than exempted,
+ * which is the whole arrangement working as intended: it takes a `RecordedSendRequest` like
+ * `deliverMessage` does, so the three fences on that type apply to it unchanged, and the file now says so
+ * instead of this being true by coincidence. Its own class fence is a RUNTIME refusal about the template's
+ * immutable class and is a different claim, asserted in `staff-notification.test.ts`.
+ */
+const PROBED_SEND_APIS = ['sendMessage', 'deliverMessage', 'deliverStaffNotification'] as const
 
 describe('no exported send API accepts a routing argument', () => {
   it('probes every send entry point the barrel exports', () => {

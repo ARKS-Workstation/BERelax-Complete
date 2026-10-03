@@ -15,7 +15,11 @@ import type { AdminChrome } from './components/admin/google-reauth-banner.ts'
  */
 
 /** No banner to show, which is the ordinary state. G-CONN-08 requires the CALL, not the banner. */
-const CHROME: AdminChrome = { googleReauth: null, sendBacklog: null, returnTo: '/agents/seo/gbp-snapshot' }
+const CHROME: AdminChrome = {
+  googleReauth: null,
+  sendBacklog: null,
+  returnTo: '/agents/seo/gbp-snapshot',
+}
 
 const FINDING: GbpConsistencyFinding = {
   rule: 'opening_hours_disagree',

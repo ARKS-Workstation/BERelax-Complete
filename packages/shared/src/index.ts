@@ -387,6 +387,19 @@ export {
   UNSUPPRESSION_SOURCES,
   type UnsuppressionSource,
 } from './schemas/suppression.ts'
+/*
+  P-HR-14's staff notification set. Named in `@berelax/shared` because three packages read it: the template
+  corpus and the class fence in `@berelax/messaging`, the credential-expiry pass in `@berelax/worker` and
+  the portal screen in `apps/web`.
+*/
+export {
+  isStaffNotificationTemplateKey,
+  STAFF_NOTIFICATION_CLASS,
+  STAFF_NOTIFICATION_CLASS_REFUSAL,
+  STAFF_NOTIFICATION_TEMPLATE_KEY_LIST,
+  STAFF_NOTIFICATION_TEMPLATE_KEYS,
+  type StaffNotificationName,
+} from './staff-notifications.ts'
 
 /** Nominal typing helper, so an AppointmentId cannot be passed where a RoomId is wanted. */
 export type Brand<T, B extends string> = T & { readonly __brand: B }

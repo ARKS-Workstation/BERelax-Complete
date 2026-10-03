@@ -60948,6 +60948,339 @@ export function chargebackNetEffectFils(`,
   )
 }
 
+// 195a-195z. (P-HR-14) The staff portal: the self-only fence shown to be able to open, the field policy
+//            shown to be able to go quiet, and the staff notification shown to be able to leave from the
+//            promotional identity.
+//
+//            The unit's claim is that a therapist sees their own data and nobody else's, and that the
+//            refusal is in the QUERY rather than a filter in the view. Four things defend it — the
+//            unconditional comparison in `assertPortalSubject`, the closed field set, the delegation to
+//            P-HR-11's and P-HR-12's own guarded readers, and the fact that the notice table's
+//            idempotency is a UNIQUE index rather than a memory in a pass — and each case here removes
+//            one and requires the suite to say so BY NAME.
+//
+//            Every mutation leaves a system that WORKS. A fence that returns true, a field-policy branch
+//            that never fires, a class fence moved behind the choke point, an `on conflict do nothing`
+//            turned into a plain insert: each one is a diff a reviewer would wave through, and three of
+//            them make the application MORE permissive while every screen still renders.
+//
+//            195a to 195f run unit suites and are fast. 195g and 195h drive the integration suite.
+{
+  const SELF_SERVICE_TS = 'packages/core/src/hr/self-service.ts'
+  const SELF_SERVICE_TEST = 'packages/core/src/hr/self-service.test.ts'
+  const SUBMISSION_TS = 'packages/core/src/hr/leave-submission.ts'
+  const SUBMISSION_TEST = 'packages/core/src/hr/leave-submission.test.ts'
+  const NOTIFICATION_TS = 'packages/messaging/src/staff-notification.ts'
+  const NOTIFICATION_TEST = 'packages/messaging/src/staff-notification.test.ts'
+  const PORTAL_HR_TS = 'packages/hr/src/staff-portal.ts'
+  const PORTAL_ITEST = 'packages/fixtures/src/staff-portal.itest.ts'
+  const NOTICE_REPO_TS = 'packages/db/src/repositories/credential-expiry-notice.ts'
+  const NOTICE_ITEST = 'apps/worker/src/jobs/credential-expiry-notice.itest.ts'
+  const ENTRY_POINTS_TEST = 'packages/fixtures/src/leave-submission-entry-points.test.ts'
+  const PORTAL_ROUTE_TS = 'apps/web/app/(admin)/hr/me/route.ts'
+
+  const portalUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const portalIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // The control for the whole block. Every case asserts that a BROKEN tree is caught, and that says
+  // nothing unless the committed tree passes.
+  {
+    const fence = run('pnpm', portalUnit(SELF_SERVICE_TEST))
+    check(
+      'portal: the committed self-service suite passes, which is the control for 195a to 195c',
+      !fence.failed,
+      `the self-service suite does not pass on the committed tree:\n${fence.output}`,
+    )
+    const notice = run('pnpm', portalUnit(NOTIFICATION_TEST))
+    check(
+      'portal: the committed staff-notification suite passes, which is the control for 195d and 195e',
+      !notice.failed,
+      `the staff-notification suite does not pass on the committed tree:\n${notice.output}`,
+    )
+  }
+
+  /*
+    195a. The self-only fence opened.
+
+    The whole unit in one line. `isPortalSubjectTheViewer` is the comparison the portal's refusal is made
+    of, and a fence that answers true is a fence that is not there — every screen still renders, every
+    read still returns rows, and a therapist can read a colleague's wage. The mutation is the plausible
+    one: somebody debugging a 403 makes the predicate permissive "temporarily".
+  */
+  checkRejectedBy(
+    'portal: 195a a self-only fence that answers true for everybody is caught',
+    withEditedFile(
+      SELF_SERVICE_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  return args.viewerEmployeeId === args.subjectEmployeeId',
+          '  return true',
+        ),
+      () => runExpectingFailure('pnpm', portalUnit(SELF_SERVICE_TEST)),
+    ),
+    'portal_subject_is_not_the_viewer',
+  )
+
+  /*
+    195b. The fence widened by a ROLE, which is the version that survives a review.
+
+    Not opened — narrowed to "everybody except the owner", which reads like a reasonable exception and is
+    the exact failure mode the unit refuses: the admin estate already has per-employee screens with their
+    own authority, and the portal is not a second way in. The case that catches it is the one asserting
+    the OWNER is refused, and it exists for this mutation.
+  */
+  checkRejectedBy(
+    'portal: 195b a fence with a role exception in it is caught',
+    withEditedFile(
+      SELF_SERVICE_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (isPortalSubjectTheViewer(args)) return',
+          "  if (isPortalSubjectTheViewer(args) || args.role === 'owner') return",
+        ),
+      () => runExpectingFailure('pnpm', portalUnit(SELF_SERVICE_TEST)),
+    ),
+    'portal_subject_is_not_the_viewer',
+  )
+
+  /*
+    195c. The field policy's non-open branch made unreachable.
+
+    `portalFieldPolicyProblems` is what holds the exposed field set to `EMPLOYEE_FIELD_GROUPS`, and a
+    branch that never fires makes it answer "no problems" for a salary column. The empty answer for the
+    REAL set then proves nothing, which is why the suite's control case asks it about a wage field, an
+    identity field and an unclassified one and requires all three to be reported.
+  */
+  checkRejectedBy(
+    'portal: 195c a field policy that can never report a non-open field is caught',
+    withEditedFile(
+      SELF_SERVICE_TS,
+      (text) =>
+        replaceOnce(text, "    if (sensitivity !== 'open') {", '    if (false as boolean) {'),
+      () => runExpectingFailure('pnpm', portalUnit(SELF_SERVICE_TEST)),
+    ),
+    'portal-field-policy-refuses-a-non-open-field',
+  )
+
+  /*
+    195d. The staff notification's class fence removed.
+
+    The route is one fence plus the choke point. With the fence gone a promotional template addressed at a
+    member of staff goes through `deliverMessage` and is handled by the gate — which means a rota notice
+    published at 22:00 would be HELD until 07:00 and one published while campaigns were paused would not
+    arrive at all. Both are staffing failures caused by a marketing control, and neither looks like a bug
+    anywhere near the notice.
+  */
+  checkRejectedBy(
+    'portal: 195d a staff notification route with no class fence is caught',
+    withEditedFile(
+      NOTIFICATION_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  assertStaffNotificationClass(request.template)',
+          '  // fence removed by gate 195d',
+        ),
+      () => runExpectingFailure('pnpm', portalUnit(NOTIFICATION_TEST)),
+    ),
+    // The TEST NAME and not the refusal's own name, and the reason is the harness rather than the rule:
+    // a vitest failure's rule string sits in the diff, and `elideMiddle` keeps the head and the tail of a
+    // long output — so the name that is reliably present is the one on the `×` line. 195a to 195c carry
+    // their rule in the assertion MESSAGE, which survives for the same reason.
+    'refuses it at the route, before the gate or the transport sees anything',
+  )
+
+  /*
+    195e. The class comparison inverted, so the fence refuses the RIGHT class.
+
+    Deleting the fence is 195d. This is the subtler one and it is a single-token diff: the comparison is
+    made against `'promotional'` instead of the declared constant, so every staff notice is refused and a
+    promotional one sails through. It is the shape an inverted constant always takes, and the case that
+    fails is the one asserting the four declared notices leave from the transactional identity — the
+    normal path, which 195d leaves working.
+  */
+  checkRejectedBy(
+    'portal: 195e a class fence inverted onto the wrong class is caught',
+    withEditedFile(
+      NOTIFICATION_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (template.messageClass !== STAFF_NOTIFICATION_CLASS) {',
+          "  if (template.messageClass !== 'promotional') {",
+        ),
+      () => runExpectingFailure('pnpm', portalUnit(NOTIFICATION_TEST)),
+    ),
+    'routes every declared notice to the transactional identity',
+  )
+
+  /*
+    195f. The leave submission's non-annual guard removed, so unpaid leave spends annual entitlement.
+
+    This is the defect this unit actually shipped and the case that caught it. `leave_movement` is the
+    ANNUAL ledger; reserving against it for unpaid or sick leave deducts days nobody earned there, and the
+    table is append-only (ZH001) so nothing can take the row back. The mutation restores the first draft's
+    arithmetic, which looks tidier than the version that is right.
+  */
+  checkRejectedBy(
+    'portal: 195f a submission that reserves annual days for unpaid leave is caught',
+    withEditedFile(
+      SUBMISSION_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  const hundredths = leaveKind === 'annual' ? days * HUNDREDTHS_PER_DAY : 0",
+          '  const hundredths = days * HUNDREDTHS_PER_DAY',
+        ),
+      () => runExpectingFailure('pnpm', portalIntegration(PORTAL_ITEST)),
+    ),
+    'reserves NOTHING for unpaid leave',
+  )
+
+  /*
+    195g. The portal's fence replaced by a FILTER, which is the whole acceptance line.
+
+    `readPortalSchedule` refuses before it composes a statement. Remove the fence and the reader still
+    works perfectly — it returns the rows of whatever employee it was asked about, because the repository
+    takes a required employee id and has no idea whose session asked. So the mutation is a silent
+    horizontal-access hole with no error anywhere, and the only thing that can see it is a suite that asks
+    for a COLLEAGUE'S row with that row present. An empty table would have proved nothing.
+  */
+  checkRejectedBy(
+    'portal: 195g a schedule reader with no fence in front of the statement is caught',
+    withEditedFile(
+      PORTAL_HR_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  fence('schedule', args.viewer, args.subjectEmployeeId)",
+          '  // fence removed by gate 195g',
+        ),
+      () => runExpectingFailure('pnpm', portalIntegration(PORTAL_ITEST)),
+    ),
+    'refuses every surface for the colleague, by name, with the rows present',
+  )
+
+  /*
+    195h. The notice insert's conflict clause removed.
+
+    The acceptance line is that the credential-expiry notices are idempotent per (employee, document,
+    window) and that a second run SENDS NOTHING. With `on conflict do nothing` gone the insert raises on
+    the second pass instead of answering null — so the pass throws rather than sending twice, which looks
+    safe and is not: the transaction aborts after the first document, every later document in the file
+    goes undecided, and the failure arrives as a constraint name in a worker log. The suite catches it on
+    the second run.
+  */
+  checkRejectedBy(
+    'portal: 195h a notice insert that cannot answer "already decided" is caught',
+    withEditedFile(
+      NOTICE_REPO_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '    on conflict (employee_id, employee_document_id, window_days) do nothing\n',
+          '',
+        ),
+      () => runExpectingFailure('pnpm', portalIntegration(NOTICE_ITEST)),
+    ),
+    'sends NOTHING on a second run, which is the acceptance line',
+  )
+
+  /*
+    195i. A second leave-submission path, planted in the portal route.
+
+    The scan's whole purpose. `submitLeaveRequest` is the one validator — the balance, the probation rule
+    and the leave year are judged there once — and the way that stops being true is a route that inserts a
+    request itself. The mutation is the shape it would really take: an import of the repository insert
+    beside the validator's, which compiles, and a call that writes a row with none of the judgement.
+  */
+  checkRejectedBy(
+    'portal: 195i a second leave submission path in a route is caught',
+    withEditedFile(
+      PORTAL_ROUTE_TS,
+      (text) => replaceOnce(text, '  readSetting,\n', '  readSetting,\n  writeLeaveRequest,\n'),
+      () =>
+        withEditedFile(
+          PORTAL_ROUTE_TS,
+          (text) =>
+            replaceOnce(
+              text,
+              'export async function GET(request: Request): Promise<Response> {',
+              'export async function GET(request: Request): Promise<Response> {\n' +
+                // A CALL and not a reference: the scan matches `writeLeaveRequest(`, because an import
+                // and a re-export are mentions rather than second paths. The first version of this case
+                // planted `void writeLeaveRequest` and the scan correctly ignored it, which is the gate
+                // proving its own discriminator works.
+                '  void writeLeaveRequest(undefined as never, undefined as never)\n',
+            ),
+          () => runExpectingFailure('pnpm', portalUnit(ENTRY_POINTS_TEST)),
+        ),
+    ),
+    'leave-request-has-one-validator',
+  )
+
+  /*
+    195j. A wage field printed on the portal document.
+
+    The field policy says what MAY appear; this is the other direction, and the two catch different
+    things. A figure can arrive in the document through a field the policy has nothing to say about — a
+    view widened by a later unit, a label carrying a number — and only a scan of the BYTES sees it. The
+    mutation adds the one line somebody would add in good faith: the wage on the screen about your own
+    pay.
+  */
+  checkRejectedBy(
+    'portal: 195j a wage figure on the portal document is caught',
+    withEditedFile(
+      'apps/web/app/(admin)/hr/me/render.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          "    '<dt>Contract</dt>',",
+          "    '<dt>Basic wage</dt>', '<dd>AED 5000.00</dd>',\n    '<dt>Contract</dt>',",
+        ),
+      () => runExpectingFailure('pnpm', portalUnit('apps/web/src/hr-me-render.test.ts')),
+    ),
+    'portal-document-must-not-contain-a-wage',
+  )
+
+  /*
+    195k. The leave-submission validator's balance probe answering from a re-derivation.
+
+    The judgement asks the LEDGER ENGINE — `applyLeaveLedgerEvent`'s `request` event — rather than
+    comparing two numbers, so `insufficient_balance` on a screen and `insufficient_balance` in the
+    engine's property test are one rule. The mutation puts a comparison in FRONT of the engine, off by
+    exactly one day, which is what a hand-written balance check gets wrong: the engine is never reached
+    for a request the comparison already accepted, and the request that is one day over the balance is
+    filed. Caught by the case that funds exactly the balance and not one day more, which exists for this.
+  */
+  checkRejectedBy(
+    'portal: 195k a balance check re-derived instead of asked is caught',
+    withEditedFile(
+      SUBMISSION_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const step = applyLeaveLedgerEvent(seeded.ledger, {',
+          '  if (opening + HUNDREDTHS_PER_DAY >= hundredths) {\n' +
+            "    return { kind: 'accepted', leaveKind, days, hundredths, leaveYearStart: yearStart }\n" +
+            '  }\n' +
+            '  const step = applyLeaveLedgerEvent(seeded.ledger, {',
+        ),
+      () => runExpectingFailure('pnpm', portalUnit(SUBMISSION_TEST)),
+    ),
+    'funds exactly the balance and not one day more',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

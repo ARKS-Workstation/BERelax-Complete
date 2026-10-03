@@ -1013,6 +1013,35 @@ export const ROUTES = [
       'and authenticated since W-SYS-11, exactly as the routes under /settings record.',
   },
   {
+    id: 'hr-leave-filing',
+    path: '/hr/leave',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'P-HR-14s leave filing screen: the SECOND entry point into submitLeaveRequest, which is the one ' +
+      'validator the staff portal also enters. It exists because nineteen employees have no phone and no ' +
+      'email on file (0081), so a therapist who cannot reach /hr/me still has to be able to take a ' +
+      'holiday and a manager typing it in is how that happens; the acceptance line is "both entry points ' +
+      'call one function" and a scan of the source asserts neither reaches writeLeaveRequest itself. It ' +
+      'FILES and never decides: the row is created pending, the days are reserved because 0066 says a ' +
+      'request reserves when it is made, and approving it is /hr/leave/[id]s with its own coverage and ' +
+      'authority checks. The authority to file for somebody else is leave:approve and never ' +
+      'leave:request - every therapist holds the second, which is what lets them file their OWN - and it ' +
+      'is checked against the session before the form renders as well as before the write. The subject is ' +
+      'a row id in the POST BODY and never a query parameter: admin-guard.test.ts refuses a principal, a ' +
+      'role or a permission taken from the query across the whole of apps/web, and a GET URL carrying an ' +
+      'employee id is a URL that gets shared. A handler answering text/html rather than a document, for ' +
+      'the reason the six HR screens beside it give: a document must be served in both locales, which ' +
+      'would need an Arabic admin document nobody has built. It names no therapist: staff_reference is ' +
+      'the handle (ADR 0020). Dynamic because the candidate list is current employment and the balance it ' +
+      'judges against moves. The /hr prefix in ADMIN_GROUP_PREFIXES is what makes it noindex, and ' +
+      'authenticated since W-SYS-11.',
+  },
+  {
     id: 'hr-leave-request',
     path: '/hr/leave/[id]',
     kind: 'handler',
@@ -1041,6 +1070,38 @@ export const ROUTES = [
       'answer are both claims about rows a reassignment changes minute by minute, so a prerendered copy ' +
       'would show a conflict somebody had already resolved. The /hr prefix in ADMIN_GROUP_PREFIXES is what ' +
       'makes it noindex.',
+  },
+  {
+    id: 'hr-me',
+    path: '/hr/me',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'P-HR-14s staff portal: a therapist sees their own published shifts, their leave balance and ' +
+      'requests, their commission derivation and their payslips, and NOTHING belonging to anyone else. ' +
+      'That last clause is a refusal in the query and not a filter on the page - assertPortalSubject in ' +
+      '@berelax/core compares the subject against the session and refuses when they differ, for every ' +
+      'role INCLUDING the owner, which is deliberately narrower than mayReadPayslip and ' +
+      'mayReadCommissionDerivation beside it: an accountant running payroll legitimately reads somebody ' +
+      'elses figures and nothing legitimately reads somebody elses /hr/me. There is no ?employee= to ' +
+      'authorise, because admin-guard.test.ts refuses a principal taken from the query across the whole ' +
+      'of apps/web; the refusal lives at the FUNCTION boundary where a caller naming a subject also hits ' +
+      'it, and the integration suite drives it with a colleagues rows present in every table so a ' +
+      'refusal is distinguishable from an empty one. The field policy is CLOSED: PORTAL_EMPLOYEE_FIELDS ' +
+      'enumerates what may appear and portalFieldPolicyProblems refuses anything whose sensitivity is not ' +
+      'open, so no wage and no identity document can reach the page, and the viewers own bank account is ' +
+      'shown as a MASK over nothing - the portal never decrypts one, so there is no field a number could ' +
+      'arrive in. Its one write is filing the viewers own leave, through submitLeaveRequest, which ' +
+      '/hr/leave also calls. A handler answering text/html rather than a document, for the reason the six ' +
+      'HR screens beside it give: a document must be served in both locales, which would need an Arabic ' +
+      'admin document nobody has built, and it would join a screenshot matrix whose RTL half has to be a ' +
+      'real Arabic route. Dynamic and never cached: this document is one persons wage, leave and roster, ' +
+      'and a cached copy is served to the next reader at the same terminal. The /hr prefix in ' +
+      'ADMIN_GROUP_PREFIXES is what makes it noindex, and authenticated since W-SYS-11.',
   },
   {
     id: 'hr-payroll',
