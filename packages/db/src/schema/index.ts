@@ -20,6 +20,7 @@ export * as analytics from './analytics.ts'
  */
 export * from './analytics-dispatch.ts'
 export * from './attendance.ts'
+export * from './attribution.ts'
 export * from './bill.ts'
 export * from './booking.ts'
 export * from './booking-manage-grant.ts'

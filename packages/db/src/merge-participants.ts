@@ -221,6 +221,33 @@ export const MERGE_PARTICIPANTS: readonly MergeParticipant[] = registry([
   }),
   participant({
     schema: 'public',
+    table: 'customer_attribution',
+    column: 'customer_id',
+    strategy: 'repoint_update',
+    // The primary key IS the customer id, so the conflict test is on no further column.
+    conflictKey: [],
+    activePredicate: null,
+    dedupeKey: null,
+    backReference: null,
+    excludeColumns: [],
+    retainedReason:
+      'Both records held a first touch, so the survivor’s key was taken and this row stayed on the ' +
+      'tombstone. Nothing was lost: `merge_record_folds_first_touch` (0149) has already carried the ' +
+      'EARLIER of the two onto the survivor, on the merge_record insert that opens this merge, and ' +
+      'ZY691 permits no other replacement. The retained row is therefore a duplicate of the answer ' +
+      'the survivor now holds, kept where it was because the survivor may hold exactly one.',
+    why:
+      'One row per customer — the FIRST touch, which is a property of the person. The generic ' +
+      'statement moves it when the survivor has none and skips it when the survivor has one, and ' +
+      'neither is the answer when both records hold a claim: the right one is the EARLIER. That ' +
+      'arithmetic is a trigger on `merge_record` rather than a fifth strategy here, because a fifth ' +
+      'strategy would have widened `sql.unsafe`’s identifier grammar and `merge_record_table`’s ' +
+      'balance constraints for one table — and the rule would then live in a module a reader of the ' +
+      'schema has no reason to open. See 0149’s header.',
+    registeredBy: 'A-FIRST-08',
+  }),
+  participant({
+    schema: 'public',
     table: 'customer_preference',
     column: 'customer_id',
     strategy: 'repoint_update',

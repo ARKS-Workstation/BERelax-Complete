@@ -12942,7 +12942,8 @@ units:
       analytics.session.session_id. A second analytics.whatsapp_ref would be a second statement of one fact.
       The itest asserts the table exists in `public` so the absence reads as a decision.'
     - 'NOTE: no customer or booking reference exists anywhere in this schema, and the itest asserts it by
-      pattern. That is deferred to A-FIRST-08, whose own acceptance line names attribution onto customer and
+      pattern. That is deferred to A-FIRST-08 — DEFERRAL SATISFIED: the reference runs the
+      other way and no analytics column was added. A-FIRST-08''s own acceptance line names attribution onto customer and
       booking and the merge repointing — a customer_id here would enter C-CRM-05''s merge participant
       registry and C-CRM-10''s erasure catalogue on this commit with no unit owning either decision, and an
       unclassified column in the latter REFUSES every customer erasure. packages/fixtures/src/analytics-privacy.itest.ts
@@ -13723,7 +13724,7 @@ units:
       touch the most recent pre-booking session, offline bookings carrying source 'offline' plus the how-heard
       fallback, and customer merge repointing attribution to the survivor.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - A-FIRST-05
@@ -13749,11 +13750,64 @@ units:
       the survivor with exactly one first-touch row
     - attribution coverage — the share of paid bookings with a non-offline, non-unknown source — is computed
       and equals the hand-counted value on the seeded fixture
+    - 'NOTE: the denormalised columns are on two CHILD tables, public.customer_attribution and
+      public.booking_attribution, and not on customer and booking themselves. The decisive reason is
+      that a NOT NULL attribution column cannot be added to either parent without inventing one: both
+      already hold rows, so the statement fails on a non-empty table and a DEFAULT writes an attribution
+      onto every customer the business already has — customer_acquisition_source (0053) already says
+      "choosing walk_in for them would be an invented attribution" (brief rule 15). A child row''s
+      ABSENCE is the honest statement and source is then NOT NULL for every row that exists, which is
+      what the acceptance line asks for. The other two reasons are that a customer-scoped column enters
+      C-CRM-05''s merge registry and C-CRM-10''s erasure catalogue one classification at a time, and that
+      widening customer by seven columns widens every read and every DTO audience behind it. ADR 0102.'
+    - 'NOTE: the first touch is the CUSTOMER''s and the last touch is the BOOKING''s — two subjects, two
+      tables. A person is found once, so on the booking one customer would have three first touches; a
+      person books repeatedly, so on the customer a second booking would overwrite the first booking''s
+      last touch, and that figure is the denominator of every "which channel produced this sale" report.
+      They may disagree, which is why there are two and not one column.'
+    - 'NOTE: two files beyond the declared list. packages/db/src/attribution.test.ts reads 0149 and
+      asserts its structural claims, for the reason analytics-dispatch.test.ts exists for 0137 — a
+      trigger deleted from a migration is invisible to a database that already has it, so the integration
+      suite stays green on a tree that no longer creates it. packages/fixtures/src/attribution-coverage.itest.ts
+      is where the coverage figure and the rule-said-twice equality are proved: packages/db may not import
+      packages/core (ADR 0001), so the ordering that picks the two touches is written as `order by …
+      limit 1` in the repository and as firstTouchOf/lastTouchBeforeOf in core, and fixtures is the one
+      package allowed to import both and hold them equal. Coverage also needs a PAID booking, and paid is
+      a fact in the ledger, so the fixture needs an invoice and therefore core''s VAT split.'
+    - 'NOTE: the deferral A-FIRST-07, A-FIRST-05 and A-FIRST-01 each recorded is discharged. analytics
+      still holds no customer or booking reference — analytics.itest.ts asserts that by pattern and the
+      assertion still passes — because the reference runs the other way: public.customer_attribution
+      carries the customer id and public.booking_attribution the booking id, both classified in
+      C-CRM-10''s erasure catalogue (delete_row and inherits_parent respectively, with the statement that
+      carries the first one out) and the first registered in C-CRM-05''s merge participant registry on
+      this commit. booking_whatsapp_ref_capture.attributed_session_id (0127) is the join a desk booking''s
+      attribution reads, exactly as A-FIRST-07 built it for.'
+    - 'NOTE: A-MEAS-03''s and A-MEAS-05''s injected AnalyticsSessionResolver now has something behind it:
+      the offline-conversions handler resolves the session through attributedSessionForBooking. It is
+      still a REFUSAL rather than a choice, which is what ADR 0091 and ADR 0092 insisted on — the answer
+      is the session the booking''s own last touch names, written by the transaction that produced the
+      booking, and null for every walk-in and telephone booking that carried no ref code. The pass counts
+      those refusals exactly as it counted the shipped resolver''s. NO_ATTRIBUTION_ON_FILE is kept and is
+      what A-MEAS-05''s own suite uses to assert the refusal path.'
+    - 'NOTE: a bot-flagged session is NOT excluded from the candidate set, and that is a decision rather
+      than an omission. ADR 0062''s rule is that the classifier''s verdict is stored and never acted on,
+      and the one unit the exclusion was deferred to is A-FIRST-09''s funnel, which counts traffic.
+      analytics.visitor exists only at consent (ADR 0066) and a crawler does not answer a consent banner,
+      so a bot flag under a consented visitor is a false positive — and dropping that session would
+      silently move the customer''s first touch.'
+    - 'NOTE: no test port band was needed. This unit starts no server: its round trip is a migration, two
+      repositories and two integration suites against PostgreSQL. The allocated band { start: 22_400,
+      width: 300 } is therefore RELEASED unused for all three of this agent''s units, and a declared but
+      unused band fails apps/web/src/test-ports.test.ts.'
     files:
-    - packages/db/migrations/NNNN_attribution_columns.sql
+    - packages/db/migrations/0149_attribution_columns.sql
     - packages/core/src/analytics/attribution.ts
+    - packages/core/src/analytics/attribution.test.ts
     - packages/db/src/repositories/attribution.ts
+    - packages/db/src/schema/attribution.ts
+    - packages/db/src/attribution.test.ts
     - packages/db/src/attribution.itest.ts
+    - packages/fixtures/src/attribution-coverage.itest.ts
   - id: A-FIRST-09
     order: 112
     title: Funnel to PAID and the nightly rollups on business_day
@@ -14278,7 +14332,11 @@ units:
       test across the full fils range the catalogue uses
     - a package redemption pushes conversion value at redemption while the package sale pushes zero, matching
       the Y11-vat-package provisional position
-    - 'NOTE: deferred to A-FIRST-08 — the analytics SESSION a till conversion belongs to. Nothing in this
+    - 'NOTE: deferred to A-FIRST-08 — DEFERRAL SATISFIED: the handler now resolves the session through
+      attributedSessionForBooking, and it still REFUSES rather than choosing — the answer is the session
+      the booking''s own last touch names, and null for every walk-in and telephone booking with no ref
+      code, which the pass counts. NO_ATTRIBUTION_ON_FILE is kept as this suite''s refusal-path control.
+      What follows is the deferral as it stood: the analytics SESSION a till conversion belongs to. Nothing in this
       schema joins an analytics session to a booking, so the pass takes the session from an injected
       resolver whose shipped implementation answers ''nothing on file'' for every conversion, and the pass
       COUNTS the refusals rather than choosing one: a session picked here would push a conversion under

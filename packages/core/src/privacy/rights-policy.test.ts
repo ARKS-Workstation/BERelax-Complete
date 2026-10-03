@@ -338,8 +338,18 @@ describe('the erasure rule registry', () => {
       0130 applied and `rights.itest.ts` refused every erasure until the rule existed. That is the
       mechanism working rather than a defect being found — which is why the rule is `registeredBy:
       'H-MIG-05'` and not collateral: this unit created the table.
+
+      A-FIRST-08 is the FIFTH, and it is the one every earlier A-FIRST unit deferred here by name:
+      A-FIRST-01, A-FIRST-05 and A-FIRST-07 each kept the `analytics` schema free of a customer id
+      precisely because *an unclassified column in C-CRM-10's catalogue REFUSES every customer erasure*,
+      and each wrote that the unit which first puts a customer near the measurement store would classify
+      it. It created `customer_attribution` and `booking_attribution`, so it carries both rules: the
+      first-touch row is `delete_row` (a measurement about a person, with nothing built from it, and the
+      rollups keep their own identifier-free aggregates) and the booking's last touch inherits the
+      booking's pseudonymise-and-keep.
     */
     expect([...units].sort()).toEqual([
+      'A-FIRST-08',
       'C-AUTO-07',
       'C-CRM-10',
       'G-REV-02',

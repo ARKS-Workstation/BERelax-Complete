@@ -939,6 +939,33 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
     registeredBy: 'C-CRM-10',
   }),
   rule({
+    key: 'public.customer_attribution.customer_id',
+    dataClass: 'operational',
+    action: 'delete_row',
+    why:
+      'A first touch is a measurement ABOUT a person — which channel found them — and it has no ' +
+      'meaning once there is nobody to have found. `booking.customer_id`’s pseudonymise-and-keep is ' +
+      'right there because the appointments and the invoices are built from the chain; nothing is ' +
+      'built from this row. It is not evidence of anything that happened either: the funnel and the ' +
+      'rollups keep their own aggregate figures per business day (0096), which carry no identifier, so ' +
+      'deleting this leaves every published number intact. The row goes with the customer by ' +
+      '`on delete cascade` as well, which is the half a restored dump and a psql session also get.',
+    registeredBy: 'A-FIRST-08',
+  }),
+  rule({
+    key: 'public.booking_attribution.booking_id',
+    dataClass: 'operational',
+    action: 'inherits_parent',
+    parent: 'public.booking.customer_id',
+    why:
+      'The last touch belongs to the BOOKING, and the booking is pseudonymised and kept because the ' +
+      'invoices are built from it. This row carries no contact detail, no free text and no identifier ' +
+      'of a person: a source, a medium, a campaign and an opaque session handle that resolves to ' +
+      'nothing after ninety days. Deleting it would make a kept booking read as unattributed and move ' +
+      'the attribution-coverage figure for a trading day that is already closed.',
+    registeredBy: 'A-FIRST-08',
+  }),
+  rule({
     key: 'public.waitlist.customer_id',
     dataClass: 'operational',
     action: 'delete_row',

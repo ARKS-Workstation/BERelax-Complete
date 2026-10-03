@@ -2521,6 +2521,37 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['assert_notification_follows_discovery'],
     translators: [],
   },
+  // ZY691-ZY692 are A-FIRST-08's, of the band ZY691-ZY700; ZY693 through ZY700 are left free and
+  // deliberately absent, because an entry for a code no migration raises is direction 3.
+  //
+  // Both are TRIGGERS rather than CHECKs: the first compares NEW against OLD and the second reads another
+  // table's row, and a CHECK can do neither.
+  //
+  // ZY691 is the one the unit rests on, and the shape of the rule is the decision. "A first touch is
+  // write-once" stated as a refusal of every UPDATE is not available, because a customer MERGE has to be
+  // able to carry the loser's EARLIER first touch onto the survivor — so the rule is the one that makes
+  // both true at once: the claim may move backwards in time and never forwards. A resolver re-run over a
+  // longer session history then converges on the same row rather than moving it, which is what makes
+  // "replay the sessions in any order and get the same answer" a property of the schema.
+  //
+  // ZY692 is about a wrong answer that is SELF-REINFORCING rather than random. A session that began after
+  // a booking cannot have produced it, and the page a customer lands on next is usually the confirmation —
+  // so an unbounded last touch re-attributes completed sales to whatever followed them, consistently and
+  // in one direction. A CHECK cannot state it: the booking's creation instant is a row in another table.
+  {
+    code: 'ZY691',
+    rule: 'A customer first touch may only be replaced by an EARLIER one.',
+    migration: '0149',
+    raisedBy: ['assert_first_touch_only_moves_earlier'],
+    translators: ['packages/db/src/repositories/attribution.ts'],
+  },
+  {
+    code: 'ZY692',
+    rule: "A booking's last touch may not be dated after the booking it is attributed to.",
+    migration: '0149',
+    raisedBy: ['assert_last_touch_precedes_its_booking'],
+    translators: ['packages/db/src/repositories/attribution.ts'],
+  },
   {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',

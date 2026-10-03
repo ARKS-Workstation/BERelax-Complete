@@ -56484,6 +56484,264 @@ export function chargebackNetEffectFils(`,
   }
 }
 
+// 180a-180z. (A-FIRST-08) First touch and last touch: every way an attribution could come to be a
+//            CONFIDENT answer derived from nothing, and every way it could quietly stop being written.
+//
+// The defects this unit is about divide into two kinds, and the second is the one that costs years.
+//
+// The loud kind is a wrong answer: a first touch that moves, a last touch taken from a session that began
+// after the booking, an offline walk-in counted as attributed. Each of those is a figure somebody can
+// argue with.
+//
+// The quiet kind is an attribution that stops existing, or one whose evidence is dropped out from under
+// it. Nothing writes the row and every test still passes, because the suites call the writer directly. A
+// foreign key is added to `analytics.session` because it looks like an improvement, and ninety days later
+// the retention purge either stops or takes the attribution with it. A paid booking nobody attributed is
+// dropped from the coverage denominator, so the figure rises towards 100% as the attribution gets worse.
+// Those three are what 180i, 180j and 180k are for, and none of them fails loudly in the direction a
+// reader would expect.
+{
+  const RULE = 'packages/core/src/analytics/attribution.ts'
+  const RULE_SUITE = 'packages/core/src/analytics/attribution.test.ts'
+  const MIGRATION = 'packages/db/migrations/0149_attribution_columns.sql'
+  const WRITER = 'packages/db/src/repositories/attribution.ts'
+  const BOOKING = 'packages/db/src/repositories/create-booking.ts'
+  const MIRROR = 'packages/db/src/schema/attribution.ts'
+  const REGISTRY = 'packages/db/src/merge-participants.ts'
+  const POLICY = 'packages/core/src/privacy/rights-policy.ts'
+  const STATIC_SUITE = 'packages/db/src/attribution.test.ts'
+
+  const unitFails = (...files) =>
+    runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const brokenUnit = (file, find, into, ...suites) =>
+    withEditedFile(
+      file,
+      (source) => replaceOnce(source, find, into),
+      () => unitFails(...suites),
+    )
+
+  // 180a. The first-touch comparator loses its tie-break. Two sessions of one visitor can share a
+  //       `started_at` to the millisecond — a tab restored into two windows is the real case — and the
+  //       answer then depends on the order the rows arrived in, which is the one thing "write-once"
+  //       claims it does not.
+  checkRejectedBy(
+    'attribution: a first-touch order that is not total is caught',
+    brokenUnit(
+      RULE,
+      '  if (left.occurredAtMs !== right.occurredAtMs) return left.occurredAtMs - right.occurredAtMs\n  return left.sessionReference < right.sessionReference ? -1 : 1',
+      '  return left.occurredAtMs - right.occurredAtMs',
+      RULE_SUITE,
+    ),
+    'breaks a tie on the session reference',
+  )
+
+  // 180b. The last touch loses its bound. The most recent session in the table is then the answer, and
+  //       the page a customer lands on after booking is usually the confirmation — so the error is
+  //       self-reinforcing rather than random, and it re-attributes completed sales in one direction.
+  checkRejectedBy(
+    'attribution: a last touch with no pre-booking bound is caught',
+    brokenUnit(
+      RULE,
+      '  const eligible = candidates.filter((touch) => touch.occurredAtMs <= bookingCreatedAtMs)',
+      '  const eligible = [...candidates]',
+      RULE_SUITE,
+    ),
+    'never takes a session that started after the booking',
+  )
+
+  // 180c. `offline` counted as an attributed source. Every walk-in then counts towards coverage, and a
+  //       day of walk-ins reports 100% attribution — which is the figure that makes the whole unit
+  //       pointless rather than merely wrong.
+  checkRejectedBy(
+    'attribution: an offline walk-in counted towards coverage is caught',
+    brokenUnit(
+      RULE,
+      '  return source !== OFFLINE_SOURCE && source !== UNKNOWN_SOURCE',
+      '  return true',
+      RULE_SUITE,
+    ),
+    'counts neither offline nor unknown',
+  )
+
+  // 180d. A window with no paid booking answering 0% instead of "no figure". ADR 0002's rule applied to
+  //       a share: 0% coverage on a day nothing was sold says the marketing failed.
+  checkRejectedBy(
+    'attribution: a coverage share of zero bookings rendered as 0% is caught',
+    brokenUnit(
+      RULE,
+      "      kind: 'no_paid_bookings',",
+      "      kind: 'coverage' as 'no_paid_bookings',",
+      RULE_SUITE,
+    ),
+    'no figure at all for a window with no paid booking',
+  )
+
+  // 180e. `offline` dropped from the basis list, which is what a reader tidying a derived constant would
+  //       do. The CHECK in 0149 would then admit a basis the type system does not.
+  checkRejectedBy(
+    'attribution: a basis list that no longer admits offline is caught',
+    brokenUnit(
+      RULE,
+      "Object.freeze([...ORIGINATION_BASES, 'offline'])",
+      'Object.freeze([...ORIGINATION_BASES])',
+      RULE_SUITE,
+    ),
+    'origination’s four plus offline',
+  )
+
+  // 180f. The origination shape stated twice instead of once. One table's CHECK stops calling the shared
+  //       function, and the two tables then drift into one accepting a row the other refuses — the
+  //       brief's "a second statement of a fact drifts", in the place it would be hardest to notice.
+  checkRejectedBy(
+    'attribution: a second hand-written copy of the origination rule is caught',
+    brokenUnit(
+      MIGRATION,
+      '  constraint booking_attribution_origination_well_formed\n    check (attribution_origination_is_well_formed(basis, source, medium, session_reference, how_heard)),',
+      "  constraint booking_attribution_origination_well_formed\n    check (basis in ('utm', 'click_id', 'referrer', 'direct', 'offline')),",
+      STATIC_SUITE,
+    ),
+    'IMMUTABLE function both tables',
+  )
+
+  // 180g. ZY691 widened to `<=`, which permits an equal-instant overwrite — every re-run of a resolver
+  //       rewriting the claim it had already made, with nothing to say it had changed.
+  checkRejectedBy(
+    'attribution: a first touch that may be replaced at the same instant is caught',
+    brokenUnit(
+      MIGRATION,
+      '  if new.occurred_at < old.occurred_at then',
+      '  if new.occurred_at <= old.occurred_at then',
+      STATIC_SUITE,
+    ),
+    'EARLIER and nothing else',
+  )
+
+  // 180h. The merge fold losing the predicate that makes it a fold. Without it the survivor's claim is
+  //       overwritten with the loser's whatever the order, which ZY691 then refuses — so every merge of
+  //       two attributed customers fails, and the message names an attribution rule rather than a merge.
+  checkRejectedBy(
+    'attribution: a merge fold that does not compare the two claims is caught',
+    brokenUnit(
+      MIGRATION,
+      '     and l.occurred_at < s.occurred_at;',
+      '     and l.occurred_at is not null;',
+      STATIC_SUITE,
+    ),
+    'folds the earlier first touch',
+  )
+
+  // 180i. A foreign key to `analytics.session`. The quiet one: it looks like an improvement, passes every
+  //       test for ninety days, and then either blocks `analytics.run_retention` or cascades away the
+  //       claim the unit exists to preserve.
+  checkRejectedBy(
+    'attribution: a foreign key into the analytics store is caught',
+    brokenUnit(
+      MIGRATION,
+      '  constraint customer_attribution_customer_fk\n    foreign key (customer_id) references customer (id) on update cascade on delete cascade,',
+      '  constraint customer_attribution_customer_fk\n    foreign key (customer_id) references customer (id) on update cascade on delete cascade,\n  constraint customer_attribution_session_fk\n    foreign key (session_reference) references analytics.session (session_id),',
+      STATIC_SUITE,
+    ),
+    'no foreign key to analytics.session',
+  )
+
+  // 180j. The write removed from the booking transaction. Nothing then writes an attribution row at all,
+  //       `attribution.itest.ts` stays green because it calls the writer directly, and the symptom is a
+  //       coverage figure that reads as a marketing failure.
+  checkRejectedBy(
+    'attribution: a booking transaction that writes no attribution is caught',
+    brokenUnit(
+      BOOKING,
+      '  await recordBookingAttribution(uow.sql, {',
+      '  await Promise.resolve({',
+      STATIC_SUITE,
+    ),
+    'inside the booking transaction',
+  )
+
+  // 180k. A paid booking with no attribution dropped from the denominator. The coverage figure then
+  //       rises towards 100% as the attribution gets worse, which is the direction nobody investigates.
+  checkRejectedBy(
+    'attribution: an unattributed paid booking dropped from the denominator is caught',
+    brokenUnit(
+      WRITER,
+      "    select coalesce(ba.source, 'unknown') as source",
+      '    select ba.source as source',
+      STATIC_SUITE,
+    ),
+    'rather than dropping it',
+  )
+
+  // 180l. The merge registry losing the participant. A table carrying a customer id that the registry
+  //       does not account for leaves the loser's attribution on a tombstone nothing reads — and the
+  //       integration catalogue is the only thing that finds it, so the static claim is asserted too.
+  checkRejectedBy(
+    'attribution: an unregistered merge participant is caught',
+    brokenUnit(
+      REGISTRY,
+      "    table: 'customer_attribution',",
+      "    table: 'customer_attribution_unregistered',",
+      STATIC_SUITE,
+    ),
+    'a merge must account for it',
+  )
+
+  // 180m. The erasure classification removed. An unclassified customer-scoped column REFUSES every
+  //       customer erasure — the failure the deferral NOTEs on A-FIRST-01, A-FIRST-05 and A-FIRST-07 each
+  //       named by hand.
+  checkRejectedBy(
+    'attribution: an unclassified customer column is caught',
+    brokenUnit(
+      POLICY,
+      "    key: 'public.customer_attribution.customer_id',",
+      "    key: 'public.customer_attribution.customer_id_unclassified',",
+      STATIC_SUITE,
+    ),
+    'public.customer_attribution.customer_id',
+  )
+
+  // 180n. The first-touch upsert losing the predicate that makes it converge. Every pass would then
+  //       rewrite the claim, ZY691 would refuse, and a booking would fail on an attribution rule.
+  checkRejectedBy(
+    'attribution: a first-touch upsert that does not converge is caught',
+    brokenUnit(
+      WRITER,
+      '     where excluded.occurred_at < customer_attribution.occurred_at',
+      '     where true',
+      STATIC_SUITE,
+    ),
+    'converge rather than accumulate',
+  )
+
+  // 180o. The control the whole block rests on. Every case above breaks something and demands a named
+  //       failure; this one demands that the unbroken tree PASSES, so a suite that had come to fail for
+  //       its own reasons could not make all fourteen of them report success.
+  {
+    const unit = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.config.ts',
+      RULE_SUITE,
+      STATIC_SUITE,
+    ])
+    check('attribution: and both suites pass on the real tree', !unit.failed, unit.output)
+  }
+
+  // 180p. The mirror's own warning. Somebody assembling a write from the Drizzle definitions is exactly
+  //       who would add the foreign key 180i is about, so the definitions have to say why there is none.
+  checkRejectedBy(
+    'attribution: a Drizzle mirror that does not warn about the missing key is caught',
+    brokenUnit(
+      MIRROR,
+      '*   1. **`sessionReference` is NOT a foreign key and never will be.**',
+      '*   1. **`sessionReference` points at the analytics session.**',
+      STATIC_SUITE,
+    ),
+    'NOT a foreign key and never will be',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

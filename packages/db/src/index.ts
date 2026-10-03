@@ -498,6 +498,23 @@ export {
   transitionRefusalOf,
 } from './repositories/appointment-transition.ts'
 export {
+  ATTRIBUTION_REFUSALS,
+  ATTRIBUTION_SQLSTATE,
+  type AttributionRefusal,
+  type AttributionRow,
+  attributedSessionForBooking,
+  attributionRefusalOf,
+  paidBookingAttributionSources,
+  type RecordAttributionInput,
+  type RecordedAttribution,
+  readBookingAttribution,
+  readFirstTouch,
+  recordBookingAttribution,
+  refCaptureSessionForBooking,
+  type SessionTouch,
+  sessionTouchesForVisitorOf,
+} from './repositories/attribution.ts'
+export {
   attachBookingToSession,
   BOOKING_SESSION_TOKEN_BYTES,
   BOOKING_SESSION_TTL_MINUTES,
@@ -5234,4 +5251,57 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // `expected_interval_seconds` 86400 and `budget_fils_per_run` 0: the pass reads this build's own tables
 // and performs no outbound call of any kind.
 //
-export const SCHEMA_VERSION = 142 as const
+// 149 is 0149_attribution_columns.sql (A-FIRST-08) — first touch and last touch, denormalised out of the
+// analytics store onto the two records that outlive it. Mirrored in `packages/db/src/schema/attribution.ts`,
+// so `pnpm db:drift` compares the two.
+//
+// **Two tables rather than columns on `customer` and `booking`, and the first reason is decisive on its
+// own.** A NOT NULL attribution column cannot be added to either parent without inventing one: both already
+// hold rows, so the statement fails on a non-empty table and a DEFAULT would write an attribution onto
+// every customer the business already has. `customer_acquisition_source`'s own comment says why that is
+// worse than a blank — *"choosing walk_in for them would be an invented attribution"*. A child row's
+// ABSENCE is the honest statement, and `source` is then NOT NULL for every row that exists. The other two
+// reasons are that a customer-scoped column enters C-CRM-10's erasure catalogue and C-CRM-05's merge
+// registry one classification at a time, and that widening `customer` by seven columns widens every read
+// and every DTO audience behind it.
+//
+// **The first touch is the CUSTOMER's and the last touch is the BOOKING's.** A person is found once, so the
+// first touch is a property of the person and is write-once; on the booking, one customer would have three
+// first touches. A person books repeatedly, so the last touch is a property of the booking; on the
+// customer, a second booking would overwrite the first booking's last touch — and that figure is the
+// denominator of every "which channel produced this sale" report, so the overwrite would silently
+// re-attribute money that had already been counted. The two may disagree, which is the whole reason there
+// are two.
+//
+// **There is no foreign key to `analytics.session` in either direction.** Retention purges that table at
+// ninety days (0096), so a reference would either block the purge or cascade away the half that has to
+// survive — 0096 says so itself, naming this unit. `session_reference` is therefore a bare uuid, which is
+// the shape A-FIRST-07 chose for `whatsapp_ref.session_reference` for the same reason, and the source,
+// medium and campaign are COPIED rather than joined: a rollup reading them through a live join would report
+// a day correctly for ninety days and then report it as unattributed, arriving as a cliff in a chart nobody
+// had deployed anything near. A reference that resolves to nothing is the expected state of an old row.
+//
+// `offline` is a FIFTH basis and not a reuse of `direct`. `direct` is a browser that arrived with nothing
+// to resolve; `offline` is a walk-in or a telephone call, where there was no browser at all. Folding them
+// would make attribution coverage unanswerable, because the denominator would hold every walk-in the salon
+// has ever had. `attribution_origination_is_well_formed` is the ONE statement of that shape and both
+// tables' CHECKs call it — two hand-written copies would drift into one table accepting a row the other
+// refuses.
+//
+// ZY691 and ZY692 are used of the band ZY691-ZY700; ZY693 through ZY700 are released UNUSED and
+// deliberately unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises. ZY691
+// permits a first touch to move EARLIER and nothing else, which is write-once and the customer merge's fold
+// stated as one rule rather than two that can disagree. ZY692 refuses a last touch dated after its own
+// booking.
+//
+// The merge fold is a trigger on `merge_record` rather than a fifth merge strategy. The generic
+// `repoint_update` statement can only MOVE the loser's row or SKIP it, and the earlier of two first touches
+// is neither; `mergeCustomers` inserts the tombstone claim before it runs the participant loop, so a
+// trigger there carries the earlier claim onto the survivor first and the loop then retains the loser's row
+// on the tombstone with a stated reason. A fifth strategy would have widened `sql.unsafe`'s identifier
+// grammar and `merge_record_table`'s balance constraints for one table's arithmetic, and the rule would
+// live in a module a reader of the schema has no reason to open. DELETE is granted on both tables to
+// `berelax_app` so C-CRM-10's `delete_row` recipe stays a statement rather than needing a third branch in
+// 0085's SECURITY DEFINER function.
+//
+export const SCHEMA_VERSION = 149 as const

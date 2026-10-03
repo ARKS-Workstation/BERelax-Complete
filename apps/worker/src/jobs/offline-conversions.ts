@@ -13,6 +13,7 @@ import {
   packageConversionStatements,
 } from '@berelax/core'
 import {
+  attributedSessionForBooking,
   enqueueAnalyticsDispatch,
   type OfflineConversionFacts,
   offlineInvoiceConversions,
@@ -86,10 +87,12 @@ export type AnalyticsSessionResolver = (
 ) => Promise<string | null> | string | null
 
 /**
- * The resolver this build ships, which answers "nothing on file" for every conversion.
+ * The resolver that answers "nothing on file" for every conversion.
  *
- * Not a stub to be replaced quietly: it is the honest answer while A-FIRST-08 does not exist, and the
- * pass's log line carries the count so that "no conversions were uploaded" reads as *the attribution is
+ * It was this build's shipped answer until A-FIRST-08 landed, and it is kept — the pass is still handed a
+ * resolver, the handler now hands it `attributedSessionForBooking`, and this one is what the pass's own
+ * suite uses to assert the refusal PATH: a conversion with no session is counted and not guessed at, and
+ * the log line carries the count so that "no conversions were uploaded" reads as *the attribution is
  * missing* rather than as *there were none*. ADR 0002's rule, applied to a pass instead of a report.
  */
 export const NO_ATTRIBUTION_ON_FILE: AnalyticsSessionResolver = () => null
@@ -347,13 +350,22 @@ async function offlineConversionsHandler(_data: never, context: JobContext): Pro
     nowIso,
     destinations: DISPATCH_DESTINATIONS,
     /*
-     * The shipped resolver, which answers "nothing on file" for every conversion. The pass still RUNS, so
-     * the log line below carries the count — ADR 0002's rule applied to a pass: "no conversions were
-     * uploaded" has to read as *the attribution is missing* rather than as *there were none*. Throwing
-     * instead would burn the retry budget and mark the shared agent unhealthy for the half of the
-     * pipeline that is working.
+     * The real resolver (A-FIRST-08), which replaces {@link NO_ATTRIBUTION_ON_FILE}.
+     *
+     * It is still a REFUSAL rather than a choice, which is what ADR 0092 insisted on: the answer is the
+     * session the booking's OWN last touch names, written by the booking transaction that produced it,
+     * and `null` for every conversion with no such session — every walk-in and every telephone booking
+     * that carried no ref code. The pass still RUNS and the log line still carries the count, because
+     * "no conversions were uploaded" has to read as *these conversions had no session* rather than as
+     * *there were none* (ADR 0002).
+     *
+     * A conversion with no booking behind it — a package sale — resolves to `null` without a query: the
+     * attribution is a property of a booking and there is nothing to look up.
      */
-    resolveSession: NO_ATTRIBUTION_ON_FILE,
+    resolveSession: async (facts) =>
+      facts.bookingId === null
+        ? null
+        : await attributedSessionForBooking(configured as Sql, facts.bookingId),
   })
   console.log(
     `${OFFLINE_CONVERSIONS_JOB} ${nowIso} for ${tradingDate}: ${describeOfflineConversionPass(result)}`,
