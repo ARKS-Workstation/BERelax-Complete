@@ -31,8 +31,8 @@ import { maskRecipient, safeText } from '@berelax/core'
 import type { InboxEntry } from '@berelax/db'
 import { tokensCss } from '@berelax/ui'
 import {
+  ADMIN_BANNER_CSS,
   type AdminChrome,
-  GOOGLE_REAUTH_BANNER_CSS,
   renderAdminBanner,
 } from '../../../../src/components/admin/google-reauth-banner.ts'
 
@@ -301,7 +301,7 @@ export function renderInboxHtml(view: InboxView): string {
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     '<meta name="robots" content="noindex, nofollow, noarchive">',
     '<title>Messages — BE RELAX admin</title>',
-    `<style>${tokensCss()}${INBOX_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${INBOX_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',

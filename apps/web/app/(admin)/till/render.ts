@@ -1,7 +1,7 @@
 import { DISCOUNT_REASONS, safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
 import {
-  GOOGLE_REAUTH_BANNER_CSS,
+  ADMIN_BANNER_CSS,
   renderAdminBanner,
 } from '../../../src/components/admin/google-reauth-banner.ts'
 import {
@@ -521,7 +521,7 @@ export function renderTillHtml(view: TillView): string {
     // brand appears, and an internal screen naming it would be citing the wrong entity. The rule is about
     // how the brand is written, so not writing it is compliant.
     `<title>${view.screen === 'preview' ? 'Invoice preview' : 'Till'} — admin</title>`,
-    `<style>${tokensCss()}${TILL_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${TILL_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',

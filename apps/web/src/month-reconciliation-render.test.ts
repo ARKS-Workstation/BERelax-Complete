@@ -18,7 +18,7 @@ import {
  * for the split — the served bytes are the integration suite's business, and the decisions are here.
  */
 
-const CHROME = { googleReauth: null } as unknown as ReconciliationView['chrome']
+const CHROME = { googleReauth: null, sendBacklog: null } as unknown as ReconciliationView['chrome']
 
 const line = (
   id: string,

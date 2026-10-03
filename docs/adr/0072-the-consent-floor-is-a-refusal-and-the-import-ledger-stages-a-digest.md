@@ -7,7 +7,7 @@
   ("imports with `marketing_consent = false` on every reconstructed record, without exception") and of
   docs/04 §5 and §8 (the opt-in proof TDRA requires before a promotional send, and the exact wording shown,
   stored and hashed), and it is the enforcement-shaped consequence of
-  [ADR 0014](0014-customers-have-no-accounts-identity-is-the-phone-number.md) (the number is the identity)
+  [ADR 0014](0014-phone-first-customer-identity.md) (the number is the identity)
   meeting [migration 0056](../../packages/db/migrations/0056_consent.sql)'s append-only consent log, and it
   records the decided answer to **Y9-import-ledger**, which
   [ADR 0061](0061-an-import-is-resumable-per-row-and-provenance-is-a-reference.md) left open for this unit.

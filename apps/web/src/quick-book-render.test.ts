@@ -27,7 +27,11 @@ import {
  * So the assertion below is on the INDEX of the substring, which is the thing the acceptance line is about.
  */
 
-const CHROME = { googleReauth: null, returnTo: '/settings/integrations' } as const
+const CHROME = {
+  googleReauth: null,
+  sendBacklog: null,
+  returnTo: '/settings/integrations',
+} as const
 
 const VARIANT_A = '01a00000-0000-7000-8000-0000000000a1'
 const VARIANT_B = '01a00000-0000-7000-8000-0000000000a2'

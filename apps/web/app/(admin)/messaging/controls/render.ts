@@ -39,8 +39,8 @@ import {
 import type { MessagingControlKey } from '@berelax/shared'
 import { tokensCss } from '@berelax/ui'
 import {
+  ADMIN_BANNER_CSS,
   type AdminChrome,
-  GOOGLE_REAUTH_BANNER_CSS,
   renderAdminBanner,
 } from '../../../../src/components/admin/google-reauth-banner.ts'
 
@@ -233,7 +233,7 @@ export function renderControlsHtml(view: ControlsView): string {
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     '<meta name="robots" content="noindex, nofollow, noarchive">',
     '<title>Promotional controls — messaging admin</title>',
-    `<style>${tokensCss()}${GOOGLE_REAUTH_BANNER_CSS}${CONTROLS_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_BANNER_CSS}${CONTROLS_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',

@@ -111,6 +111,10 @@ const bannerFor = (overrides: Partial<ConnectionSnapshot>): ReauthBannerView | n
 
 const chrome = (banner: ReauthBannerView | null, returnTo: string): AdminChrome => ({
   googleReauth: banner,
+  // Null: this file's subject is the Google banner, and a send-backlog banner above it would put a
+  // second `<section>` in every document these cases parse. H-HARD-05's own banner is asserted in
+  // `messages-inbox.itest.ts` and `messages-delayed-banner.test.ts`.
+  sendBacklog: null,
   returnTo,
 })
 

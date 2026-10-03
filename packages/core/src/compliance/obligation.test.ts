@@ -72,7 +72,14 @@ describe('the vocabularies', () => {
   })
 
   it('knows the five classes and calls a consequence blocking exactly when there is one', () => {
-    expect([...OBLIGATION_CLASSES]).toEqual(['licence', 'credential', 'hygiene', 'tax', 'labour'])
+    expect([...OBLIGATION_CLASSES]).toEqual([
+      'licence',
+      'credential',
+      'hygiene',
+      'tax',
+      'labour',
+      'privacy',
+    ])
     expect(isBlockingObligation({ blockingEffect: 'publishing_blocked' })).toBe(true)
     expect(isBlockingObligation({ blockingEffect: 'therapist_unbookable' })).toBe(true)
     // The control. Without it, a function that returned `true` unconditionally would pass the two above.

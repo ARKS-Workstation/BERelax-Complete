@@ -1,5 +1,10 @@
 import { escapeHtml, type ReauthBannerView, safeText } from '@berelax/core'
 import { RECONNECT_SCREEN_PATH } from '@berelax/shared'
+import {
+  MESSAGES_DELAYED_BANNER_CSS,
+  renderMessagesDelayedBanner,
+  type SendBacklogView,
+} from './messages-delayed-banner.ts'
 
 /**
  * The Google re-auth banner, on every admin document.
@@ -90,6 +95,21 @@ export const GOOGLE_REAUTH_BANNER_CSS = `
   .google-reauth[data-dismissible='false'] h2 { font-weight: 600; }
 `
 
+/**
+ * Every admin document's chrome CSS, in one constant.
+ *
+ * The 29 render modules each used to name `GOOGLE_REAUTH_BANNER_CSS` directly, which meant the second
+ * banner this chrome ever grew was a 29-file edit — and the failure mode of a 29-file edit is the one file
+ * that was missed, rendering a banner with no styles and no error anywhere. `renderAdminBanner` already
+ * composes the MARKUP for exactly that reason; this is the same argument for the styles.
+ *
+ * `GOOGLE_REAUTH_BANNER_CSS` stays as the Google banner's own rules, because
+ * `google-reauth-banner.test.ts` holds that constant to a list of properties that could hide the banner —
+ * `display: none`, `visibility`, a zero `opacity`, a collapsing `max-height` — and that claim is about
+ * those rules rather than about everything an admin page emits.
+ */
+export const ADMIN_BANNER_CSS = `${GOOGLE_REAUTH_BANNER_CSS}${MESSAGES_DELAYED_BANNER_CSS}`
+
 /** The attribute a test queries for, and the rule name the gate fixtures are caught by. */
 export const GOOGLE_REAUTH_BANNER_ATTRIBUTE = 'data-google-reauth'
 
@@ -120,12 +140,29 @@ export function reconnectHrefFor(view: ReauthBannerView, returnTo: string): stri
  */
 export interface AdminChrome {
   readonly googleReauth: ReauthBannerView | null
+  /**
+   * H-HARD-05's send-backlog banner, or null. REQUIRED and not optional, for the reason this interface
+   * exists at all: an optional field would make the banner quietly absent from nine documents and present
+   * in the one somebody tested. `adminChromeFor` is the single place that builds this, so adding it cost
+   * one line there rather than ten.
+   */
+  readonly sendBacklog: SendBacklogView | null
   readonly returnTo: string
 }
 
-/** What an admin document emits. One call, so a document either has the banner or visibly does not. */
+/**
+ * What an admin document emits. One call, so a document either has the banners or visibly does not.
+ *
+ * The send-backlog banner comes FIRST, above the Google one, and the order is a judgement that is worth
+ * stating: a delayed message is about something a member of staff is doing right now at a terminal — do
+ * not promise a client this has been sent — and an expired Google grant is about replies that are not
+ * being posted. The urgent-to-the-reader one is the one at the top.
+ */
 export function renderAdminBanner(chrome: AdminChrome): string {
-  return renderGoogleReauthBanner(chrome.googleReauth, chrome.returnTo)
+  return (
+    renderMessagesDelayedBanner(chrome.sendBacklog) +
+    renderGoogleReauthBanner(chrome.googleReauth, chrome.returnTo)
+  )
 }
 
 /**

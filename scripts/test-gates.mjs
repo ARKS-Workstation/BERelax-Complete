@@ -54642,6 +54642,1026 @@ export function chargebackNetEffectFils(`,
   }
 }
 
+// 175a-175z. (H-HARD-05) The alert registry: every field shown to be a claim something outside the
+//            table can be held to, and the two things the type forbids shown to be refused by the gate
+//            as well.
+//
+//            The unit's whole argument is that an alert registry which nothing compares to the alerting
+//            path is the defect `pnpm jobs` exists to remove, one floor up: a cron nobody watches and an
+//            alert nobody watches are the same shape, and the second is invisible for exactly as long as
+//            nothing holds the table to the tree. So `ALERT_REGISTRY` is read BY the alerting path — the
+//            observer map is a `Record<AlertId, …>` and the worker's pass enumerates the table — and
+//            `pnpm alerts` proves the rest. These cases are what make `pnpm alerts` a gate rather than a
+//            script that has never been seen to fail (ADR 0003).
+//
+//            Two of them are about a TYPE and are here anyway. `AlertSlo.target` is `null` rather than
+//            `number | null`, so an invented service-level objective does not compile — and a type is
+//            enforcement for a tree that typechecks and says nothing about one where somebody widened
+//            it, which is precisely how `pnpm boundaries` once reported success over zero modules. Same
+//            for the observer map. The gate is the backstop, and 175g and 175i are what prove the
+//            backstop is reachable.
+{
+  const ALERTS = 'packages/shared/src/alerts/registry.ts'
+  const OBSERVERS = 'packages/db/src/alerts.ts'
+  const SETTINGS_REGISTRY = 'packages/config/src/settings/registry.ts'
+  const BANNER = 'apps/web/src/components/admin/google-reauth-banner.ts'
+  const EVALUATOR = 'packages/core/src/alerts/evaluate.ts'
+  const alerts = () => runExpectingFailure('pnpm', ['alerts'])
+
+  // The control. Every case below asserts that a MUTATED tree is rejected, and that claim is worth
+  // nothing unless the unmutated tree is accepted — a gate that fails on everything is not a gate.
+  {
+    const clean = run('pnpm', ['alerts'])
+    check(
+      'alert registry: the committed tree passes, which is the control for every case below',
+      !clean.failed && `${clean.output}`.includes('each with a severity'),
+      `pnpm alerts does not pass on the committed tree, so every rejection below is uninformative:\n${clean.output}`,
+    )
+  }
+
+  // 175a. A severity outside the closed set. Three values and deliberately no `info`: a severity meaning
+  //       "do nothing" is what lets the other two fill up with things nobody reads.
+  checkRejectedBy(
+    'alert registry: 175a an unknown severity is refused',
+    withEditedFile(
+      ALERTS,
+      (text) =>
+        replaceOnce(
+          text,
+          "    severity: 'same_day',\n    threshold: {\n      kind: 'setting',",
+          "    severity: 'info',\n    threshold: {\n      kind: 'setting',",
+        ),
+      alerts,
+    ),
+    'unknown-alert-severity',
+  )
+
+  // 175b. An audience naming a role the F07 matrix does not have. This is the failure that looks most
+  //       like working code: the entry reads correctly, the alert is declared, and it is addressed to
+  //       nobody. The role set is `ROLES` in `packages/core`, so a renamed role fails here too.
+  checkRejectedBy(
+    'alert registry: 175b an audience naming a role the F07 matrix does not have is refused',
+    withEditedFile(
+      ALERTS,
+      (text) =>
+        replaceOnce(
+          text,
+          "    route: { audience: ['owner', 'manager', 'receptionist'], surface: 'admin_banner' },",
+          "    route: { audience: ['owner', 'front_desk'], surface: 'admin_banner' },",
+        ),
+      alerts,
+    ),
+    'unknown-alert-audience-role',
+  )
+
+  // 175c. The acceptance line, verbatim: "an entry naming an unknown runbook id fails a gate". The id is
+  //       `<file stem>#<heading slug>` and the gate resolves it against the headings actually in
+  //       `docs/runbooks/`, so a renamed heading fails as loudly as an invented one — which is the point.
+  //       An alert with no procedure is a notification somebody invents a response to at 02:00.
+  checkRejectedBy(
+    'alert registry: 175c a runbook id that resolves to no heading is refused',
+    withEditedFile(
+      ALERTS,
+      (text) =>
+        replaceOnce(
+          text,
+          "    runbook: 'alerting#messages-are-delayed',",
+          "    runbook: 'alerting#the-send-queue-is-backed-up',",
+        ),
+      alerts,
+    ),
+    'alert-runbook-missing',
+  )
+
+  // 175d. A structural threshold POINTS at the file that owns its figure rather than repeating it, and a
+  //       pointer nothing follows is a repetition with extra steps. Breaking the path is the cheaper of
+  //       the two directions to write and the same rule catches the other: a migration that changed 0085
+  //       so it no longer contains the figure fails this too, which is the drift this design exists to
+  //       make loud.
+  checkRejectedBy(
+    'alert registry: 175d a structural threshold whose stated authority does not exist is refused',
+    withEditedFile(
+      ALERTS,
+      (text) =>
+        replaceOnce(
+          text,
+          "      statedIn: 'packages/db/migrations/0085_data_subject_rights.sql',",
+          "      statedIn: 'packages/db/migrations/0085_rights_that_moved.sql',",
+        ),
+      alerts,
+    ),
+    'structural-threshold-not-stated-there',
+  )
+
+  /*
+    175e. A threshold that is a judgement must be an F09 setting, or there is nothing an owner can change
+    and the correction is a deploy.
+
+    The fixture replaces the imported constant with a LITERAL, and that is the only mutation that can
+    prove this rule. Renaming `OUTBOX_LAG_THRESHOLD_SETTING_KEY` was tried first and passed: the F09
+    registry imports the same constant, so both sides move together and the key still resolves — which is
+    exactly the property the shared constant exists to give (`compliance-notices.ts`'s argument, that a
+    mismatch should not be expressible). So the rule's real subject is a call site that spelled the key
+    itself, and the fixture has to be one.
+  */
+  checkRejectedBy(
+    'alert registry: 175e a threshold key that is not an F09 setting is refused',
+    withEditedFile(
+      ALERTS,
+      (text) =>
+        replaceOnce(
+          text,
+          "    threshold: { kind: 'setting', settingKey: OUTBOX_LAG_THRESHOLD_SETTING_KEY, unit: 'seconds' },",
+          "    threshold: { kind: 'setting', settingKey: 'alerts.outbox_lag_sec', unit: 'seconds' },",
+        ),
+      alerts,
+    ),
+    'threshold-setting-undeclared',
+  )
+
+  // 175f. The load-bearing one. An alert whose threshold can be set to a million is an alert that can be
+  //       silenced from a settings screen with nothing recording that anything was silenced — so every
+  //       threshold schema carries a ceiling, and the gate proves it by ASKING THE SCHEMA to parse a
+  //       figure no threshold may legitimately hold rather than by looking for `.max(` in the source.
+  //       That distinction is why this case exists: the text scan was written first, located the
+  //       definition by its key literal, found none because the registry imports the key as a constant,
+  //       and passed for every key including an unbounded one.
+  checkRejectedBy(
+    'alert registry: 175f a threshold schema with no upper bound is refused',
+    withEditedFile(
+      SETTINGS_REGISTRY,
+      (text) =>
+        replaceOnce(
+          text,
+          'schema: z.number().int().min(600).max(21_600),',
+          'schema: z.number().int().min(600),',
+        ),
+      alerts,
+    ),
+    'threshold-setting-unbounded',
+  )
+
+  // 175g. The SLO target, which the TYPE already forbids — `target: null`, not `number | null`. This case
+  //       is about the tree where somebody widened the type, and it is the one the dispatch's rule is
+  //       about: there is no production traffic here and no measured baseline, so a figure would be
+  //       invented, and a dashboard green against an invented target answers "are we inside the
+  //       objective" with a number nobody committed to.
+  checkRejectedBy(
+    'alert registry: 175g an SLO carrying a target at all is refused',
+    withEditedFile(
+      ALERTS,
+      (text) =>
+        replaceOnce(
+          text,
+          '      windowDays: 365,\n      target: null,',
+          '      windowDays: 365,\n      target: 0.99 as unknown as null,',
+        ),
+      alerts,
+    ),
+    'alert-slo-has-a-target',
+  )
+
+  // 175h. An absent figure is only honest if the absence is recorded where absences are recorded. An
+  //       `openQuestionId` nothing in `docs/OPEN-QUESTIONS.md` answers is a missing figure with nowhere
+  //       for the conversation to happen.
+  checkRejectedBy(
+    'alert registry: 175h an open-question id that OPEN-QUESTIONS.md does not list is refused',
+    withEditedFile(
+      ALERTS,
+      (text) =>
+        replaceOnce(
+          text,
+          "export const ALERT_SLO_OPEN_QUESTION_ID = 'Y13-alert-slos'",
+          "export const ALERT_SLO_OPEN_QUESTION_ID = 'Y13-alert-service-levels'",
+        ),
+      alerts,
+    ),
+    'alert-open-question-missing',
+  )
+
+  // 175i. The property the whole unit rests on, from the side that matters: a registered alert with no
+  //       reader. `ALERT_OBSERVERS` is a `Record<AlertId, AlertObserver>` so this does not compile, and
+  //       the gate is what sees it in a tree where the annotation was loosened. An alert nothing measures
+  //       reports the same thing as a quiet day, which is the sentence this block is about.
+  checkRejectedBy(
+    'alert registry: 175i a registered alert with no observer is refused',
+    withEditedFile(
+      OBSERVERS,
+      (text) => replaceOnce(text, '  send_backlog: observeSendBacklog,\n', ''),
+      alerts,
+    ),
+    'alert-without-an-observer',
+  )
+
+  // 175j. And the other direction: a reader for something the table does not declare. It has no severity,
+  //       no threshold, no runbook and no audience, so whatever it measures reaches nobody — which is the
+  //       shape an alerting path drifts into one commit at a time.
+  checkRejectedBy(
+    'alert registry: 175j an observer for an alert the registry does not declare is refused',
+    withEditedFile(
+      OBSERVERS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  send_backlog: observeSendBacklog,\n',
+          '  send_backlog: observeSendBacklog,\n  settlement_unreconciled: observeSendBacklog,\n',
+        ),
+      alerts,
+    ),
+    'observer-without-an-alert',
+  )
+
+  /*
+    175k and 175l. The insider-threat exception, in both directions.
+
+    `UNDEFENDED_BY_DESIGN` records what this build does NOT defend against — the owner can read
+    everything, `psql` writes no audit row, refused sign-ins are unmetered, and no pass can report its own
+    absence — and `doesNotCover` attaches each one to the alert a reader would otherwise believe covers
+    it. The equality is held in both directions because an exception no alert names is a page nobody
+    opens, and an id no exception defines is a limitation stated as a word.
+
+    Both cases delete the module-load assertion as well as breaking the data, and that is deliberate
+    rather than lazy: `assertRegistry()` runs at import and throws first, so without the second edit the
+    gate's own rules would be unreachable and these two cases would be proving the import guard twice
+    instead of the gate once. Two guards, both reachable, each with its own fixture.
+  */
+  checkRejectedBy(
+    'alert registry: 175k an undefended case no alert names is refused',
+    withEditedFile(
+      ALERTS,
+      (text) =>
+        replaceOnce(
+          replaceOnce(text, '\nassertRegistry()', '\n// assertRegistry()'),
+          "    doesNotCover: ['owner-reads-everything', 'refused-sign-ins-are-unmetered'],",
+          "    doesNotCover: ['owner-reads-everything'],",
+        ),
+      alerts,
+    ),
+    'undefended-case-unreferenced',
+  )
+
+  checkRejectedBy(
+    'alert registry: 175l an alert naming an exception nothing defines is refused',
+    withEditedFile(
+      ALERTS,
+      (text) =>
+        replaceOnce(
+          replaceOnce(text, '\nassertRegistry()', '\n// assertRegistry()'),
+          "    doesNotCover: ['the-pass-cannot-report-its-own-absence'],\n  },\n  {\n    id: 'send_backlog',",
+          "    doesNotCover: ['the-worker-is-on-fire'],\n  },\n  {\n    id: 'send_backlog',",
+        ),
+      alerts,
+    ),
+    'alert-names-an-undefined-exception',
+  )
+
+  // 175m. The module-load guard itself, which is the one that fires in development rather than in CI. A
+  //       module that loads with a `doesNotCover` naming nothing real has already shipped the limitation
+  //       as a word, so the registry refuses to load rather than waiting for a gate.
+  checkRejectedBy(
+    'alert registry: 175m the registry refuses to LOAD with a doesNotCover naming nothing real',
+    withEditedFile(
+      ALERTS,
+      (text) =>
+        replaceOnce(
+          text,
+          "    doesNotCover: ['owner-reads-everything', 'refused-sign-ins-are-unmetered'],",
+          "    doesNotCover: ['owner-reads-everything', 'somebody-elses-problem'],",
+        ),
+      alerts,
+    ),
+    'which UNDEFENDED_BY_DESIGN does not',
+  )
+
+  /*
+    175n. The vacuity floor on this gate's own reading (ADR 0002).
+
+    `pnpm alerts` derives from three places — the registry, the runbook headings and the F09 settings —
+    and it iterates over them. An empty registry makes every loop run zero times and the gate prints
+    "0 alerts, each with a severity, a threshold, a runbook heading…" and exits zero, which is the green
+    tick over zero modules that ADR 0002 is about, said about alerting. The floor is what refuses that,
+    and this case is what proves the floor is not itself dead.
+  */
+  checkRejectedBy(
+    'alert registry: 175n a registry the gate reads as nearly empty is refused rather than reported clean',
+    withEditedFile(
+      ALERTS,
+      (text) =>
+        replaceOnce(
+          replaceOnce(text, '\nassertRegistry()', '\n// assertRegistry()'),
+          'export const ALERT_IDS: readonly AlertId[] = ALERT_REGISTRY.map((entry) => entry.id)',
+          'export const ALERT_IDS: readonly AlertId[] = ALERT_REGISTRY.map((entry) => entry.id)\n// @ts-expect-error the fixture for 175n: a gate that iterates must refuse an empty table\nALERT_REGISTRY.length = 0',
+        ),
+      alerts,
+    ),
+    'too little to mean anything',
+  )
+
+  /*
+    175o. A corrupt threshold must never read as all-clear.
+
+    There are three answers and not two, and the third is the one nothing would notice: an `app_setting`
+    row holding a word, or holding nothing, is a threshold the pass cannot read — and a comparison against
+    `NaN` answers `false`, which reads as "clear". `resolveAlertThreshold` returns a NAMED verdict for it
+    and the worker publishes a configuration fault rather than silence. This case makes the resolver fall
+    back to a figure instead, which is the plausible wrong design, and requires the unit suite to notice.
+  */
+  checkRejectedBy(
+    'alert registry: 175o a resolver that falls back instead of reporting an unreadable threshold is caught',
+    withEditedFile(
+      EVALUATOR,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (!settings.has(key)) {\n    return { settingKey: key, unreadable: `no value for "${key}" was read` }\n  }',
+          '  if (!settings.has(key)) {\n    return { value: 0 }\n  }',
+        ),
+      () =>
+        runExpectingFailure('pnpm', [
+          'exec',
+          'vitest',
+          'run',
+          '-c',
+          'vitest.config.ts',
+          'packages/core/src/alerts/evaluate.test.ts',
+        ]),
+    ),
+    // The failing case's NAME, not the verdict's tag: vitest prints the test title and the assertion, and
+    // `threshold_unreadable` appears in neither. A rule name that is not in the output is the vacuous
+    // match `checkRejectedBy` exists to refuse, and this one was caught by running the block.
+    'reports an absent setting as unreadable',
+  )
+
+  /*
+    175p. The banner and the alert are one fact, and the chrome is where that can stop being true.
+
+    `renderAdminBanner` is the single call every admin document makes, which is what stops the send-backlog
+    banner being present on the one document somebody tested and quietly absent from the other nine. Drop
+    it from the composition and nothing in the application fails — the documents still render, the alert
+    still fires in the worker, and a receptionist is never told. So the suite has to be the thing that
+    fails.
+  */
+  checkRejectedBy(
+    'alert registry: 175p an admin chrome that stops emitting the delay banner is caught',
+    withEditedFile(
+      BANNER,
+      (text) =>
+        replaceOnce(
+          text,
+          '    renderMessagesDelayedBanner(chrome.sendBacklog) +\n    renderGoogleReauthBanner(chrome.googleReauth, chrome.returnTo)',
+          '    renderGoogleReauthBanner(chrome.googleReauth, chrome.returnTo)',
+        ),
+      () =>
+        runExpectingFailure('pnpm', [
+          'exec',
+          'vitest',
+          'run',
+          '-c',
+          'vitest.config.ts',
+          'apps/web/src/messages-delayed-banner.test.ts',
+        ]),
+    ),
+    'above the Google banner',
+  )
+}
+
+// 176a-176z. (H-HARD-07) The incident register and the breach clock: every refusal shown to be able to
+//            stop firing, the clock shown to come from the DISCOVERY, and the field list shown to be
+//            held to the schema in both directions.
+//
+//            The unit's claim is that a statutory clock starts at an event, so the event is a row with an
+//            instant and the row cannot be edited afterwards. Four of those words are enforced by the
+//            database — ZY521 to ZY525 — and a trigger that stopped firing would leave a register that
+//            reads exactly as it does now, with every test still green, because every one of those tests
+//            asserts a REFUSAL. So each case below removes one refusal and requires the suite to notice.
+//
+//            The expensive ones go last. 176a to 176e each run `pnpm alerts`-sized work; 176f onwards run
+//            the integration suite, which needs a database.
+{
+  const INCIDENT_SQL = 'packages/db/migrations/0142_incident.sql'
+  const INCIDENT_FIELDS_TS = 'packages/shared/src/incident-register.ts'
+  const CLOCK_TS = 'packages/core/src/compliance/breach-clock.ts'
+  const INCIDENT_ITEST = 'packages/fixtures/src/incident.itest.ts'
+  const CLOCK_TEST = 'packages/core/src/compliance/breach-clock.test.ts'
+  const incidentUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const incidentIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // The control for the whole block. Every case asserts that a BROKEN tree is caught, and that says
+  // nothing unless the committed tree passes.
+  {
+    const clean = run('pnpm', incidentUnit(CLOCK_TEST))
+    check(
+      'incident: the committed clock suite passes, which is the control for 176a to 176e',
+      !clean.failed,
+      `the clock suite does not pass on the committed tree:\n${clean.output}`,
+    )
+  }
+
+  /*
+    176a. The clock computed from the FILING instead of the discovery.
+
+    This is the defect the whole unit is shaped against, and it is the one that would be invisible: the
+    register would be complete, the calendar entry would exist, and the deadline on it would simply be
+    later than the law allows — by however long the paperwork took. The mutation is the plausible wrong
+    implementation, not a syntax error: `breachNotificationDeadline` ignores its argument and uses the
+    moment it was called.
+  */
+  checkRejectedBy(
+    'incident: 176a a clock that starts when the paperwork is done is caught',
+    withEditedFile(
+      CLOCK_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const discovered = Date.parse(input.discoveredAtIso)',
+          '  const discovered = Date.now()',
+        ),
+      () => runExpectingFailure('pnpm', incidentUnit(CLOCK_TEST)),
+    ),
+    'breachNotificationDeadline',
+  )
+
+  /*
+    176b. The deadline dated on the TRADING date rather than the civil date.
+
+    Everything else dated in this build goes through `resolveTradingDate`, which is why this is the
+    mistake somebody would make: trading runs 11:00-02:00, so the trading date puts 01:30 on the previous
+    day, and a statutory period dated that way hands the business an extra day roughly one night in
+    three. The mutation is a zone offset of zero, which is what "use UTC and stop thinking about it"
+    looks like in this module.
+  */
+  checkRejectedBy(
+    'incident: 176b a deadline dated outside the business civil zone is caught',
+    withEditedFile(
+      CLOCK_TS,
+      (text) => replaceOnce(text, '  utcOffsetMinutes: 240,', '  utcOffsetMinutes: 0,'),
+      () => runExpectingFailure('pnpm', incidentUnit(CLOCK_TEST)),
+    ),
+    'in the business civil zone',
+  )
+
+  /*
+    176c. A comparison done on DATES rather than on instants.
+
+    A notification at 23:00 on the due date is inside a 72-hour window that expired at 09:00 that morning
+    only if the comparison is done on dates, and that is the answer a regulator would not accept. The
+    mutation truncates both sides to a day, which is the version that passes a casual reading.
+  */
+  checkRejectedBy(
+    'incident: 176c a timeliness answer computed on dates rather than instants is caught',
+    withEditedFile(
+      CLOCK_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  return notified <= deadline ? ',
+          '  return args.notifiedAtIso.slice(0, 10) <= args.deadlineAtIso.slice(0, 10) ? ',
+        ),
+      () => runExpectingFailure('pnpm', incidentUnit(CLOCK_TEST)),
+    ),
+    'INSTANTS',
+  )
+
+  /*
+    176d. A period that defaults instead of refusing.
+
+    A default here would be an invented statutory period in the one place nobody looks — and the
+    plausible spelling is exactly this: `?? 72`. The reader in `packages/db` throws for the same reason
+    and is covered by 176k.
+  */
+  checkRejectedBy(
+    'incident: 176d a clock that defaults an unreadable period rather than refusing is caught',
+    withEditedFile(
+      CLOCK_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (!Number.isInteger(input.periodHours) || input.periodHours < 1) {',
+          '  if (false) {',
+        ),
+      () => runExpectingFailure('pnpm', incidentUnit(CLOCK_TEST)),
+    ),
+    'whole number of hours',
+  )
+
+  /*
+    176e. A declared field that no column answers.
+
+    The acceptance line is that the schema's columns match the declared insurer and regulator field list
+    EXACTLY. This breaks the list rather than the schema, which is the direction that would otherwise be
+    satisfied by a test checking only that every column is declared — a field an insurer asks for with no
+    column is a question somebody answers in an email at the worst possible moment.
+  */
+  checkRejectedBy(
+    'incident: 176e a declared field with no column is caught by the completeness test',
+    withEditedFile(
+      INCIDENT_FIELDS_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "    column: 'cross_border_transfer',",
+          "    column: 'cross_border_transfer_basis',",
+        ),
+      () => runExpectingFailure('pnpm', incidentIntegration(INCIDENT_ITEST)),
+    ),
+    'declared vs actual',
+  )
+
+  /*
+    176f. A column no reader asks for.
+
+    The other direction, and it is broken from the LIST side on purpose: removing a column would need a
+    migration, and what this rule is really about is a schema growing a field the declared list does not
+    account for. Dropping the declaration is the same state the gate must refuse.
+  */
+  checkRejectedBy(
+    'incident: 176f a column the field list does not declare is caught',
+    withEditedFile(
+      INCIDENT_FIELDS_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  {\n    column: 'claim_anticipated',",
+          "  {\n    column: 'claim_anticipated_removed_for_the_fixture',",
+        ),
+      () => runExpectingFailure('pnpm', incidentIntegration(INCIDENT_ITEST)),
+    ),
+    'declared vs actual',
+  )
+
+  /*
+    176g. The structural-column exclusion growing to cover an awkward field.
+
+    This is the hole that makes a both-directions test one-directional, and it is cheap to open: declare
+    the column structural and both comparisons pass. So the exclusion list is itself asserted to be
+    exactly the keys and creation instants, and this case is what proves that assertion is reachable.
+  */
+  checkRejectedBy(
+    'incident: 176g a structural-column exclusion that grew to hide a field is caught',
+    withEditedFile(
+      INCIDENT_FIELDS_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  'breach_fields_present',\n]",
+          "  'breach_fields_present',\n  'estimated_loss_fils',\n]",
+        ),
+      () => runExpectingFailure('pnpm', incidentIntegration(INCIDENT_ITEST)),
+    ),
+    'declared vs actual',
+  )
+
+  /*
+    176h to 176j. The three append-only refusals, each shown to be able to stop firing.
+
+    One function and two triggers per table, which is the shape 0111 argued for: the half-written pair —
+    one trigger copied for the other event with the word not changed — is where this defect always hides,
+    and the table then documents a guarantee it half keeps. Each case removes the UPDATE trigger, which
+    is the half a reader is least likely to miss, and requires the suite to name the code.
+
+    `withEditedFile` edits the MIGRATION, which is the authority; the probe re-reads it only if the
+    database is rebuilt, so these three cases break the SQL text that `pnpm db:conventions` reads and
+    that the integration suite's refusal assertions depend on. The conventions gate is the faster of the
+    two and is what the first two use; 176j drives the suite, because a missing DELETE trigger on a table
+    whose comment claims both is exactly what the conventions rule is about.
+  */
+  checkRejectedBy(
+    'incident: 176h an incident table missing one of its two append-only triggers is caught',
+    withEditedFile(
+      INCIDENT_SQL,
+      (text) =>
+        replaceOnce(
+          text,
+          'create trigger incident_no_update before update on incident\n  for each row execute function refuse_incident_change();\n',
+          '',
+        ),
+      () => runExpectingFailure('pnpm', ['db:conventions']),
+    ),
+    'append-only-table-must-refuse-update-and-delete',
+  )
+
+  checkRejectedBy(
+    'incident: 176i an addendum table missing one of its two append-only triggers is caught',
+    withEditedFile(
+      INCIDENT_SQL,
+      (text) =>
+        replaceOnce(
+          text,
+          'create trigger incident_addendum_no_delete before delete on incident_addendum\n  for each row execute function refuse_incident_addendum_change();\n',
+          '',
+        ),
+      () => runExpectingFailure('pnpm', ['db:conventions']),
+    ),
+    'append-only-table-must-refuse-update-and-delete',
+  )
+
+  checkRejectedBy(
+    'incident: 176j a notification table missing one of its two append-only triggers is caught',
+    withEditedFile(
+      INCIDENT_SQL,
+      (text) =>
+        replaceOnce(
+          text,
+          'create trigger incident_notification_no_update before update on incident_notification\n  for each row execute function refuse_incident_notification_change();\n',
+          '',
+        ),
+      () => runExpectingFailure('pnpm', ['db:conventions']),
+    ),
+    'append-only-table-must-refuse-update-and-delete',
+  )
+
+  /*
+    176k. The period reader falling back instead of refusing.
+
+    `readBreachNotificationHours` throws on a stored value it cannot turn into whole hours, and the
+    tempting alternative is `?? 72` — which would restore the build's guess over a figure somebody had
+    deliberately changed, silently, on a statutory deadline. The integration suite's provisional-setting
+    cases are what notice, because a fallback makes the declared bound unenforceable.
+  */
+  checkRejectedBy(
+    'incident: 176k a breach-period reader that falls back to the build guess is caught',
+    withEditedFile(
+      'packages/db/src/settings/pdpl.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (typeof raw !== ',
+          '  if (typeof raw === "number") return raw\n  if (typeof raw !== ',
+        ),
+      () => runExpectingFailure('pnpm', incidentUnit('packages/db/src/settings/pdpl.test.ts')),
+    ),
+    'BreachPeriodUnreadable',
+  )
+
+  /*
+    176l. The erasure conflict, which is acceptance line 4 and is C-CRM-10's mechanism.
+
+    This unit does not restate it — that would be a second statement of the same fact — so what it
+    depends on is that the policy engine's answer for a financial record is a RETENTION with a reason and
+    never a delete. The mutation turns one `retain_statutory` rule into a delete, which is the change a
+    future unit would make to "finish" an erasure, and requires the rights suite to refuse it by name.
+  */
+  checkRejectedBy(
+    "incident: 176l a statutory retention that stops carrying the conflict it records is caught by THIS unit's suite",
+    withEditedFile(
+      'packages/core/src/privacy/rights-policy.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          // The key as well as the two fields, because `replaceOnce` found the pair four times and
+          // refused — which is the guard doing its job: `String.replace` would have taken the first,
+          // and a case that edits the wrong construct reports PASS about a file that still contains
+          // what it meant to remove.
+          "    key: 'public.invoice.notes',\n    dataClass: 'financial',\n    action: 'retain_statutory',\n    obligationColumn: 'financial_retention_years',",
+          "    key: 'public.invoice.notes',\n    dataClass: 'financial',\n    action: 'retain_statutory',\n",
+        ),
+      () => runExpectingFailure('pnpm', incidentIntegration(INCIDENT_ITEST)),
+    ),
+    'erasure rule registry is not well formed',
+  )
+}
+
+// 177a-177z. (H-HARD-09) The documentation set, machine-checked: the processor register held against
+//            the services actually wired up, the privacy policy shown to be GENERATED, the index shown
+//            to be generated, and every link in docs/ shown to be able to break.
+//
+//            The unit's whole subject is artefacts that survive the single builder, and the failure mode
+//            of every one of them is identical and silent: it is right on the day it is written. A
+//            processor register nothing compares to the provider keys names eight services while the
+//            build talks to nine. A privacy policy written beside the register says who had the data
+//            last year. An index maintained by hand loses the record somebody added in a hurry. A link
+//            goes dead and the sentence around it still reads perfectly.
+//
+//            So the deliverables here are four checks, and these cases are what make them checks rather
+//            than scripts that have never been seen to fail (ADR 0003). Each one breaks exactly what a
+//            future commit would break by accident.
+{
+  const REGISTER = 'packages/shared/src/processor-register.ts'
+  const POLICY = 'packages/core/src/privacy/processor-policy.ts'
+  const ENV_SCHEMA = 'packages/config/src/env.ts'
+  const INVENTORY = 'build/secret-inventory.json'
+  const ADR_README = 'docs/adr/README.md'
+  const processors = () => runExpectingFailure('pnpm', ['processors'])
+  const docsSet = () => runExpectingFailure('pnpm', ['docs-set'])
+
+  // The control for the whole block.
+  {
+    const clean = run('pnpm', ['processors'])
+    check(
+      'docs set: the committed tree passes pnpm processors, which is the control for 177a to 177g',
+      !clean.failed && `${clean.output}`.includes('provider keys in'),
+      `pnpm processors does not pass on the committed tree:\n${clean.output}`,
+    )
+  }
+
+  /*
+    177a. The acceptance line, verbatim: "adding a provider key without a register row fails the gate".
+
+    The fixture adds a provider-mode key to the config schema and nothing else, which is exactly the
+    commit that wires up a ninth external service. Note what makes this detectable: the gate derives the
+    provider set from the declaration's TYPE (`providerMode`) rather than from the key's NAME, so a
+    provider called anything at all is caught. A name-suffix scan would have missed `MEDIA_STORAGE`,
+    which is in the real set.
+  */
+  checkRejectedBy(
+    'docs set: 177a a provider key with no processor row is refused',
+    withEditedFile(
+      ENV_SCHEMA,
+      (text) =>
+        replaceOnce(
+          text,
+          "    LLM_PROVIDER: providerMode.default('fake'),",
+          "    LLM_PROVIDER: providerMode.default('fake'),\n    ANALYTICS_PROVIDER: providerMode.default('fake'),",
+        ),
+      processors,
+    ),
+    'provider-key-without-a-processor-row',
+  )
+
+  /*
+    177b. The other direction: a row naming a config key the schema does not declare.
+
+    This is the one that lets the register SHRINK, and it is the direction an allowlist always lacks: a
+    row describing a service nothing in the build can reach reads exactly like a live one, so it is
+    permission to believe the service is still in use — and the privacy policy keeps telling people
+    about it.
+  */
+  checkRejectedBy(
+    'docs set: 177b a processor row naming a config key the schema does not declare is refused',
+    withEditedFile(
+      REGISTER,
+      (text) =>
+        replaceOnce(text, "configKeys: ['MEDIA_STORAGE'],", "configKeys: ['MEDIA_BUCKET'],"),
+      processors,
+    ),
+    'processor-row-without-a-config-key',
+  )
+
+  /*
+    177c. A row that stops stating one of the four things acceptance line 2 names.
+
+    Retention is the one broken here because it is the only one of the four that is prose, so it is the
+    one a hurried commit can empty without a type error. "Unknown" is the plausible wrong value: it
+    reads like an answer and says nothing about whether the period is one this build controls.
+  */
+  checkRejectedBy(
+    'docs set: 177c a processor row with no real retention sentence is refused',
+    withEditedFile(
+      REGISTER,
+      (text) =>
+        replaceOnce(
+          text,
+          "    retention:\n      'Held until this build deletes the object.",
+          "    retention: 'Unknown.', // 177c\n    unusedRetention:\n      'Held until this build deletes the object.",
+        ),
+      processors,
+    ),
+    'processor-row-incomplete',
+  )
+
+  /*
+    177d. A claimed data processing agreement.
+
+    Brief rule 15 applied to a legal instrument: a register saying an agreement is on file, when none has
+    ever been seen, is indistinguishable from one that has been signed — and it is the field somebody
+    would flip to make a compliance page look finished. The register refuses it at module load and the
+    gate refuses it again, so this case asserts on the gate's rule name and 177e on the loader.
+  */
+  checkRejectedBy(
+    'docs set: 177d a register claiming an unsigned data processing agreement is refused',
+    withEditedFile(
+      REGISTER,
+      (text) =>
+        replaceOnce(
+          text,
+          "    agreementOnFile: false,\n    why:\n      'The only channel that reaches a client",
+          "    agreementOnFile: true,\n    why:\n      'The only channel that reaches a client",
+        ),
+      processors,
+    ),
+    'brief rule',
+  )
+
+  /*
+    177e. The privacy policy ceasing to be generated.
+
+    The failure this is about is the one that looks most like an improvement: somebody writes a vendor's
+    name into the policy generator, because the generated sentence read awkwardly. The policy is then a
+    second statement of who has the data, and the copy that drifts is the one a data subject reads. The
+    rule is that every processor name in the policy comes from the register at run time.
+  */
+  checkRejectedBy(
+    'docs set: 177e a vendor name written into the policy generator rather than read from the register is refused',
+    withEditedFile(
+      POLICY,
+      (text) =>
+        replaceOnce(
+          text,
+          "  transactional_messaging: 'to send you booking confirmations, reminders and receipts',",
+          "  transactional_messaging: 'to send you booking confirmations through SMSala',",
+        ),
+      processors,
+    ),
+    'privacy-policy-not-generated',
+  )
+
+  /*
+    177f. The secret inventory losing a key the config schema requires.
+
+    `pnpm rotation` already holds the inventory against secret-shaped names the CODE READS, and it cannot
+    see a key reached only through `loadConfig()` — there is no `process.env.FOO` for it to find. So a
+    credential added to the schema and never classified was invisible to every gate in the build. This
+    is that half, and the fixture is the commit that adds one.
+  */
+  checkRejectedBy(
+    'docs set: 177f a credential in the config schema that the inventory does not classify is refused',
+    withEditedFile(
+      ENV_SCHEMA,
+      (text) =>
+        replaceOnce(
+          text,
+          '    SENTRY_DSN: z.string().optional(),',
+          '    SENTRY_DSN: z.string().optional(),\n    ANALYTICS_INGEST_TOKEN: z.string().optional(),',
+        ),
+      processors,
+    ),
+    'secret-inventory-missing-a-schema-key',
+  )
+
+  /*
+    177g. An inventory entry with no owner.
+
+    Acceptance line 4 names the owner and the rotation interval, and the owner is the half that goes
+    first: a rotation procedure with no subject is a procedure that happens when somebody notices. It is
+    also the field a hurried entry omits, because the procedure feels like the substance.
+  */
+  checkRejectedBy(
+    'docs set: 177g an inventory entry with no owner is refused',
+    withEditedFile(
+      INVENTORY,
+      (text) => {
+        /*
+          Parsed and re-serialised rather than edited as text, and the first version was the text edit.
+          It deleted the `"owner"` line with a regex, left the trailing comma on the line before, and
+          the gate died in `JSON.parse` with a SyntaxError — which `checkRejectedBy` reported as "did
+          not report secret-inventory-entry-incomplete", because a crash is not a rule firing. A fixture
+          has to produce the state the rule is about, which here is VALID json with no owner.
+        */
+        const parsed = JSON.parse(text)
+        delete parsed.entries[0].owner
+        return `${JSON.stringify(parsed, null, 2)}\n`
+      },
+      processors,
+    ),
+    'secret-inventory-entry-incomplete',
+  )
+
+  // The control for the docs half.
+  {
+    const clean = run('pnpm', ['docs-set'])
+    check(
+      'docs set: the committed tree passes pnpm docs-set, which is the control for 177h to 177l',
+      !clean.failed && `${clean.output}`.includes('relative link'),
+      `pnpm docs-set does not pass on the committed tree:\n${clean.output}`,
+    )
+  }
+
+  /*
+    177h. A stale generated index.
+
+    The whole value of generating the index is that it cannot be wrong without the record being wrong,
+    and that holds only while something fails when the committed copy is behind. Editing a title in the
+    generated file is the shape of a well-meant hand edit.
+  */
+  checkRejectedBy(
+    'docs set: 177h a hand-edited generated ADR index is refused as stale',
+    withEditedFile(
+      'docs/adr/INDEX.md',
+      (text) => replaceOnce(text, '| [0002](', '| [0002x]('),
+      docsSet,
+    ),
+    'adr-index-stale',
+  )
+
+  /*
+    177i. A record the commentary does not link.
+
+    The direction that matters for a reader: a decision whose record exists and which nothing points at
+    is a decision the next person re-makes, having looked for it and not found it. The fixture removes
+    one row's link, which is what a merge conflict resolved the wrong way does.
+  */
+  checkRejectedBy(
+    'docs set: 177i an ADR the commentary does not link is refused',
+    withEditedFile(
+      ADR_README,
+      (text) =>
+        replaceOnce(
+          text,
+          '| [0003](0003-every-gate-needs-a-known-bad-fixture.md)',
+          '| 0003 (link removed by the fixture)',
+        ),
+      docsSet,
+    ),
+    'adr-not-in-the-commentary',
+  )
+
+  /*
+    177j. The commentary naming a record that is not there.
+
+    The shrinking direction, and the one an allowlist always lacks. A row describing a decision whose
+    record was renamed reads exactly like a live one — which is the defect this block's own subject
+    found in the committed tree: ADR 0072 linked `0014-customers-have-no-accounts-...md`, and the real
+    file is `0014-phone-first-customer-identity.md`. Nothing in the build noticed, because nothing
+    followed a link.
+  */
+  checkRejectedBy(
+    'docs set: 177j a commentary row naming a record that is not on disk is refused',
+    withEditedFile(
+      ADR_README,
+      (text) =>
+        replaceOnce(
+          text,
+          '| [0003](0003-every-gate-needs-a-known-bad-fixture.md)',
+          '| [0003](0003-every-gate-needs-a-known-bad-fixture-renamed.md)',
+        ),
+      docsSet,
+    ),
+    'adr-commentary-names-a-missing-record',
+  )
+
+  /*
+    177k. A dead relative link in the set.
+
+    The pre-existing defect this check found, reproduced deliberately. It is the failure mode of a
+    documentation set specifically: the links are the part that goes stale without anybody touching the
+    sentence around them, and the paragraph still reads correctly.
+  */
+  checkRejectedBy(
+    'docs set: 177k a relative link pointing at a file that does not exist is refused',
+    withEditedFile(
+      'docs/04-uae-compliance.md',
+      (text) =>
+        replaceOnce(
+          text,
+          '# UAE Compliance',
+          '# UAE Compliance\n\nSee [the procedure](runbooks/this-runbook-does-not-exist.md).',
+        ),
+      docsSet,
+    ),
+    'docs-link-target-missing',
+  )
+
+  /*
+    177l. An anchor that no heading produces.
+
+    Separate from 177k because it is the commoner failure and the harder one to see: the file is there,
+    the link resolves, and the reader lands at the top of a long runbook with no idea which part was
+    meant. A reworded heading does it, and nothing about the sentence changes.
+  */
+  checkRejectedBy(
+    'docs set: 177l a #fragment matching no heading in the target is refused',
+    withEditedFile(
+      'docs/04-uae-compliance.md',
+      (text) =>
+        replaceOnce(
+          text,
+          '# UAE Compliance',
+          '# UAE Compliance\n\nSee [the step](runbooks/alerting.md#a-heading-nobody-wrote).',
+        ),
+      docsSet,
+    ),
+    'docs-anchor-missing',
+  )
+
+  /*
+    177m. A generated page nothing links to.
+
+    A page kept perfectly current that nobody can reach from the set is not in the set, and the
+    generator keeping it fresh makes that worse rather than better: it looks maintained. The fixture
+    removes the one link to the inventory page.
+  */
+  checkRejectedBy(
+    'docs set: 177m a generated page nothing in docs/ links to is refused',
+    withEditedFile(
+      ADR_README,
+      // The INDEX.md link and not the secret-inventory one, which was the first version and passed
+      // nothing: the inventory page is reached from TWO places (here and
+      // `docs/05-external-dependencies.md`), so removing one leaves it reachable — correctly. Reading
+      // "nothing was rejected" and finding the rule was right is the better half of writing these.
+      (text) => replaceOnce(text, '[INDEX.md](INDEX.md)', 'INDEX.md'),
+      docsSet,
+    ),
+    'docs-generated-page-not-linked',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -55496,6 +56516,9 @@ export function chargebackNetEffectFils(`,
     // makes dropping it from CI a failing build rather than the silent loss of the one check that says
     // nothing but an opaque category code leaves the building.
     'pnpm event-attributes',
+    'pnpm alerts',
+    'pnpm processors',
+    'pnpm docs-set',
     'pnpm egress',
     // And the SAQ-A scan beside it, for the same reason in the other direction: it is the one check that
     // says no card number can reach anything this build renders, logs or stores, and its whole value is

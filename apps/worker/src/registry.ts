@@ -23,6 +23,7 @@ import type { Job, PgBoss } from 'pg-boss'
 import { FLOW_TICK_JOB } from './automation/interpreter.ts'
 import type { JobContext, JobDefinition, JobHandler } from './job.ts'
 import { runWatchdog } from './jobs/agent-watchdog.ts'
+import { runAlertEvaluation } from './jobs/alert-evaluator.ts'
 import {
   ANALYTICS_PARTITIONS_JOB_DEFINITION,
   ANALYTICS_RETENTION_JOB_DEFINITION,
@@ -192,7 +193,9 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
     name: 'agent.watchdog',
     purpose:
       'Alerts when any enabled agent has had no success within twice its declared interval, whatever ' +
-      'the cause. The absence of a success is the signal; docs/10 §6.',
+      "the cause. The absence of a success is the signal; docs/10 §6. It also runs H-HARD-05's alert " +
+      "ladder over ALERT_REGISTRY in the same pass, so the alerting path inherits this agent's declared " +
+      'interval and heartbeat rather than being a cron nobody watches.',
     // Every fifteen minutes. The alert itself is deduplicated by incident, so a frequent pass costs a
     // query rather than ninety-six notifications — and the shortest declared interval in the registry is
     // five minutes, so a slower watchdog would be the thing delaying its own alert.
@@ -523,12 +526,25 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
 ]
 
 /**
- * The watchdog's own handler.
+ * The watchdog's own handler, and the alert ladder's pass.
  *
  * It watches itself, which is not circular in the way it first looks: if this job stops running, its own
  * heartbeat goes stale and no pass raises the alert — so something outside this process has to notice,
- * which is the alerting ladder in H-HARD-05. What this unit guarantees is that the evidence exists and is
+ * which is the alerting ladder in H-HARD-05. What G-AGT-01 guarantees is that the evidence exists and is
  * a row rather than a log line nobody reads.
+ *
+ * **H-HARD-05's pass runs here, in the same handler, and that is a decision rather than convenience.**
+ * `ALERT_REGISTRY` is the alerting ladder's table and `runAlertEvaluation` is what reads it; giving it a
+ * cron of its own would have meant a new `agent_definition` row, which is a migration (0021 says so in as
+ * many words: adding an agent is a reviewable act and not a row somebody inserted on production), and
+ * H-HARD-05 holds no migration number. The alternative to a new agent row is not "no agent row" — a cron
+ * with no agent is refused by `pnpm jobs`, because a cron nobody watches is the failure G-AGT-01 exists
+ * to remove. So the pass runs inside the one job whose subject is already *finding what nothing is
+ * looking at*, and inherits its declared interval, its budget and its heartbeat.
+ *
+ * The two results are reported separately and the alert pass runs even when the watchdog raised nothing:
+ * they measure different things, and an exception from one must not discard the other's findings, which
+ * is why each is awaited on its own line rather than in a `Promise.all`.
  */
 async function watchdogHandler(_data: never, context: JobContext): Promise<void> {
   const sql = maintenanceSql
@@ -539,10 +555,24 @@ async function watchdogHandler(_data: never, context: JobContext): Promise<void>
         'startWorkers().',
     )
   }
-  const result = await runWatchdog(sql, instantFromIso(context.now()))
+  const now = instantFromIso(context.now())
+  const result = await runWatchdog(sql, now)
   if (result.raised.length > 0) {
     console.warn(
       `agent watchdog raised ${result.raised.length} alert(s): ${result.raised.join(', ')}`,
+    )
+  }
+  const alerts = await runAlertEvaluation(sql, now)
+  if (alerts.raised.length > 0) {
+    console.warn(`alert ladder raised ${alerts.raised.length}: ${alerts.raised.join(', ')}`)
+  }
+  // A threshold nobody can read is louder than a firing alert, because it means the pass cannot answer
+  // the question at all for that condition — and the one outcome that must never be reachable is a
+  // corrupt setting reading as all-clear.
+  if (alerts.faulted.length > 0) {
+    console.error(
+      `alert ladder could not read the threshold for: ${alerts.faulted.join(', ')}. Those conditions ` +
+        'were NOT evaluated and are not clear.',
     )
   }
 }

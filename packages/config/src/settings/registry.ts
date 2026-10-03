@@ -1,6 +1,10 @@
 import {
   ACCOUNT_CODE_PATTERN,
+  ALERT_THRESHOLDS_OPEN_QUESTION_ID,
   AppError,
+  AUTH_FAILURE_THRESHOLD_SETTING_KEY,
+  BREACH_CLOCK_OPEN_QUESTION_ID,
+  BREACH_NOTIFICATION_HOURS_SETTING_KEY,
   CLINICAL_LINT_QUESTION_COPY_SETTING_KEY,
   CLINICAL_REAL_INTAKE_SETTING_KEY,
   CLINICAL_STEP_UP_WINDOW_MINUTES,
@@ -26,6 +30,7 @@ import {
   GRATUITY_LIABILITY_ACCOUNT_SETTING_KEY,
   GRATUITY_SETTLEMENT_PAYABLE_ACCOUNT_SETTING_KEY,
   genderMatchingModeSchema,
+  JOB_FAILURE_THRESHOLD_SETTING_KEY,
   LLM_PROVIDER_SETTING_KEY,
   llmProviderSchema,
   MAX_GOOGLE_REAUTH_LADDER_STEPS,
@@ -36,6 +41,7 @@ import {
   MINIMUM_REVIEW_COOLING_OFF_HOURS,
   OBLIGATION_ESCALATION_OFFSETS_SETTING_KEY,
   OBLIGATION_REMINDER_OFFSETS_SETTING_KEY,
+  OUTBOX_LAG_THRESHOLD_SETTING_KEY,
   PLACEHOLDER_WPS_AGENT_ID,
   PLACEHOLDER_WPS_EMPLOYER_ID,
   PROVISIONAL_EXPIRING_SOON_DAYS,
@@ -61,6 +67,7 @@ import {
   reviewReplyLanguagesSchema,
   rightsSlaDaysSchema,
   rightsSupervisoryAuthoritySchema,
+  SEND_BACKLOG_THRESHOLD_SETTING_KEY,
   STRICT_GENDER_MATCHING,
   WHATSAPP_REF_EXPECTED_SETTING_KEY,
   WHATSAPP_REF_TTL_SETTING_KEY,
@@ -1568,6 +1575,150 @@ export const SETTINGS = [
         'observation in the handover and not a figure measured from takings, and this build cannot ' +
         'measure it: a seasonality index needs two separated occurrences of the window and there have ' +
         'been none.',
+    },
+  }),
+  // ---------------------------------------------------------------------------------------------
+  // H-HARD-05 — the four alert thresholds that are JUDGEMENTS rather than facts.
+  //
+  // `packages/shared/src/alerts/registry.ts` holds the alert table and distinguishes two kinds of
+  // threshold. A structural one points at a figure a migration already owns: one more data subject than
+  // the request covers is a bulk read, and an obligation one day past its due date is overdue. These four
+  // are the other kind — "how long is too long", "how many is too many" — and nothing in this build has
+  // measured any of them, because it has no production traffic.
+  //
+  // They are settings and not constants for exactly the reason the two obligation notice windows are
+  // (`packages/shared/src/compliance-notices.ts`): they are the figures the owner will be wrong about
+  // first, changing one changes WHICH alerts fire, and a constant would make the correction a deploy. And
+  // they are `provisional` so each appears on the Unconfirmed Assumptions panel rather than reading as a
+  // figure somebody looked up — which is also why the defaults below are written as the strictest safe
+  // option plus a sentence saying they were chosen and not measured.
+  //
+  // Every one is BOUNDED, and that is not tidiness. An alert whose threshold can be set to a million is
+  // an alert that can be turned off from a settings screen with no record that anything was turned off;
+  // the ceiling is what keeps a quieter threshold a judgement rather than a silencing. The one alert the
+  // acceptance line requires to be un-disableable — the client-list export — has no setting at all.
+  define({
+    key: OUTBOX_LAG_THRESHOLD_SETTING_KEY,
+    tier: 'operational',
+    // Ten minutes to six hours. The floor is above the drain interval so a normal pass cannot trip it;
+    // the ceiling is a working day's quarter, past which "the outbox has stopped" has stopped being news.
+    schema: z.number().int().min(600).max(21_600),
+    defaultValue: 900,
+    label: 'Outbox lag before alerting',
+    help: 'How old the oldest unpublished domain event may get before this alerts. An event stuck here is a confirmation, a reminder or a review request that has not happened.',
+    editableBy: OWNER_MANAGER,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: ALERT_THRESHOLDS_OPEN_QUESTION_ID,
+      note:
+        "Fifteen minutes CHOSEN, not measured: it is the agent watchdog's own interval, so an event " +
+        'older than that has survived at least one full pass of the thing that would have published it. ' +
+        'No drain latency has ever been observed in this build.',
+    },
+  }),
+  define({
+    key: SEND_BACKLOG_THRESHOLD_SETTING_KEY,
+    tier: 'operational',
+    // One to five hundred. One is legal and means "tell me about any delay at all"; the ceiling is well
+    // above a day's traffic for a salon of this size, so a higher figure would be a banner that can never
+    // appear.
+    schema: z.number().int().min(1).max(500),
+    defaultValue: 20,
+    label: 'Queued messages before the delay banner',
+    help: 'How many messages may be queued and unsent before the front desk is shown a "messages delayed" banner. The banner exists so a receptionist does not promise a confirmation the system has not sent.',
+    editableBy: OWNER_MANAGER,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: ALERT_THRESHOLDS_OPEN_QUESTION_ID,
+      note:
+        'Twenty CHOSEN, not measured. Nothing in this build knows what a normal queue depth is, because ' +
+        'no message has ever been sent to a real recipient; twenty is roughly a busy hour of bookings at ' +
+        'the seeded appointment rate, which makes it a guess with a stated basis rather than a measurement.',
+    },
+  }),
+  define({
+    key: JOB_FAILURE_THRESHOLD_SETTING_KEY,
+    tier: 'operational',
+    // Two to twenty. Two and not one, because the floor has to leave room for a single transient
+    // provider failure to be retried; the ceiling is low because twenty consecutive failures of a
+    // fifteen-minute job is five hours of nothing happening.
+    schema: z.number().int().min(2).max(20),
+    defaultValue: 3,
+    label: 'Consecutive agent failures before alerting',
+    help: 'How many runs of one scheduled agent may fail in a row before this alerts. This is the "running and failing" case; an agent that has stopped entirely is the watchdog\'s 2x-interval alert instead.',
+    editableBy: OWNER_MANAGER,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: ALERT_THRESHOLDS_OPEN_QUESTION_ID,
+      note:
+        "Three CHOSEN, not measured: it is one more than the default retry limit on most of the registry's " +
+        'jobs, so a failure that the retry policy was going to absorb does not reach a person. No failure ' +
+        'rate has been observed, because no agent has run against a real provider.',
+    },
+  }),
+  define({
+    key: AUTH_FAILURE_THRESHOLD_SETTING_KEY,
+    tier: 'compliance_locked',
+    // Three to fifty, per credential, inside the window below. Three is the floor because a mistyped
+    // password twice is ordinary; the ceiling is low on purpose — a credential refused fifty times is
+    // long past the point where somebody should have been told.
+    schema: z.number().int().min(3).max(50),
+    defaultValue: 5,
+    label: 'Refused sign-ins before alerting',
+    help: 'How many refused sign-ins on one staff credential, inside the alerting window, before this alerts. It is either somebody locked out of their own account or somebody guessing, and both need answering.',
+    // Compliance-locked and owner-only: this is the one threshold whose relaxation widens the window a
+    // credential can be guessed in, and the F07 matrix locks customer-safety and access policy to the
+    // owner alone.
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: ALERT_THRESHOLDS_OPEN_QUESTION_ID,
+      note:
+        'Five CHOSEN, not measured. There is no rate-limiting policy on file yet — H-HARD-01 owns the ' +
+        'public-endpoint limits and is not built — so this figure is a judgement about how many mistyped ' +
+        'passwords are ordinary, and it is not derived from any observed sign-in behaviour.',
+    },
+  }),
+  // ---------------------------------------------------------------------------------------------
+  // H-HARD-07 — the one PDPL figure this build holds.
+  //
+  // docs/04 section 8 marks Federal Decree-Law 45 of 2021 and its executive regulations [UNVERIFIED]
+  // and says in so many words to confirm the breach notification threshold and deadline. 72 hours is
+  // therefore the build's reading of a secondary source, which is exactly what `provisional` is for: it
+  // puts the figure on the Unconfirmed Assumptions panel instead of letting it read, wherever it
+  // appears, like something somebody looked up.
+  //
+  // The THRESHOLD — whether a given breach is notifiable at all — is deliberately not a setting and not
+  // anything else in this build. It is a judgement about risk to the people affected, and a build that
+  // held a rule for it would be deciding not to notify, silently, with an absence for evidence. Every
+  // breach filing generates the duty and dates it; closing it is an act with a recorded reason.
+  define({
+    key: BREACH_NOTIFICATION_HOURS_SETTING_KEY,
+    tier: 'compliance_locked',
+    // One hour to thirty days. The floor exists because a deadline at or before the discovery reads on
+    // the calendar as a duty that was already overdue when it was created; the ceiling is low because a
+    // period longer than a month is not a breach notification regime, and a bound is what keeps a
+    // relaxation a judgement rather than a silencing.
+    schema: z.number().int().min(1).max(720),
+    defaultValue: 72,
+    label: 'Hours to notify a personal-data breach',
+    help: 'How long after DISCOVERING a personal-data breach the supervisory authority must be told. The deadline on every breach already filed was computed from the figure in force at the time, so changing this does not move it.',
+    // Owner only, and compliance-locked: lengthening this moves a statutory deadline, which is not an
+    // operational preference. The F07 matrix locks access and customer-safety policy to the owner.
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: BREACH_CLOCK_OPEN_QUESTION_ID,
+      note:
+        "72 hours is the build's reading of a secondary source and is NOT confirmed. docs/04 section 8 " +
+        'marks the regulation and its executive regulations UNVERIFIED and names the breach notification ' +
+        'deadline as one of the things to confirm. Which authority it is owed to is also not on file, ' +
+        'which is why obligation.authority is null on both breach duties (Y1-entity).',
     },
   }),
 ] as const

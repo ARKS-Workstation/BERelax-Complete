@@ -2,8 +2,8 @@ import { safeText } from '@berelax/core'
 import type { PipelineBoard, PipelineCard, PipelineColumn } from '@berelax/db'
 import { tokensCss } from '@berelax/ui'
 import {
+  ADMIN_BANNER_CSS,
   type AdminChrome,
-  GOOGLE_REAUTH_BANNER_CSS,
   renderAdminBanner,
 } from '../../../../src/components/admin/google-reauth-banner.ts'
 
@@ -519,7 +519,7 @@ export function renderPipelineHtml(view: PipelineView): string {
     // brand appears, and an internal board naming it would be citing the wrong entity. The rule is about
     // how the brand is written, so not writing it is compliant.
     '<title>Pipeline board — admin</title>',
-    `<style>${tokensCss()}${PIPELINE_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${PIPELINE_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',

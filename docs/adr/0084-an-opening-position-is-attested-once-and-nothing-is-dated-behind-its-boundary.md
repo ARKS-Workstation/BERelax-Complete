@@ -8,7 +8,7 @@
   opening position is a SET of entries rather than one, which is what
   [ADR 0069](0069-a-reconstructed-package-sale-is-the-outstanding-entitlement-held-to-its-workbook-row.md)
   made true by posting the reconstructed package liability on `source = 'opening_balance'`; it stands on
-  [ADR 0017](0017-the-journal-is-append-only.md) (a correction is a dated reversal),
+  [ADR 0017](0017-accounting-journal-and-no-auto-filing.md) (a correction is a dated reversal),
   [ADR 0064](0064-a-financial-statement-is-a-directed-sum-over-a-partition-of-the-chart.md) (a statement
   line holds no figure of its own) and
   [ADR 0071](0071-a-realised-cohort-figure-is-a-figure-at-a-stated-horizon.md) (a posting from outside the

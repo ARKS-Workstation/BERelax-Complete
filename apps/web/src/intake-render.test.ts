@@ -52,7 +52,7 @@ const rendered: RenderedSubmission = {
 const CUSTOMER = '0c8c8c08-0000-7000-8000-000000000001'
 
 const view = (over: Partial<IntakePageView> = {}): IntakePageView => ({
-  chrome: { googleReauth: null, returnTo: `/clients/${CUSTOMER}/intake` },
+  chrome: { googleReauth: null, sendBacklog: null, returnTo: `/clients/${CUSTOMER}/intake` },
   customerId: CUSTOMER,
   outcome: {
     kind: 'record',
@@ -320,6 +320,7 @@ describe('the document itself', () => {
             connectionId: '88888888-8888-8888-8888-888888888888',
             googleEmail: null,
           },
+          sendBacklog: null,
           returnTo: '/clients/x/intake',
         },
       }),

@@ -51,7 +51,11 @@ const BUDGET = 250 * 1024
 const MEASURED = 120 * 1024
 
 /** No banner: the connection needs no re-auth in this fixture, and the chrome is the caller's input. */
-const CHROME: AdminChrome = { googleReauth: null, returnTo: SEO_SUGGESTIONS_PATH }
+const CHROME: AdminChrome = {
+  googleReauth: null,
+  sendBacklog: null,
+  returnTo: SEO_SUGGESTIONS_PATH,
+}
 
 const OWNER: SuggestionsPrincipal = {
   // A uuid, because `publication_approval.approver_user_id` records `employee.id`.

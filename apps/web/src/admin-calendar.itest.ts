@@ -161,7 +161,7 @@ async function readPage(
       // The diary's own claims are about the day. Whether the Google connection needs re-authorising is
       // another suite's subject, and a banner read here would make this file depend on whichever
       // connection an earlier suite left behind (brief rule 12).
-      chrome: { googleReauth: null, returnTo: '/calendar' },
+      chrome: { googleReauth: null, sendBacklog: null, returnTo: '/calendar' },
     },
     deps(frozen),
   )

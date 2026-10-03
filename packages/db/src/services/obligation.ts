@@ -87,7 +87,7 @@ function assertIsoDate(what: string, value: string): void {
 export interface ObligationDefinitionRow {
   readonly key: string
   readonly title: string
-  readonly obligationClass: 'licence' | 'credential' | 'hygiene' | 'tax' | 'labour'
+  readonly obligationClass: 'licence' | 'credential' | 'hygiene' | 'tax' | 'labour' | 'privacy'
   readonly cadence: 'monthly' | 'quarterly' | 'annual' | 'event_driven'
   readonly subjectScope: 'business' | 'therapist'
   readonly ownerRole: string

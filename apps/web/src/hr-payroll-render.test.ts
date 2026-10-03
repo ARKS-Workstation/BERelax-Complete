@@ -23,6 +23,7 @@ import {
 
 const CHROME: PayrollPageView['chrome'] = {
   googleReauth: null,
+  sendBacklog: null,
   returnTo: '/hr/payroll',
 }
 

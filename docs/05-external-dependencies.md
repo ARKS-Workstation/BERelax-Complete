@@ -9,6 +9,28 @@ else is a morning of pulling files together, plus one question for a lawyer.
 
 ---
 
+## Where the machine-checked versions of this list live
+
+This page is the discovery work: what has to be obtained, from whom, and how long it takes. Two
+artefacts hold the same subject in a form a check can enforce, and they are the ones to read when
+something is already wired up rather than being chased:
+
+- **`packages/shared/src/processor-register.ts`** — every external service that touches personal data,
+  with its purpose, the classes of data it can see, its transfer basis and its retention.
+  `pnpm processors` holds it against the provider keys in `packages/config/src/env.ts` in both
+  directions, so a provider added to the build without a register row fails, and the public privacy
+  policy is generated from those rows rather than written beside them (docs/04 §8).
+- **[operations/secret-inventory.md](operations/secret-inventory.md)** — every credential, what it
+  controls, who owns rotating it, how often and the procedure. Generated from
+  `build/secret-inventory.json`; `pnpm rotation` and `pnpm processors` hold it against the code and the
+  config schema respectively.
+
+Neither claims a signed data processing agreement, because none has been seen by this build
+(`Y1-processor-agreements`), and neither names a transfer mechanism nobody has executed
+(`Y5-residency`).
+
+---
+
 ## Part 1 — In an external queue. Start now.
 
 ### 1. Two SMS sender IDs — SMSala + e& (Etisalat) + du

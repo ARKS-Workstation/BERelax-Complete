@@ -2,8 +2,8 @@ import type { CredentialAssessment, CredentialEvaluation, CredentialStatus } fro
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
 import {
+  ADMIN_BANNER_CSS,
   type AdminChrome,
-  GOOGLE_REAUTH_BANNER_CSS,
   renderAdminBanner,
 } from '../../../../src/components/admin/google-reauth-banner.ts'
 
@@ -232,7 +232,7 @@ export function renderCredentialsHtml(view: CredentialsView): string {
     // because its title reads "BE RELAX admin"; this page needs no exemption, because an internal
     // back-office screen has no reason to name the business at all.
     '<title>Credentials — HR admin</title>',
-    `<style>${tokensCss()}${CREDENTIALS_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${CREDENTIALS_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',

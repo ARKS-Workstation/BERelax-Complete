@@ -994,7 +994,7 @@ describe('acceptance — the M2 slice, part 2: with a TRN configured the whole s
       {
         searchParams: new URLSearchParams(),
         body,
-        chrome: { googleReauth: null, returnTo: TILL_PATH },
+        chrome: { googleReauth: null, sendBacklog: null, returnTo: TILL_PATH },
         requestId: 'mtill13-m2-control',
       },
       { sql, now: () => Date.now(), readIssuer: databaseIssuer },
@@ -1029,7 +1029,7 @@ describe('acceptance — the M2 slice, part 2: with a TRN configured the whole s
       {
         searchParams: new URLSearchParams(),
         body,
-        chrome: { googleReauth: null, returnTo: TILL_PATH },
+        chrome: { googleReauth: null, sendBacklog: null, returnTo: TILL_PATH },
         requestId: 'mtill13-m2-slice',
       },
       { sql, now: () => Date.now(), readIssuer: async () => FIXTURE_ISSUER },

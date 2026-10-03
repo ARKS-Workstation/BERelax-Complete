@@ -12,7 +12,7 @@ import { type PrivacyPageView, renderPrivacyHtml } from '../app/(admin)/settings
  */
 
 const BASE: PrivacyPageView = {
-  chrome: { googleReauth: null, returnTo: '/settings/privacy' },
+  chrome: { googleReauth: null, sendBacklog: null, returnTo: '/settings/privacy' },
   readAtIso: '2099-06-02T09:00:00.000Z',
   slaDays: 30,
   slaOpenQuestionId: 'Y1-entity',

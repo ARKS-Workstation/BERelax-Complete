@@ -6,10 +6,11 @@ import {
   startStaffSession,
   withUnitOfWork,
 } from '@berelax/db'
-import { isAppError } from '@berelax/shared'
+import { isAppError, STAFF_SESSION_REFUSED_ACTION } from '@berelax/shared'
 import {
   adminSessionCookie,
   assertAuthenticated,
+  type LoginAttemptOutcome,
   RETURN_TO_PARAM,
   resolveLoginAttempt,
   STAFF_SESSION_TTL_SECONDS,
@@ -120,6 +121,7 @@ export async function POST(request: Request): Promise<Response> {
     // Every stage but `authenticated` renders a page. None of them is a redirect and none is a 401: the
     // reader is standing at a terminal and needs the form again, with the reason on it.
     if (outcome.stage.stage !== 'authenticated') {
+      await recordRefusedSignIn(outcome, totpCode)
       const view = viewFor(outcome.stage.stage, staffReference, totpCode)
       // 401 for a refused attempt and 200 for one that is merely incomplete-so-far. `totp_required` is
       // NOT a failure — the password was right and the next factor is being asked for — so answering 401
@@ -183,6 +185,58 @@ export async function POST(request: Request): Promise<Response> {
       headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
     })
   }
+}
+
+/**
+ * Records a refused sign-in, so H-HARD-05's `repeated_auth_failure` alert has something to count.
+ *
+ * Before this, a refused attempt wrote NOTHING: a credential could be guessed indefinitely and the only
+ * evidence was the absence of a `staff_session.started` row, which is also what a quiet night looks like.
+ * `operation: 'denied'` is one of `ALWAYS_AUDITED` in `@berelax/db` precisely for this class of fact.
+ *
+ * Three decisions in nine lines, each of which is the reason the row is shaped the way it is.
+ *
+ * **The actor is `system` and not `staff`.** A refused attempt has no authenticated principal by
+ * definition, so naming the account holder as the actor would attribute somebody else's guess to them in
+ * an append-only table that cannot be corrected (ADR 0008). The label names the SURFACE, which is what
+ * the diary, the pipeline board and the quick-book screen already correctly record when they have no
+ * session to read (0128's ledger note says so). The credential is the ENTITY — the thing acted upon —
+ * which is also what makes "repeated failures on one account" a `group by entity_id`.
+ *
+ * **Nothing is written when the staff reference does not resolve.** `resolveLoginAttempt` returns a
+ * credential whenever the handle existed, even for a wrong password, so this covers every attempt
+ * against a real account. An unknown handle writes no row, and that is deliberate twice over: there is
+ * no account to alert anybody about, and the alternative would be putting arbitrary unauthenticated
+ * input into the trail as an entity id.
+ *
+ * **`totp_required` with no code supplied is not a refusal.** The password was right and the second
+ * factor is being asked for. Counting it would make every ordinary two-step sign-in a refused attempt,
+ * which is the same mistake the 401-versus-200 decision above avoids — and the alert would fire on
+ * normal use within a day.
+ */
+async function recordRefusedSignIn(
+  outcome: LoginAttemptOutcome,
+  totpCode: string | null,
+): Promise<void> {
+  const credential = outcome.credential
+  if (credential === null) return
+  const stage = outcome.stage.stage
+  const refused = stage === 'password_required' || (stage === 'totp_required' && totpCode !== null)
+  if (!refused) return
+  await withSql(async (sql) =>
+    withUnitOfWork(sql, { kind: 'system', label: 'admin sign-in' }, async (uow) => {
+      await uow.audit.record({
+        action: STAFF_SESSION_REFUSED_ACTION,
+        entityType: 'staff_credential',
+        entityId: credential.credentialId,
+        operation: 'denied',
+        // The STAGE and nothing else. Never the handle that was typed, never the password's length, and
+        // never whether the password or the code was the part that failed for a reader who is not the
+        // account holder: `audit_event` is append-only and is read by staff.
+        after: { stage },
+      })
+    }),
+  )
 }
 
 /** Which screen a non-authenticated stage renders. */

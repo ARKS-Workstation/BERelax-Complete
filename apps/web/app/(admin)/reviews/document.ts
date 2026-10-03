@@ -1,8 +1,8 @@
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
 import {
+  ADMIN_BANNER_CSS,
   type AdminChrome,
-  GOOGLE_REAUTH_BANNER_CSS,
   renderAdminBanner,
 } from '../../../src/components/admin/google-reauth-banner.ts'
 import type { QueueDirection } from './view.ts'
@@ -127,7 +127,7 @@ export function reviewsDocumentHead(title: string, direction: QueueDirection): r
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     '<meta name="robots" content="noindex, nofollow, noarchive">',
     `<title>${safeText(title)} — reviews admin</title>`,
-    `<style>${tokensCss()}${REVIEWS_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${REVIEWS_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',

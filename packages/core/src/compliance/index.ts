@@ -24,6 +24,7 @@
  */
 
 export * from './banned-claims.ts'
+export * from './breach-clock.ts'
 export * from './lexicon.ts'
 export * from './obligation.ts'
 export * from './obligation-notice.ts'

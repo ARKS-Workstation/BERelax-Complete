@@ -23,7 +23,7 @@ import {
  * count — are `till.itest.ts`'s, and that file says why.
  */
 
-const CHROME = { googleReauth: null, returnTo: '/till' } as const
+const CHROME = { googleReauth: null, sendBacklog: null, returnTo: '/till' } as const
 
 function view(overrides: Partial<TillView> = {}): TillView {
   const base: TillView = {

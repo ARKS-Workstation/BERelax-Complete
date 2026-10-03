@@ -100,7 +100,7 @@ const view = (
     // Every admin document carries the re-auth banner, so the view cannot be built without its
     // state; `google-reauth-banner.test.ts` is the case that enumerates the renders and refuses one
     // that draws none.
-    chrome: { googleReauth: null, returnTo: '/crm/flows/cauto09_unit/builder' },
+    chrome: { googleReauth: null, sendBacklog: null, returnTo: '/crm/flows/cauto09_unit/builder' },
     flowKey: 'cauto09_unit',
     draft,
     registry: REGISTRY,

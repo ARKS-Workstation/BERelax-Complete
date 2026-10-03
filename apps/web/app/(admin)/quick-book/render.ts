@@ -1,7 +1,7 @@
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
 import {
-  GOOGLE_REAUTH_BANNER_CSS,
+  ADMIN_BANNER_CSS,
   renderAdminBanner,
 } from '../../../src/components/admin/google-reauth-banner.ts'
 import {
@@ -558,7 +558,7 @@ export function renderQuickBookHtml(view: QuickBookView): string {
     // brand appears, and an internal screen naming it would be citing the wrong entity. The rule is about
     // how the brand is written, so not writing it is compliant.
     '<title>Quick-book — admin</title>',
-    `<style>${tokensCss()}${QUICK_BOOK_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${QUICK_BOOK_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',

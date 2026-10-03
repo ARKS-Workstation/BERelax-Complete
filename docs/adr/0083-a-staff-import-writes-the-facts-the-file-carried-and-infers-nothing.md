@@ -6,8 +6,8 @@
 - **Covers:** docs/01 decisions — none new. It is the import-shaped consequence of
   [ADR 0072](0072-the-consent-floor-is-a-refusal-and-the-import-ledger-stages-a-digest.md) (the migration
   ledger is permanent, so what it stages is the decision) meeting
-  [migration 0030](../../packages/db/migrations/0030_staff.sql)'s refusal to invent a gender and
-  [migration 0066](../../packages/db/migrations/0066_leave.sql)'s leave policy, and it records the
+  [migration 0030](../../packages/db/migrations/0030_staff_availability.sql)'s refusal to invent a gender and
+  [migration 0066](../../packages/db/migrations/0066_hr_leave.sql)'s leave policy, and it records the
   provisional answers to **Y8-staff** and **Y8-leave** that the import rests on.
 
 ## Decision

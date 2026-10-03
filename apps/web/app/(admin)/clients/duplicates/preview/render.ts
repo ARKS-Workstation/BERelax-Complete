@@ -2,8 +2,8 @@ import type { CustomerMergeFieldPlan, CustomerMergeSubject } from '@berelax/core
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
 import {
+  ADMIN_BANNER_CSS,
   type AdminChrome,
-  GOOGLE_REAUTH_BANNER_CSS,
   renderAdminBanner,
 } from '../../../../../src/components/admin/google-reauth-banner.ts'
 import type { RenderDirection } from '../render.ts'
@@ -205,7 +205,7 @@ const HEAD = (
   '<meta name="robots" content="noindex, nofollow, noarchive">',
   // No brand in the title, for the reason the queue's render states.
   `<title>${safeText(title)} — admin</title>`,
-  `<style>${tokensCss()}${PREVIEW_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
+  `<style>${tokensCss()}${PREVIEW_CSS}${ADMIN_BANNER_CSS}</style>`,
   '</head>',
   '<body>',
   '<main>',

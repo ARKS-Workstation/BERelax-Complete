@@ -10,8 +10,8 @@ import {
 } from '@berelax/shared'
 import { tokensCss } from '@berelax/ui'
 import {
+  ADMIN_BANNER_CSS,
   type AdminChrome,
-  GOOGLE_REAUTH_BANNER_CSS,
   renderAdminBanner,
 } from '../../../../../../src/components/admin/google-reauth-banner.ts'
 import type { FlowLiveState } from '../../api/handler.ts'
@@ -624,7 +624,7 @@ export function renderFlowBuilderHtml(view: BuilderView): string {
     '<meta name="robots" content="noindex, nofollow, noarchive">',
     // No brand in the title: docs/09's brand-collision rule, scanned by `apps/web/src/seo/brand.test.ts`.
     '<title>Journey builder — CRM admin</title>',
-    `<style>${tokensCss()}${GOOGLE_REAUTH_BANNER_CSS}${BUILDER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_BANNER_CSS}${BUILDER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',

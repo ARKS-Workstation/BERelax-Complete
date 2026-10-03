@@ -12,6 +12,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
+import { incident } from './incident.ts'
 import { message } from './message.ts'
 import { employee } from './staff.ts'
 
@@ -44,6 +45,7 @@ export const obligationClass = pgEnum('obligation_class', [
   'hygiene',
   'tax',
   'labour',
+  'privacy',
 ])
 
 /**
@@ -180,6 +182,15 @@ export const obligationInstance = pgTable(
     acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
     acknowledgedByRole: text('acknowledged_by_role'),
     acknowledgedByLabel: text('acknowledged_by_label'),
+    /**
+     * The incident that generated this occurrence, for an `event_driven` obligation (0142).
+     *
+     * NULL for every cadence-generated instance, and part of `obligation_instance_one_per_due_date`
+     * below. Without it, two personal-data breaches whose 72-hour deadlines land on the same civil date
+     * collide on that constraint and the second filing silently reuses the first's duty — so completing
+     * one notification would mark the other done.
+     */
+    incidentId: uuid('incident_id').references(() => incident.id, { onDelete: 'restrict' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
   },
@@ -195,8 +206,9 @@ export const obligationInstance = pgTable(
      * acceptance asks for is a constraint here rather than a convention in the writer. Drizzle's
      * `.nullsNotDistinct()` is the mirror of that; the migration is the authority.
      */
+    index('obligation_instance_incident_idx').on(t.incidentId),
     unique('obligation_instance_one_per_due_date')
-      .on(t.obligationId, t.subjectEmployeeId, t.dueOn)
+      .on(t.obligationId, t.subjectEmployeeId, t.incidentId, t.dueOn)
       .nullsNotDistinct(),
     check(
       'obligation_instance_completed_by_role_known',

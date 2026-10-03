@@ -207,7 +207,7 @@ async function cardHtml(options: { readonly now?: Instant } = {}): Promise<strin
     connectionId,
     // No banner, so this file's screenshots do not diff when another suite leaves a broken connection
     // behind (brief rule 12). `google-reauth-banner.itest.ts` photographs the banner itself.
-    chrome: { googleReauth: null, returnTo: '/settings/integrations' },
+    chrome: { googleReauth: null, sendBacklog: null, returnTo: '/settings/integrations' },
   })
   return renderIntegrationsPage(view)
 }
