@@ -1698,6 +1698,42 @@ export const ROUTES = [
       'noindex prefix.',
   },
   {
+    id: 'sitemap-index',
+    path: '/sitemap.xml',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: true,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'The sitemap INDEX (W-SITE-08). A handler and locale-neutral for the reason /robots.txt and ' +
+      '/api/facts are: it is bytes rather than a document, it has no language, and giving it a locale ' +
+      'would give one file two URLs — which for a sitemap means two sets of <loc> a crawler has to ' +
+      'reconcile. `indexable: true` and `sitemap: false`: it carries no x-robots-tag, because a sitemap ' +
+      'a crawler is told not to read is a sitemap that does nothing, and it is not IN a sitemap, because ' +
+      'nothing lists a sitemap. `robots.txt` advertises it, and only once this entry exists — the ' +
+      'registry is in bijection with the filesystem, so declaring it and serving it are one statement.',
+  },
+  {
+    id: 'sitemap-section',
+    path: '/sitemaps/[type]',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: true,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'One sitemap per type — pages, treatments, therapists, journal — so a crawler can re-fetch the ' +
+      'catalogue without re-reading the brochure pages. A section with no URLs answers 404 rather than ' +
+      'an empty <urlset>, which is a positive statement that those pages have gone; two of the four are ' +
+      'legitimately empty today (no therapist is publishable, no journal post has its two bylines). A ' +
+      'handler, so it declares no sampleParams and nothing opens its URL to read an hreflang set out of ' +
+      "it — the alternates it PUBLISHES are the pages' own, built by the same `alternatesFor` the <head> " +
+      'uses, which is what makes the cross-check an assertion rather than a reconciliation.',
+  },
+  {
     id: 'spa',
     path: '/spa',
     kind: 'document',
@@ -2159,6 +2195,15 @@ export interface SitemapEntry {
   readonly path: string
   readonly locale: Locale
   readonly changefreq: ChangeFrequency
+  /**
+   * The entry's route id, so a consumer can ask `alternatesFor` for its `hreflang` set.
+   *
+   * On the entry rather than looked up from the path by the caller, and the difference is not convenience:
+   * a path-to-id lookup is a second resolution of the URL space, and W-SITE-08's acceptance criterion is
+   * that the sitemap's `hreflang` set and the page's `<head>` agree. They agree because both come from
+   * `alternatesFor(id, locale)`, and that is only possible if the id travels with the entry.
+   */
+  readonly id: RouteId
 }
 
 export function sitemapEntries(): readonly SitemapEntry[] {
@@ -2170,7 +2215,12 @@ export function sitemapEntries(): readonly SitemapEntry[] {
     // the rows, and this function stays synchronous and database-free for every other route.
     if (isParameterised(route.path)) continue
     for (const locale of route.locales) {
-      entries.push({ path: pathFor(route, locale), locale, changefreq: route.changefreq })
+      entries.push({
+        id: route.id,
+        path: pathFor(route, locale),
+        locale,
+        changefreq: route.changefreq,
+      })
     }
   }
   return entries

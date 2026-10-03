@@ -18031,7 +18031,7 @@ units:
       revalidation by cache tag, IndexNow ping and CDN purge on publish, each idempotent and each visible
       in an outbox. This is M4 Findable.'
     owner: claude
-    status: todo
+    status: done
     size: L
     milestone: M4
     depends_on:
@@ -18060,9 +18060,33 @@ units:
     files:
     - apps/web/app/sitemap.xml/route.ts
     - apps/web/app/sitemaps/[type]/route.ts
+    - packages/core/src/seo/sitemap.ts
+    - apps/web/src/sitemap/build.ts
+    - apps/web/src/revalidate/interconnection.ts
     - packages/media/src/purge/port.ts
+    - packages/media/src/purge/fake-purge.ts
+    - packages/providers/src/seo/port.ts
+    - packages/providers/src/seo/fake-indexnow.ts
+    - packages/db/migrations/0158_publish_propagate_agent.sql
+    - packages/db/src/repositories/propagation.ts
     - apps/worker/src/jobs/publish-propagate.ts
-    - tests/seo/publish-loop.spec.ts
+    - apps/web/src/public-site.itest.ts
+    notes:
+    - 'NOTE: the planned `tests/seo/publish-loop.spec.ts` is the W-SITE-08 block of
+      `apps/web/src/public-site.itest.ts`: the repository has no `tests/` tree, and the suite shares one
+      port band — and therefore one file and one server — with W-SITE-06 and W-SITE-09.'
+    - 'NOTE: the IndexNow key is UNSET and the refusal is the mechanism, not a gap. `Y1-indexnow-key` is
+      a new open question: a key is chosen by the owner and published by this site at /<key>.txt, so the
+      build cannot choose one. `seo.indexnow_key` holds a marker `is_placeholder_text()` refuses,
+      `createFakeIndexNow` throws from its constructor rather than submitting, and the propagation job
+      records `refused_no_key` with the question id as `last_error` on the publish_propagate agent row.'
+    - 'NOTE: the `journal` sitemap section is empty and therefore 404s and is absent from the index —
+      no journal post is publishable, because a post needs an author byline and a reviewer byline
+      (W-SITE-07) and this build invents neither. The section appears the day one is published with no
+      change to the builder.'
+    - 'NOTE: there is no CDN. docs/05 names none, so `packages/media/src/purge` ships a port and a fake
+      whose outbox is asserted; the real adapter arrives with the deployment. A purge therefore answers
+      ACCEPTED and never completed, which is what every CDN promises at the moment of the call.'
   - id: W-SITE-09
     order: 147
     title: Legacy WooCommerce URL migration and the 301 map

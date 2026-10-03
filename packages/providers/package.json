@@ -5,12 +5,13 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./call-log": "./src/call-log.ts",
+    "./failure": "./src/failure.ts",
     "./google": "./src/google/index.ts",
     "./llm": "./src/llm/index.ts",
-    "./failure": "./src/failure.ts",
-    "./call-log": "./src/call-log.ts",
+    "./not-implemented": "./src/not-implemented.ts",
     "./payments": "./src/payments/index.ts",
-    "./not-implemented": "./src/not-implemented.ts"
+    "./seo": "./src/seo/index.ts"
   },
   "dependencies": {
     "@berelax/config": "workspace:*",

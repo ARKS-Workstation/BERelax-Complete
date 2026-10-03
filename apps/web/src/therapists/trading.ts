@@ -3,7 +3,7 @@ import { readOpenTradingDays, type Sql } from '@berelax/db'
 /**
  * The trading date the availability preview is about: the next one that is still open.
  *
- * Read from `business_day` and never computed from the clock, which is brief rule 7 and ADR 0009. The
+ * Read from `business_day` and never computed from the clock, which is brief rule 7 and ADR 0007. The
  * trading day crosses midnight, so a calendar date is wrong twice: in the small hours the business is
  * still working the PREVIOUS trading date, and between close and open there is no trading date at all — a
  * reader standing outside in the morning wants the day that is about to open, not an empty grid for a day

@@ -61135,7 +61135,7 @@ export function chargebackNetEffectFils(`,
     withEditedFile(
       SITEMAP,
       (text) =>
-        `${text}\n// A second writer, which is the defect 189g is about.\n// update employee set display_name = 'x'\nconst SECOND_WRITER = \`update employee set display_name = \$1\`\nvoid SECOND_WRITER\n`,
+        `${text}\n// A second writer, which is the defect 189g is about.\n// update employee set display_name = 'x'\nconst SECOND_WRITER = \`update employee set display_name = $1\`\nvoid SECOND_WRITER\n`,
       () => runExpectingFailure('pnpm', unit(GUARD_SCAN)),
     ),
     'nothing else writes any of the three columns',
@@ -61207,6 +61207,274 @@ export function chargebackNetEffectFils(`,
       () => runExpectingFailure('pnpm', unit(PATHS_TEST)),
     ),
     'the index path is the registry entry',
+  )
+}
+
+// 190a-190z. (W-SITE-08) The publish loop shown to be able to stop closing: the reciprocity rule shown to
+//            be able to ignore a lopsided hreflang set, the empty-section refusal shown to be able to
+//            publish one, the IndexNow key shown to be able to accept a marker, the idempotency shown to
+//            be able to ping twice, and the interconnection map shown to be able to over-purge.
+//
+//            Every mutation below leaves a system that WORKS: a sitemap that parses, a ping that returns
+//            success, a cache that is emptier than it needed to be. What changes is whether anybody is
+//            told. A lopsided `hreflang` set is not partially honoured — Google discards the language
+//            signal for every page in the group — and a ping reported as sent against an unverified key
+//            reaches nobody for as long as nobody checks Bing.
+{
+  const SITEMAP = 'packages/core/src/seo/sitemap.ts'
+  const SITEMAP_TEST = 'packages/core/src/seo/sitemap.test.ts'
+  const INDEXNOW = 'packages/providers/src/seo/fake-indexnow.ts'
+  const INDEXNOW_TEST = 'packages/providers/src/seo/fake-indexnow.test.ts'
+  const PURGE = 'packages/media/src/purge/fake-purge.ts'
+  const PURGE_TEST = 'packages/media/src/purge/fake-purge.test.ts'
+  const MAP = 'apps/web/src/revalidate/interconnection.ts'
+  const MAP_TEST = 'apps/web/src/revalidate/interconnection.test.ts'
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  for (const [name, test] of [
+    ['sitemap', SITEMAP_TEST],
+    ['indexnow', INDEXNOW_TEST],
+    ['purge', PURGE_TEST],
+    ['interconnection map', MAP_TEST],
+  ]) {
+    const result = run('pnpm', unit(test))
+    check(
+      `publish-loop: the committed ${name} suite passes, which is this block's control`,
+      !result.failed,
+      `${test} does not pass on the committed tree:\n${result.output}`,
+    )
+  }
+
+  /*
+    190a. The reciprocity rule stops noticing a set that does not list itself.
+
+    Google's rule is that every page in an `hreflang` set lists every page INCLUDING itself, and a set
+    that does not is **ignored entirely** — so the whole group loses its language signal rather than the
+    one entry. The mutation reads as a tidy-up: of course a page does not need to list itself.
+  */
+  checkRejectedBy(
+    'publish-loop: 190a a reciprocity rule that accepts a non-self-referential set is caught',
+    withEditedFile(
+      SITEMAP,
+      (text) => replaceOnce(text, '    if (!hrefs.includes(url.loc)) {', '    if (false) {'),
+      () => runExpectingFailure('pnpm', unit(SITEMAP_TEST)),
+    ),
+    'catches a set that does not list itself',
+  )
+
+  /*
+    190b. An alternate naming a URL the sitemap does not contain stops being a finding.
+
+    The rule that catches the realistic defect — the other document stopped being published (an archived
+    treatment, a withdrawn photography consent) and the surviving half still points at it. Dropping it
+    leaves every other rule firing and the sitemap serving a set Google discards.
+  */
+  checkRejectedBy(
+    'publish-loop: 190b an alternate pointing at an absent URL ceasing to be a finding is caught',
+    withEditedFile(
+      SITEMAP,
+      (text) =>
+        replaceOnce(
+          text,
+          "      if (other === undefined) {\n        findings.push({\n          rule: 'alternate_names_an_absent_url',",
+          "      if (false) {\n        findings.push({\n          rule: 'alternate_names_an_absent_url',",
+        ),
+      () => runExpectingFailure('pnpm', unit(SITEMAP_TEST)),
+    ),
+    'catches an alternate naming a URL the sitemap does not contain',
+  )
+
+  /*
+    190c. `sitemapXml` serves a document whose reciprocity is broken instead of refusing it.
+
+    The mutation that looks like robustness: report the findings and serve anyway. It is wrong in exactly
+    one direction — a lopsided set makes Google discard the language signal for every page in the group,
+    so serving it is worse than serving nothing while somebody fixes it, and a 500 on
+    `/sitemaps/treatments` is noticed the same day where a silently-ignored set is noticed in a quarterly
+    ranking report.
+  */
+  checkRejectedBy(
+    'publish-loop: 190c a sitemap served despite a broken hreflang graph is caught',
+    withEditedFile(
+      SITEMAP,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const findings = reciprocityFindings(urls)\n  if (findings.length > 0) {',
+          '  const findings = reciprocityFindings(urls)\n  if (findings.length > 1000) {',
+        ),
+      () => runExpectingFailure('pnpm', unit(SITEMAP_TEST)),
+    ),
+    'refuses to serve a sitemap whose reciprocity is broken',
+  )
+
+  /*
+    190d. The index lists a section with no URLs.
+
+    An empty `<urlset>` is not "no information": it is a positive statement that there are no pages of
+    this kind, and a crawler acts on it by dropping the ones it already knows about. Two of the four
+    sections are legitimately empty today, so this is the live case rather than a hypothetical one.
+  */
+  checkRejectedBy(
+    'publish-loop: 190d an index listing an empty section is caught',
+    withEditedFile(
+      SITEMAP,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const empty = sections.filter((section) => section.urlCount === 0)',
+          '  const empty = sections.filter((section) => section.urlCount < 0)',
+        ),
+      () => runExpectingFailure('pnpm', unit(SITEMAP_TEST)),
+    ),
+    'refuses an index section with no URLs',
+  )
+
+  /*
+    190e. The `lastmod` loses its offset.
+
+    `toISOString()` is the obvious spelling and it answers in `Z`. Both are valid W3C datetimes and a
+    crawler accepts either, so nothing breaks — which is the point: the acceptance criterion names the
+    Asia/Dubai offset because the person asking "did the sitemap notice my price change at four this
+    afternoon?" is in it, and a `lastmod` of `12:00:00Z` is an answer they have to do arithmetic on.
+  */
+  checkRejectedBy(
+    'publish-loop: 190e a lastmod that drops the zone offset is caught',
+    withEditedFile(
+      SITEMAP,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const shifted = new Date(ms + offsetMinutes * 60_000)',
+          '  const shifted = new Date(ms)\n  offsetMinutes = 0',
+        ),
+      () => runExpectingFailure('pnpm', unit(SITEMAP_TEST)),
+    ),
+    'formats an instant in the zone it is given',
+  )
+
+  /*
+    190f. The IndexNow fake accepts the marker as a key.
+
+    The one mutation in this block that produces a system reporting SUCCESS for something that reached
+    nobody. `Y1-indexnow-key` is open, so the setting holds a marker; a constructor that accepted it would
+    submit with a key no file serves, every submission would answer 403 in production, and the outbox
+    would be full of accepted pings. The refusal is in the constructor because that is the one moment it
+    can be made before a submission exists.
+  */
+  checkRejectedBy(
+    'publish-loop: 190f an IndexNow fake that accepts an unset key is caught',
+    withEditedFile(
+      INDEXNOW,
+      (text) => replaceOnce(text, '  if (indexNowKeyIsUnset(key)) {', '  if (false) {'),
+      () => runExpectingFailure('pnpm', unit(INDEXNOW_TEST)),
+    ),
+    'refuses to construct with the marker the setting holds while Y1-indexnow-key is open',
+  )
+
+  /*
+    190g. The idempotency key stops being over the SET.
+
+    Without the sort, a retry whose paths came back in a different order is a different key — so the
+    second ping looks legitimate, the outbox count stops being a measurement, and the acceptance
+    criterion's "one ping per changed URL set" is unfalsifiable.
+  */
+  checkRejectedBy(
+    'publish-loop: 190g an idempotency key that depends on URL order is caught',
+    withEditedFile(
+      INDEXNOW,
+      (text) =>
+        replaceOnce(
+          text,
+          "  const canonical = [...new Set(urls)].sort().join('\\n')",
+          "  const canonical = [...urls].join('\\n')",
+        ),
+      () => runExpectingFailure('pnpm', unit(INDEXNOW_TEST)),
+    ),
+    'is the same key for the same set in any order',
+  )
+
+  /*
+    190h. A thrown failure stops reaching the outbox.
+
+    "We never pinged" and "we pinged and it blew up" are different answers, and the outbox is the only
+    thing that distinguishes them. The mutation is the natural order — throw, then record — and under it
+    the two become the same.
+  */
+  checkRejectedBy(
+    'publish-loop: 190h a provider failure that leaves no outbox entry is caught',
+    withEditedFile(
+      INDEXNOW,
+      (text) =>
+        replaceOnce(
+          text,
+          "        record(submission, { kind: 'rejected', reason: 'unknown', detail: String(armed) })\n",
+          '',
+        ),
+      () => runExpectingFailure('pnpm', unit(INDEXNOW_TEST)),
+    ),
+    'records a thrown failure in the outbox before throwing',
+  )
+
+  /*
+    190i. The purge port answers "purged" instead of "accepted".
+
+    No CDN promises completion at the moment of the call. A port that claimed it would make the pipeline
+    assert something no CDN does, and the test built on it would pass while a stale page was still being
+    served from an edge.
+  */
+  checkRejectedBy(
+    'publish-loop: 190i a purge that reports completion rather than acceptance is caught',
+    withEditedFile(
+      PURGE,
+      (text) =>
+        replaceOnce(
+          text,
+          "      const notPaths = request.paths.filter((path) => !path.startsWith('/'))",
+          "      const notPaths = request.paths.filter((path) => path.startsWith('/'))",
+        ),
+      () => runExpectingFailure('pnpm', unit(PURGE_TEST)),
+    ),
+    'answers accepted with the path count',
+  )
+
+  /*
+    190j. The interconnection map over-purges.
+
+    The failure nobody reports. A row that purged every tag would make every propagation test pass, the
+    cache would empty on a change that touched one page, and nothing anywhere would say so. The mutation
+    adds `availability` to the theme row, which is exactly the shape a careful reader would add "to be
+    safe" — and `theme.accent`'s own settings test already asserts a theme change does NOT invalidate
+    availability, which is the reason that row is written down.
+  */
+  checkRejectedBy(
+    'publish-loop: 190j an interconnection row that purges a tag it does not declare is caught',
+    withEditedFile(
+      MAP,
+      (text) =>
+        replaceOnce(
+          text,
+          "  accent_density_radius: {\n    cacheTags: ['theme'],",
+          "  accent_density_radius: {\n    cacheTags: ['theme', 'availability'],",
+        ),
+      () => runExpectingFailure('pnpm', unit(MAP_TEST)),
+    ),
+    'purges availability only for the four changes that can move a slot',
+  )
+
+  /*
+    190k. The interconnection map loses a row docs/09 §5 names.
+
+    Eight rows, and the one that goes missing is the one nobody tests for — which is why the count and the
+    names are both asserted. A map with seven rows still satisfies every per-row assertion.
+  */
+  checkRejectedBy(
+    'publish-loop: 190k an interconnection map missing one of the eight documented rows is caught',
+    withEditedFile(
+      MAP,
+      (text) => replaceOnce(text, "  'package_template',\n] as const", '] as const'),
+      () => runExpectingFailure('pnpm', unit(MAP_TEST)),
+    ),
+    'covers the eight changes docs/09 §5 names, and no more',
   )
 }
 

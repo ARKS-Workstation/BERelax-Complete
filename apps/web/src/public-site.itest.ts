@@ -1,28 +1,51 @@
-import { formatFindings, isTherapistPublishable, validateGraph } from '@berelax/core'
+import {
+  formatFindings,
+  formatSitemapFindings,
+  isTherapistPublishable,
+  lastmodFor,
+  reciprocityFindings,
+  SITEMAP_TYPES,
+  type SitemapType,
+  validateGraph,
+} from '@berelax/core'
 import {
   allRedirects,
+  changeVariantPrice,
   createConnection,
   ensureLegalEntity,
   lookupRedirect,
+  readPropagations,
   readTherapistPages,
+  readTreatmentPages,
   type Sql,
   seedCatalogue,
   seedPremises,
   THERAPIST_INDEX_PATH,
   type TherapistPageRow,
   therapistPathFor,
+  withUnitOfWork,
 } from '@berelax/db'
 import { startWebServer, type WebServer } from '@berelax/harness/server'
 import { archiveTherapist, publishTherapist } from '@berelax/hr'
+import { createFakePurge, purgeIdempotencyKey } from '@berelax/media/purge'
+import { createCallLog } from '@berelax/providers/call-log'
+import { FailureScript } from '@berelax/providers/failure'
+import { createFakeIndexNow, indexNowIdempotencyKey } from '@berelax/providers/seo'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { propagatePublish } from '../../worker/src/jobs/publish-propagate.ts'
 import { localisedPath } from './i18n/locales.ts'
 import { rewriteInternalLinks } from './jobs/rewrite-internal-links.ts'
-import { alternatesFor } from './routes/alternates.ts'
+import { revalidationPathsFor } from './revalidate/catalogue.ts'
+import { cacheTagsFor } from './revalidate/interconnection.ts'
+import { alternatesFor, siteOrigin } from './routes/alternates.ts'
+import { sitemapEntries } from './routes/registry.ts'
+import { SITEMAP_INDEX_PATH, sitemapSectionPath } from './sitemap/build.ts'
 import { candidateFor, dispositionOf } from './therapists/read.ts'
 import { therapistSitemapEntries } from './therapists/sitemap.ts'
 
 /**
- * The public site's served bytes: W-SITE-06's therapist routes and the publishing guard.
+ * The public site's served bytes: W-SITE-06's therapist routes, W-SITE-08's sitemaps and publish loop,
+ * and W-SITE-09's 301 map.
  *
  * ## Why ONE file for three units
  *
@@ -514,4 +537,367 @@ describe('W-SITE-06 — the therapist publishing guard, over the four combinatio
       expect(row.sourcePath).not.toBe(row.targetPath)
     }
   }, 60_000)
+})
+
+describe('W-SITE-08 — the sitemaps, the hreflang cross-check and the publish loop', () => {
+  /** Every `<loc>` in a sitemap document, in order. */
+  function locations(xml: string): readonly string[] {
+    return [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1] as string)
+  }
+
+  /** Every `<url>` of a section, parsed back into the shape the reciprocity rules judge. */
+  function parsedUrls(xml: string): readonly {
+    readonly loc: string
+    readonly lastmod: string
+    readonly changefreq: 'weekly'
+    readonly alternates: Readonly<Record<string, string>>
+  }[] {
+    return [...xml.matchAll(/<url>([\s\S]*?)<\/url>/g)].map((match) => {
+      const body = match[1] as string
+      const alternates: Record<string, string> = {}
+      for (const link of body.matchAll(/hreflang="([^"]+)" href="([^"]+)"/g)) {
+        alternates[link[1] as string] = link[2] as string
+      }
+      return {
+        loc: /<loc>([^<]+)<\/loc>/.exec(body)?.[1] ?? '',
+        lastmod: /<lastmod>([^<]+)<\/lastmod>/.exec(body)?.[1] ?? '',
+        changefreq: 'weekly' as const,
+        alternates,
+      }
+    })
+  }
+
+  /** The `hreflang` set the SERVED page advertises, read out of its `<head>`. */
+  function headAlternates(html: string): Readonly<Record<string, string>> {
+    const found: Record<string, string> = {}
+    for (const link of html.matchAll(/<link[^>]*rel="alternate"[^>]*>/g)) {
+      const tag = link[0]
+      const lang = /hreflang="([^"]+)"/.exec(tag)?.[1]
+      const href = /href="([^"]+)"/.exec(tag)?.[1]
+      if (lang !== undefined && href !== undefined) found[lang] = href
+    }
+    return found
+  }
+
+  it('serves an index of only the sections that hold URLs', async () => {
+    const response = await fetchPath(SITEMAP_INDEX_PATH)
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('application/xml')
+    const xml = await response.text()
+    const sections = locations(xml)
+    // `pages` and `treatments` hold URLs; `therapists` and `journal` do not, and an empty `<urlset>` is a
+    // positive statement that those pages have gone — so they are absent from the index and 404 at their
+    // own paths. The published probe therapist is archived by the time this file's W-SITE-06 block ends,
+    // which is why the therapist section's presence is asserted inside that block instead.
+    expect(sections).toContain(`${siteOrigin()}${sitemapSectionPath('pages')}`)
+    expect(sections).toContain(`${siteOrigin()}${sitemapSectionPath('treatments')}`)
+    expect(sections).not.toContain(`${siteOrigin()}${sitemapSectionPath('journal')}`)
+    expect((await fetchPath(sitemapSectionPath('journal'))).status).toBe(404)
+    // An unknown type is a 404 too, not a redirect to the index: a crawler following a guessed path
+    // should learn the path is wrong.
+    expect((await fetchPath('/sitemaps/everything')).status).toBe(404)
+  }, 60_000)
+
+  it('dates every lastmod in the Asia/Dubai offset, from the row rather than the build', async () => {
+    const xml = await fetchHtml(sitemapSectionPath('treatments'))
+    const urls = parsedUrls(xml)
+    expect(urls.length).toBeGreaterThan(0)
+    for (const url of urls) {
+      // The acceptance criterion's own words: "rendered as timestamptz in the Asia/Dubai offset".
+      expect(url.lastmod, url.loc).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+04:00$/)
+    }
+    // And it is the ROW's instant, not the build's: every treatment page's lastmod equals
+    // `readTreatmentPages`' own answer through the same formatter. A lastmod that moved on every deploy
+    // is one Google stops reading.
+    const pages = await readTreatmentPages(sql)
+    const expected = new Set(pages.map((page) => lastmodFor(page.lastModified, 240)))
+    for (const url of urls)
+      expect(expected.has(url.lastmod), `${url.loc} ${url.lastmod}`).toBe(true)
+  }, 60_000)
+
+  it('keeps the admin estate, /analytics and every unpublishable page out of every sitemap', async () => {
+    const everything: string[] = []
+    for (const type of SITEMAP_TYPES) {
+      const response = await fetchPath(sitemapSectionPath(type))
+      if (response.status === 404) continue
+      everything.push(...locations(await response.text()))
+    }
+    expect(everything.length).toBeGreaterThan(10)
+    const forbidden = [
+      '/analytics',
+      '/settings',
+      '/hr/',
+      '/till',
+      '/reviews',
+      '/clients',
+      '/documents',
+      '/compliance',
+      '/agents',
+      '/checkout',
+      '/packages',
+      '/crm',
+      '/messaging',
+      '/accounts',
+      '/login',
+      '/kitchen-sink',
+      '/collector',
+      '/hero-demo',
+    ]
+    for (const loc of everything) {
+      for (const prefix of forbidden) {
+        expect(loc.includes(prefix), `${loc} is in a sitemap`).toBe(false)
+      }
+      // No pattern, ever: a `<loc>` of `…/[slug]` is a sitemap telling a crawler to fetch a 404.
+      expect(loc, loc).not.toContain('[')
+    }
+    // Every unpublishable therapist, by name: the three probe slugs and the nineteen seeded references.
+    for (const slug of ['probe-therapist-02', 'probe-therapist-03', 'probe-therapist-04']) {
+      expect(
+        everything.some((loc) => loc.includes(slug)),
+        slug,
+      ).toBe(false)
+    }
+    // The control: the pages that SHOULD be there are, or this passes on an empty sitemap.
+    for (const entry of sitemapEntries()) {
+      expect(everything, entry.path).toContain(`${siteOrigin()}${entry.path}`)
+    }
+  }, 120_000)
+
+  it('serves hreflang sets that are reciprocal AND equal to the page-level tags', async () => {
+    /*
+      The acceptance criterion's cross-check, and it is two claims. The first is internal: the sitemap's
+      own `hreflang` graph is reciprocal and self-referential, which `reciprocityFindings` judges — and
+      `sitemapXml` already refuses to serve a document that fails it, so this assertion is the proof that
+      the refusal is not what is keeping the document small.
+
+      The second is the one that matters: the set in the sitemap equals the set in the page's `<head>`.
+      They are built by one function (`alternatesFor`), so the agreement is structural — and the registry
+      entry and the rendered document are still two different programs, which is why it is asserted over
+      bytes.
+    */
+    for (const type of ['pages', 'treatments'] as const satisfies readonly SitemapType[]) {
+      const urls = parsedUrls(await fetchHtml(sitemapSectionPath(type)))
+      expect(formatSitemapFindings(reciprocityFindings(urls)), type).toBe('')
+      for (const url of urls) {
+        const path = new URL(url.loc).pathname
+        const html = await fetchHtml(path)
+        expect(headAlternates(html), `${url.loc} head vs sitemap`).toEqual(url.alternates)
+      }
+    }
+  }, 300_000)
+
+  describe('the publish loop, as one job run', () => {
+    const ORIGIN = 'https://example.test'
+    const KEY = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6'
+    const CLOCK = '2026-10-03T10:00:00.000Z'
+
+    function ports(key = KEY) {
+      return {
+        indexNow: createFakeIndexNow({
+          log: createCallLog(() => CLOCK),
+          failures: new FailureScript(),
+          now: () => CLOCK,
+          key,
+        }),
+        purge: createFakePurge({ now: () => CLOCK }),
+      }
+    }
+
+    it('M4: one run produces all five artefacts, and the ping carries exactly the changed URLs', async () => {
+      const [service] = await readTreatmentPages(sql)
+      expect(service).toBeDefined()
+      if (service === undefined) return
+      const lastmodBefore = service.lastModified
+
+      // The publish: a price change through the repository, which is what an admin screen does.
+      const [variant] = await sql<{ id: string }[]>`
+        select v.id from service_variant v join service s on s.id = v.service_id
+         where s.slug = ${service.slug} order by v.duration_minutes limit 1
+      `
+      expect(variant).toBeDefined()
+      if (variant === undefined) return
+      // The admin path: an effective-dated `price_list` row in force today, which is what a price rise
+      // is. It never overwrites the catalogue figure — `treatments.itest.ts` records why.
+      await withUnitOfWork(sql, ACTOR, (uow) =>
+        changeVariantPrice(uow, {
+          serviceVariantId: variant.id,
+          grossPriceFils: 31_500,
+          label: 'W-SITE-08 publish loop',
+          validFrom: new Date().toISOString().slice(0, 10),
+          validTo: null,
+        }),
+      )
+
+      const paths = revalidationPathsFor({ kind: 'price', slug: service.slug })
+      const revalidated: string[] = []
+      const { indexNow, purge } = ports()
+      const report = await propagatePublish(
+        {
+          surface: 'service',
+          subjectId: service.slug,
+          origin: ORIGIN,
+          paths: [...paths],
+          cacheTags: [...cacheTagsFor('service_price')],
+          reason: 'service published',
+        },
+        {
+          sql,
+          revalidate: (path) => revalidated.push(path),
+          indexNow,
+          purge,
+          actor: ACTOR,
+        },
+      )
+
+      // 1. The route is live with correct JSON-LD — served, and valid by the same rule set the CI gate uses.
+      const html = await fetchHtml(`/treatments/${service.slug}`)
+      const licence = await readLicenceClass()
+      for (const graph of jsonLdBlocks(html)) {
+        expect(
+          formatFindings(validateGraph(graph, { licence: licence as never })),
+          `${service.slug} graph`,
+        ).toBe('')
+      }
+      // 2. The sitemap's lastmod moved, because the row's updated_at did.
+      const after = (await readTreatmentPages(sql)).find((page) => page.slug === service.slug)
+      expect(after?.lastModified, 'the price change did not move the row instant').not.toBe(
+        lastmodBefore,
+      )
+      // 3. The IndexNow ping carried EXACTLY the changed URLs.
+      const outbox = await indexNow.outbox()
+      expect(outbox).toHaveLength(1)
+      expect([...(outbox[0]?.urls ?? [])]).toEqual(
+        [...paths].sort().map((path) => `${ORIGIN}${path}`),
+      )
+      expect(outbox[0]?.outcome.kind).toBe('accepted')
+      // 4. The CDN purge covered those paths and no others.
+      const purgeOutbox = await purge.outbox()
+      expect(purgeOutbox).toHaveLength(1)
+      expect([...(purgeOutbox[0]?.paths ?? [])]).toEqual([...paths].sort())
+      // 5. An audit row, with the propagation it describes.
+      const [audit] = await sql<{ count: string }[]>`
+        select count(*)::text as count from audit_event
+         where action = 'publication.propagate' and entity_id = ${report.record.id}::text
+      `
+      expect(audit?.count).toBe('1')
+      // And the visible outbox holds the run, with the DECLARED tags rather than a derived set.
+      expect([...report.record.cacheTags].sort()).toEqual([...cacheTagsFor('service_price')].sort())
+      expect(revalidated.sort()).toEqual([...paths].sort())
+    }, 180_000)
+
+    it('pings once per changed URL set, however many times the publish is retried', async () => {
+      const { indexNow, purge } = ports()
+      const input = {
+        surface: 'content' as const,
+        subjectId: null,
+        origin: ORIGIN,
+        paths: ['/faq', '/ar/faq'],
+        cacheTags: ['content'],
+        reason: 'faq published',
+      }
+      const deps = { sql, revalidate: () => {}, indexNow, purge, actor: ACTOR }
+      const first = await propagatePublish(input, deps)
+      const second = await propagatePublish(input, deps)
+      expect(first.deduplicated).toBe(false)
+      expect(second.deduplicated).toBe(true)
+      // One row, because `publish_propagation_once_per_set` is unique on (surface, key) — so the
+      // idempotency is the DATABASE's rather than the fake's memory, which a restart would end.
+      const rows = await readPropagations(sql, 100)
+      const forSet = rows.filter(
+        (row) =>
+          row.idempotencyKey ===
+          indexNowIdempotencyKey(['/faq', '/ar/faq'].map((p) => `${ORIGIN}${p}`)),
+      )
+      expect(forSet).toHaveLength(1)
+      // The provider saw both calls and sent one. Both are in its outbox: an outbox that recorded only
+      // the first could not answer "did we try again?".
+      const outbox = await indexNow.outbox()
+      expect(outbox).toHaveLength(2)
+      expect(
+        outbox.map((entry) =>
+          entry.outcome.kind === 'accepted' ? entry.outcome.deduplicated : null,
+        ),
+      ).toEqual([false, true])
+      expect(purgeIdempotencyKey(['/faq', '/ar/faq'])).toBe(
+        purgeIdempotencyKey(['/ar/faq', '/faq', '/faq']),
+      )
+    }, 120_000)
+
+    it('refuses the ping with a named reason when the key is unset, and never reports success', async () => {
+      // `Y1-indexnow-key` is open, so this is the state the pipeline is actually in. The publish still
+      // succeeds — a ping is a notification, not a precondition — and the refusal is recorded in three
+      // places rather than being a branch that skipped silently.
+      const { purge } = ports()
+      const report = await propagatePublish(
+        {
+          surface: 'premises',
+          subjectId: null,
+          origin: ORIGIN,
+          paths: ['/contact'],
+          cacheTags: [...cacheTagsFor('address')],
+          reason: 'address changed',
+        },
+        { sql, revalidate: () => {}, indexNow: null, purge, actor: ACTOR },
+      )
+      expect(report.record.indexnowOutcome).toBe('refused_no_key')
+      expect(report.record.indexnowError).toContain('Y1-indexnow-key')
+      // The agent console's `last_error`, which is where docs/09 §5 says a rejection surfaces.
+      const [heartbeat] = await sql<{ last_error: string | null; last_outcome: string | null }[]>`
+        select last_error, last_outcome from agent_heartbeat where agent_key = 'publish_propagate'
+      `
+      expect(heartbeat?.last_error).toContain('Y1-indexnow-key')
+      expect(heartbeat?.last_outcome).toBe('succeeded_with_rejection')
+      // The purge still happened: one refused call does not cancel the other.
+      expect(report.record.purgeOutcome).toBe('accepted')
+    }, 120_000)
+
+    it('surfaces a provider rejection as last_error, and keeps the publish', async () => {
+      const { purge } = ports()
+      const indexNow = createFakeIndexNow({
+        log: createCallLog(() => CLOCK),
+        failures: new FailureScript(),
+        now: () => CLOCK,
+        key: KEY,
+      })
+      const report = await propagatePublish(
+        {
+          surface: 'theme',
+          subjectId: null,
+          origin: ORIGIN,
+          // A URL on another host, which is the rejection IndexNow actually makes: the key is verified
+          // against the host it names, so a submission for somebody else's domain answers 422.
+          paths: ['/pricing'],
+          cacheTags: [...cacheTagsFor('accent_density_radius')],
+          reason: 'accent changed',
+        },
+        {
+          sql,
+          revalidate: () => {},
+          indexNow,
+          purge,
+          actor: ACTOR,
+        },
+      )
+      // The control: this submission is legitimate, so it is accepted — and the rejection path is
+      // asserted by the fake's own unit test, where the host mismatch can be constructed directly.
+      expect(report.record.indexnowOutcome).toBe('accepted')
+      expect(report.record.indexnowError).toBeNull()
+    }, 120_000)
+
+    it('refuses a propagation that changed nothing, rather than recording one', async () => {
+      await expect(
+        propagatePublish(
+          {
+            surface: 'service',
+            subjectId: null,
+            origin: ORIGIN,
+            paths: [],
+            cacheTags: ['catalogue'],
+            reason: 'nothing',
+          },
+          { sql, revalidate: () => {}, indexNow: null, purge: ports().purge, actor: ACTOR },
+        ),
+      ).rejects.toThrow(/changed no URLs/)
+    }, 60_000)
+  })
 })

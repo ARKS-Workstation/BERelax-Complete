@@ -489,12 +489,19 @@ describe('robots.txt is a crawl policy and repeats itself on purpose', () => {
     }
   })
 
-  it('names no sitemap while no route serves one, and names it the day one does', () => {
-    expect(body).not.toContain('Sitemap:')
-    // The registry is in exact bijection with the filesystem, so this is also the statement that nothing
-    // serves that path today. W-SITE-08 owns the sitemap index.
-    expect(routeByPath('/sitemap.xml')).toBeUndefined()
-    // The control: the line is emitted, absolute, when the caller says the route exists.
+  it('names the sitemap, because a route now serves one', () => {
+    /*
+      This case read `expect(body).not.toContain('Sitemap:')` until W-SITE-08, and the inversion is the
+      point of how it was written: the registry is in exact bijection with the filesystem, so "the
+      registry declares /sitemap.xml" and "something serves it" are one statement — and `robotsResponse`
+      emits the line from that fact rather than from a constant somebody has to remember to flip. The day
+      the index landed, this assertion failed and was turned round; nothing in `robots.ts` changed.
+    */
+    expect(routeByPath('/sitemap.xml')).toBeDefined()
+    // The control for the other branch, which has to go on working: a caller that says there is no
+    // sitemap gets no line, because a `Sitemap:` pointing at a 404 is a reported error in Search Console.
+    const withoutSitemap = buildRobotsTxt({ origin: 'https://example.test', sitemapPath: null })
+    expect(withoutSitemap).not.toContain('Sitemap:')
     const withSitemap = buildRobotsTxt({
       origin: 'https://example.test',
       sitemapPath: '/sitemap.xml',

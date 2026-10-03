@@ -62,6 +62,7 @@ import {
 } from './jobs/package-expiry.ts'
 import { PARALLEL_RUN_RECONCILE_JOB_DEFINITION } from './jobs/parallel-run-reconcile.ts'
 import { PAYMENT_RECONCILIATION_JOB_DEFINITION } from './jobs/payment-reconciliation.ts'
+import { PUBLISH_PROPAGATE_JOB_DEFINITION } from './jobs/publish-propagate.ts'
 import { RECONCILE_DLR_JOB } from './jobs/reconcile-dlr.ts'
 import { runRecurringCostCheck } from './jobs/recurring-cost-check.ts'
 import { REPORTING_REFRESH_JOB_DEFINITION } from './jobs/reporting-refresh.ts'
@@ -495,6 +496,12 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
   SETTLEMENT_IMPORT_JOB_DEFINITION,
   // A queue with no cron, and therefore no agent. W-SYS-05: a derivative build is announced by the
   // upload that produced the original, so the thing being watched is the request that accepted the file.
+  // W-SITE-08's publish loop, and a fourth queue with no cron: a publish ANNOUNCES the work, so a
+  // schedule here would be a poller looking for changes nobody made. It is the one announced queue that
+  // DOES declare an agent, and the reason is the opposite of a schedule — what has to be visible is not
+  // whether the job ran but whether its two outbound calls were accepted, and `agent_heartbeat.last_error`
+  // is where docs/09 §5's console reads a rejected IndexNow ping from. Its agent row arrives in 0158.
+  PUBLISH_PROPAGATE_JOB_DEFINITION,
   BUILD_DERIVATIVES_JOB,
   // W-SYS-06, and the same shape again: a hero video master is written to the private bucket by the
   // request that accepted it, and that request enqueues this. Separate from the image build rather than a

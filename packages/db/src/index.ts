@@ -1496,6 +1496,14 @@ export {
   recordDocumentFetch,
   registerPrivateDocument,
 } from './repositories/private-document.ts'
+export {
+  type PropagationOutcome,
+  type PropagationRecord,
+  type PropagationSurface,
+  type RecordPropagationInput,
+  readPropagations,
+  recordPropagation,
+} from './repositories/propagation.ts'
 /*
   W-SITE-10's publication control plane. The only module in the build that writes `publication_lint_pass`,
   `publication_approval` and `publication_record`: 0093 makes all three append-only for every role, so a
@@ -5967,4 +5975,38 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // a unique index, so the codes are 23514 and 23505 and the constraint name says which rule, and
 // `pnpm sqlstate` refuses an entry for a code no migration raises.
 //
-export const SCHEMA_VERSION = 157 as const
+// 158 is 0158_publish_propagate_agent.sql (W-SITE-08) — one `agent_definition` row, its
+// `agent_heartbeat` row, the `publish_propagation` table, two indexes and one trigger. Mirrored in
+// `packages/db/src/schema/agents.ts`.
+//
+// THE AGENT HAS NO CRON, WHICH IS THE ONE UNUSUAL THING IN IT. Every other agent in this registry is
+// scheduled; propagation is triggered by a publish, because propagating a change nobody made reads the
+// same rows and sends nothing. `expected_interval_seconds` is therefore a WATCHDOG BOUND rather than a
+// schedule — a week, chosen so that a quiet week in which nobody published is not an incident while a
+// broken loop is noticed long before a quarter's rankings are. `pnpm jobs` refuses a cron without an
+// agent and says nothing about an agent without a cron, which is the right way round: the agent row is
+// what makes "no agent ever stops quietly" (docs/09 §5) true for a job whose silence is the hardest to
+// notice — a publish that revalidated its pages and failed to ping leaves a site that looks entirely
+// correct and is simply not re-crawled.
+//
+// `publish_propagation` IS THE VISIBLE OUTBOX THE CRITERION ASKS FOR. The fakes hold theirs in memory,
+// which is right for a fake and useless for an operator: a process restart is the end of the record, and
+// "did we actually ping, and with what?" is asked about production. The table is NOT append-only — a run
+// is one row updated once as it completes, and the ordering question is `audit_event`'s (0005), which the
+// job writes as its fifth artefact.
+//
+// `publish_propagation_once_per_set` IS THE IDEMPOTENCY. Unique on `(surface, idempotency_key)`, where
+// the key is a hash of the sorted, deduplicated changed URL set — so "a retried publish yields one ping
+// per changed URL set" is a property of this database rather than of a fake's memory. Per SURFACE as
+// well as per key, because the same URL set can legitimately be republished by two different kinds of
+// change (archiving a therapist and editing the CMS page that linked them both touch `/therapists`), and
+// collapsing those would lose one of them.
+//
+// ZY791 holds `(idempotency_key, changed_urls)` TOGETHER. The key is a hash OF the set, so a key that
+// moved on its own makes the row a record of a submission nobody made — and once IndexNow has accepted a
+// set, rewriting it makes the outbox answer "what did we send?" with what somebody wishes had been sent.
+//
+// ZY792 through ZY800 are released UNUSED and deliberately unregistered, because `pnpm sqlstate` refuses
+// an entry for a code no migration raises.
+//
+export const SCHEMA_VERSION = 158 as const
