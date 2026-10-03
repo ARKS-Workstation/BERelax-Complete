@@ -15509,16 +15509,20 @@ units:
       DOCUMENT must be served in both locales, which needs an Arabic admin document and the W-SYS-01 shell,
       and `?dir=rtl` re-renders the English document mirrored so the direction half of the matrix is audited
       without inventing an Arabic admin surface - the month reconciliation, the compliance calendar, the
-      Messages inbox and the five HR screens are the precedent. (3) The browser suite was WRITTEN AND NOT
-      EXECUTED in this container: it needs `pnpm --filter @berelax/web build` and the container had 1.6 GB
-      free with three other agents building, so the one build this unit was budgeted could not be spent. It
-      is read-only by construction - the window is a seeded trading day with no appointment, document,
-      journal entry or shift, so it creates nothing but its own principal and the `journal_entry`
-      no-DELETE hazard (ZL001) cannot arise. The band `dashboards` at 24_200 is declared and claimed, so
-      `test-ports.test.ts` holds. Everything that does not need a browser - the scope in the query, the
-      forbidden columns absent from the serialised payload, the drill-down identity for every tile, the
-      export''s audit row and its alert, and the bucket count, contiguity and business-day order over the
-      rendered HTML - is asserted in `apps/web/src/dashboards.itest.ts`, which ran twice.'
+      Messages inbox and the five HR screens are the precedent. (3) The browser suite WAS run, against a real
+      build, and it found a defect on its first run: the KPI tile printed its formula in a token that is
+      under 4.5:1 on a surface, and axe reported color-contrast as SERIOUS in all twelve cells. The
+      string-level tile suite could not have seen it (a contrast ratio is a property of two rendered
+      colours) and `pnpm colours` could not either (both values are tokens, which is all that check
+      claims). Fixed, and the suite then passed: the bucket order, axe over twelve cells with a known-bad
+      control, and the twelve-cell screenshot matrix with zero pixel diff on a re-run. It is read-only by
+      construction - the window is a seeded trading day with no appointment, document, journal entry or
+      shift, so it creates nothing but its own principal and the `journal_entry` no-DELETE hazard (ZL001)
+      cannot arise. The band `dashboards` at 24_200 is declared and claimed. Everything that does not need
+      a browser - the scope in the query, the forbidden columns absent from the serialised payload, the
+      drill-down identity for every tile, the export''s audit row and its alert, and the bucket count,
+      contiguity and business-day order over the rendered HTML - is asserted in
+      `apps/web/src/dashboards.itest.ts`, which ran twice.'
     files:
     - packages/core/src/reporting/dashboards.ts
     - packages/db/src/reporting/dashboard-queries.ts
