@@ -51,6 +51,11 @@ export const PROCESSOR_PURPOSES = [
   'error_monitoring',
   'accounting_export',
   'language_generation',
+  // Added by the integrator at the final verify. A-MEAS-03 put `ANALYTICS_PROVIDER` in the config
+  // schema, and this register has no row for a provider key it cannot name a purpose for — none of
+  // the eight above is what GA4 and a conversions API do, and filing it under `marketing_messaging`
+  // would say this system sends a visitor a message, which it does not.
+  'advertising_measurement',
 ] as const
 export type ProcessorPurpose = (typeof PROCESSOR_PURPOSES)[number]
 
@@ -185,6 +190,29 @@ export const PROCESSOR_REGISTER: readonly Processor[] = [
     agreementOnFile: false,
     why: 'Statements, receipts and anything with a document attached, which SMS cannot carry.',
   },
+  {
+    id: 'advertising-measurement',
+    vendor:
+      'the advertising platforms, which are GA4 and a conversions API in shape and neither in fact',
+    providerKey: 'ANALYTICS_PROVIDER',
+    configKeys: ['ANALYTICS_PROVIDER'],
+    purpose: 'advertising_measurement',
+    // What LEAVES is a conversion: that a booking reached PAID, what it was worth, and hashed
+    // identifiers so the platform can match it to somebody it already knows. No name, address or
+    // treatment: A-MEAS-01's allowlist is what holds that, and `pnpm egress` is what checks it.
+    dataClasses: ['identity', 'booking', 'financial', 'marketing'],
+    transferBasis: 'not_yet_established',
+    retention:
+      'Controlled by the platform once a conversion is accepted, which is the point of the consent ' +
+      'gate: nothing is pushed for a visitor who did not grant the signals the destination needs ' +
+      '(ADR 0076), and a dispatch the gate refuses is recorded as suppressed rather than sent.',
+    agreementOnFile: false,
+    why:
+      'Offline conversion measurement. The vendors are deliberately unnamed in the same sense as the ' +
+      'gateway: `ANALYTICS_PROVIDER=real` resolves to notImplemented, there is no measurement id and ' +
+      'no pixel id in this build, and naming a plausible account would read as configured.',
+  },
+
   {
     id: 'payment-gateway',
     vendor: 'the payment gateway, which has not been chosen',
