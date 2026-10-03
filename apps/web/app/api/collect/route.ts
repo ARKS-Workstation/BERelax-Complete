@@ -2,6 +2,7 @@ import { loadConfig } from '@berelax/config'
 import type { Clock, Instant } from '@berelax/core'
 import { createConnection } from '@berelax/db'
 import { siteOrigin } from '../../../src/routes/alternates.ts'
+import { takeRateLimit, withRateLimitHeaders } from '../../../src/security/rate-limit.ts'
 import { type CollectEndpointDeps, handleCollectRequest } from './ingest.ts'
 
 /**
@@ -78,5 +79,10 @@ function ownHostsFrom(origin: string): readonly string[] {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  return await handleCollectRequest(collectRuntime(), request)
+  // H-HARD-01. The highest ceiling of the four and still a ceiling: a beacon endpoint with none is a
+  // write amplifier pointed at the database it exists to keep traffic away from.
+  const limit = await takeRateLimit({ scope: 'collect', request, nowIso: new Date().toISOString() })
+  if (limit.kind === 'refused') return limit.response
+  const response = await handleCollectRequest(collectRuntime(), request)
+  return withRateLimitHeaders(response, limit.headers)
 }

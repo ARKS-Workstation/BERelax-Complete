@@ -5,6 +5,7 @@ import {
   ADMIN_BANNER_CSS,
   renderAdminBanner,
 } from '../../../src/components/admin/google-reauth-banner.ts'
+import { renderTillOfflinePanel, TILL_OFFLINE_PANEL_CSS } from './offline.ts'
 import { CHECKOUT_PATH, type CheckoutView } from './view.ts'
 
 /**
@@ -198,7 +199,7 @@ export function renderCheckout(view: CheckoutView): string {
     // No brand in the title: docs/09's brand-collision rule forbids the bare brand in any title, and
     // `apps/web/src/seo/brand.test.ts` scans every title-bearing line in `apps/web` for it.
     '<title>Take a card payment — payments admin</title>',
-    `<style>${tokensCss()}${CHECKOUT_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${CHECKOUT_CSS}${TILL_OFFLINE_PANEL_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',
@@ -219,6 +220,22 @@ export function renderCheckout(view: CheckoutView): string {
       ? ''
       : `<div class="refusal"><p><strong>Not authorised.</strong> ${safeText(view.refusal.sentence)}</p></div>`,
     outcome(view),
+    /*
+      H-HARD-08's honest-failure panel, BEFORE the form and not after a failure.
+
+      There is no code running in this browser — ADR 0013, and `script-src 'none'` on this document — so a
+      submission that cannot reach the server ends on the browser's own error page. The only moment this
+      application is certain to have the operator's attention is before the submission, which is why the
+      reference and the paper fallback are rendered unconditionally rather than on an error state nothing
+      could detect.
+    */
+    renderTillOfflinePanel({
+      idempotencyKey: view.idempotencyKey,
+      // A state only when the SERVER answered. A refusal that arrived is a refusal before the money
+      // moved; the other two states are things this page can never be re-rendered to say, which is why
+      // the panel carries their sentences standing.
+      state: view.refusal === null ? null : 'refused_before_the_money_moved',
+    }),
     '<h2>Card details</h2>',
     cardFields(view),
     '<h2>What is being paid</h2>',

@@ -667,7 +667,7 @@ describe('acceptance — a valid link and an unknown one answer the same status 
     const issued = await mintToken(readerId)
     const valid = await readPage({ contactId: readerId, token: issued.token })
     // Well-formed and belonging to nothing: the shape C-CRM-04 refuses without a query.
-    const forged = 'A'.repeat(OPT_OUT_TOKEN_LENGTH - 1) + 'b'
+    const forged = `${'A'.repeat(OPT_OUT_TOKEN_LENGTH - 1)}b`
     expect(forged).toHaveLength(OPT_OUT_TOKEN_LENGTH)
     const unknown = await readPage({ contactId: readerId, token: forged }, READ_ISO)
 

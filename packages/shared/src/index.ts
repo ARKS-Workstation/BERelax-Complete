@@ -235,6 +235,24 @@ export {
   rightsSlaDaysSchema,
   rightsSupervisoryAuthoritySchema,
 } from './privacy.ts'
+/*
+  H-HARD-01's public-endpoint rate limits. The policy, the decision and the headers are here because
+  `@berelax/db` holds the counter and `apps/web` holds the endpoints, and this is the package both may see.
+*/
+export {
+  decideRateLimit,
+  RATE_LIMIT_OPEN_QUESTION,
+  RATE_LIMIT_POLICIES,
+  RATE_LIMIT_RETENTION_DAYS,
+  RATE_LIMIT_SCOPES,
+  type RateLimitDecision,
+  type RateLimitPolicy,
+  type RateLimitScope,
+  type RateLimitWindow,
+  rateLimitHeaders,
+  rateLimitKey,
+  windowStartFor,
+} from './rate-limit.ts'
 export {
   DEFAULT_REMINDER_OFFSETS_HOURS,
   MAX_REMINDER_OFFSET_HOURS,
@@ -395,6 +413,19 @@ export {
   UNSUPPRESSION_SOURCES,
   type UnsuppressionSource,
 } from './schemas/suppression.ts'
+/*
+  P-HR-14's staff notification set. Named in `@berelax/shared` because three packages read it: the template
+  corpus and the class fence in `@berelax/messaging`, the credential-expiry pass in `@berelax/worker` and
+  the portal screen in `apps/web`.
+*/
+export {
+  isStaffNotificationTemplateKey,
+  STAFF_NOTIFICATION_CLASS,
+  STAFF_NOTIFICATION_CLASS_REFUSAL,
+  STAFF_NOTIFICATION_TEMPLATE_KEY_LIST,
+  STAFF_NOTIFICATION_TEMPLATE_KEYS,
+  type StaffNotificationName,
+} from './staff-notifications.ts'
 
 /** Nominal typing helper, so an AppointmentId cannot be passed where a RoomId is wanted. */
 export type Brand<T, B extends string> = T & { readonly __brand: B }

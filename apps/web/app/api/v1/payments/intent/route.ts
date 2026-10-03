@@ -2,6 +2,7 @@ import { loadConfig } from '@berelax/config'
 import type { Clock, Instant } from '@berelax/core'
 import { createConnection } from '@berelax/db'
 import { createPaymentGateways } from '@berelax/payments'
+import { takeRateLimit, withRateLimitHeaders } from '../../../../../src/security/rate-limit.ts'
 import { handlePaymentIntentRequest, type PaymentIntentEndpointDeps } from './handler.ts'
 
 /**
@@ -47,5 +48,16 @@ function paymentsRuntime(): PaymentIntentEndpointDeps {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  return await handlePaymentIntentRequest(paymentsRuntime(), request)
+  // H-HARD-01, and an INTERIM control rather than an answer: `Y7-intent-endpoint-auth` is open, so today
+  // this is an unauthenticated POST that creates a payment intent. A ceiling bounds the damage; it does
+  // not decide who may call this, and `RATE_LIMIT_POLICIES.payment_intent` says so rather than reading as
+  // though the question were settled.
+  const limit = await takeRateLimit({
+    scope: 'payment_intent',
+    request,
+    nowIso: new Date().toISOString(),
+  })
+  if (limit.kind === 'refused') return limit.response
+  const response = await handlePaymentIntentRequest(paymentsRuntime(), request)
+  return withRateLimitHeaders(response, limit.headers)
 }

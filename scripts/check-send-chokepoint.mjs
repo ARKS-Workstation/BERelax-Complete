@@ -158,6 +158,14 @@ const KILL_SWITCH_WRITER = 'packages/db/src/repositories/messaging-controls.ts'
  */
 const PERMITTED_LITERAL_KILL_SWITCHES = new Map([
   [
+    'apps/worker/src/jobs/credential-expiry-notice.ts',
+    'The credential-expiry notice to a therapist (P-HR-14). Transactional staff traffic: a licence ' +
+      'about to lapse stops that therapist being bookable, so a marketing decision must never ' +
+      'suppress it, and reading the marketing control row here would let an unreadable table hide an ' +
+      'expiring licence. Added by the integrator at the P-HR-14 / H-HARD-01 merge, where this rule ' +
+      'first saw the file.',
+  ],
+  [
     'apps/web/app/api/v1/book/route.ts',
     'The booking confirmation. Transactional, and the one message a marketing decision must never stop.',
   ],
@@ -191,6 +199,15 @@ const PERMITTED_LITERAL_KILL_SWITCHES = new Map([
       'row here would be worse than not reading it — an unreadable marketing table would stop the one ' +
       'message that says the salon’s figures cannot be trusted today, which is the failure this alert ' +
       'exists to make visible.',
+    'apps/worker/src/jobs/credential-expiry-notice.ts',
+    'The credential-expiry notices (P-HR-14). Transactional, and the route REFUSES anything else by ' +
+      'name: `deliverStaffNotification` throws `staff_notification_must_be_transactional` for a template ' +
+      'whose class is not transactional and for a key outside the declared four, so a promotional send ' +
+      'through this runtime is unreachable rather than merely unevaluated. The three consent evaluators ' +
+      'beside the literal THROW as well, which is the second layer. Reading the marketing control row ' +
+      'here would be worse than not reading it: an unreadable marketing table would stop the message ' +
+      'that tells a therapist a document on their file is about to lapse, after which the credential ' +
+      'sweep takes their bookings off them with no notice.',
   ],
   [
     'apps/worker/src/jobs/seo-weekly-report.ts',

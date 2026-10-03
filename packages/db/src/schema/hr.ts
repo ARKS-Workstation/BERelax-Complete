@@ -18,7 +18,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
-import { employee, leaveRequest, staffLanguage } from './staff.ts'
+import { employee, employeeDocument, leaveRequest, staffLanguage } from './staff.ts'
 
 /**
  * Drizzle mirror of the two tables `packages/db/migrations/0050_employee.sql` creates, the one
@@ -902,6 +902,82 @@ export const rotaPublicationNotice = pgTable(
     check(
       'rota_publication_notice_skip_produced_no_message',
       sql`${t.skippedReason} is null or ${t.messageId} is null`,
+    ),
+  ],
+)
+
+/**
+ * `credential_expiry_notice` — one notice DECIDED about one document on one person's file (0163).
+ *
+ * P-HR-14. The acceptance line is that the notices are idempotent per (employee, document, window), and
+ * `credential_expiry_notice_once` is where that lives rather than in the pass: a pass that remembered what
+ * it had sent would be a second copy of the truth, lost the first time the worker restarts mid-run, and a
+ * unique index also holds against two workers and against a `psql` session. The insert is
+ * `on conflict do nothing`, so a second pass inserts no row, sends no message and writes no audit event.
+ *
+ * `windowDays` is in the key and `expiresOn` is not: widening the configured window from 60 to 90 days is a
+ * change to the QUESTION, so a notice under a wider window is a new fact, while `employee_document.expires_on`
+ * cannot vary for one document because 0030 makes a renewal a new row rather than an update.
+ *
+ * **Append-only: UPDATE and DELETE raise ZY841 for every role**, by `refuse_credential_expiry_notice_change()`.
+ * A notice is evidence that somebody was told — or that nothing could be sent to them, which is the shipped
+ * state since no table in this build holds a staff phone number (0081's argument). A correction is a further
+ * row under a different window.
+ */
+export const credentialExpiryNotice = pgTable(
+  'credential_expiry_notice',
+  {
+    id: uuid('id').primaryKey(),
+    employeeId: uuid('employee_id')
+      .notNull()
+      .references(() => employee.id, { onDelete: 'restrict' }),
+    /** RESTRICT, unlike `employee_document`'s own cascade to `employee`: a document removed under a
+     * notice would leave a notice about nothing while reading as though none had been sent. */
+    employeeDocumentId: uuid('employee_document_id')
+      .notNull()
+      .references(() => employeeDocument.id, { onDelete: 'restrict' }),
+    windowDays: integer('window_days').notNull(),
+    expiresOn: date('expires_on').notNull(),
+    detectedOn: date('detected_on').notNull(),
+    /** Pinned to `hr.credential_expiring` by a CHECK: a notice addressed at another template is a notice
+     * about something else. */
+    templateKey: text('template_key').notNull(),
+    /** `sent` or `skipped`. */
+    outcome: text('outcome').notNull(),
+    /** `no_recipient_on_file` is the shipped state rather than an edge case. */
+    skipReason: text('skip_reason'),
+    /** Text and not a reference: a send diverted to the local outbox has no `message` row. */
+    messageId: text('message_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    createdBy: text('created_by').notNull(),
+  },
+  (t) => [
+    uniqueIndex('credential_expiry_notice_once').on(
+      t.employeeId,
+      t.employeeDocumentId,
+      t.windowDays,
+    ),
+    index('credential_expiry_notice_employee_idx').on(t.employeeId, t.detectedOn),
+    check(
+      'credential_expiry_notice_window_is_plausible',
+      sql`${t.windowDays} >= 0 and ${t.windowDays} <= 365`,
+    ),
+    check('credential_expiry_notice_outcome_is_known', sql`${t.outcome} in ('sent', 'skipped')`),
+    check(
+      'credential_expiry_notice_skip_has_a_reason',
+      sql`(${t.outcome} = 'skipped') = (${t.skipReason} is not null)`,
+    ),
+    check(
+      'credential_expiry_notice_send_has_a_message',
+      sql`(${t.outcome} = 'sent') = (${t.messageId} is not null)`,
+    ),
+    check(
+      'credential_expiry_notice_template_is_the_credential_one',
+      sql`${t.templateKey} = 'hr.credential_expiring'`,
+    ),
+    check(
+      'credential_expiry_notice_created_by_not_placeholder',
+      sql`not is_placeholder_text(${t.createdBy})`,
     ),
   ],
 )

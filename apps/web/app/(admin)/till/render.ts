@@ -4,6 +4,7 @@ import {
   ADMIN_BANNER_CSS,
   renderAdminBanner,
 } from '../../../src/components/admin/google-reauth-banner.ts'
+import { inlineScriptTag } from '../../../src/security/inline-script.ts'
 import {
   TILL_FIELDS,
   TILL_TENDER_FIELDS,
@@ -568,7 +569,7 @@ export function renderTillHtml(view: TillView): string {
     issuerPanel(view),
     assumptionsPanel(view),
     '</main>',
-    `<script>${TILL_SCRIPT}</script>`,
+    inlineScriptTag(view.chrome.cspNonce, TILL_SCRIPT),
     '</body>',
     '</html>',
   ].join('\n')

@@ -97,6 +97,14 @@ const EXPECTED = [
   'resolveSenderIdentity',
   'resolveVariant',
   'sendMessage',
+  // P-HR-14's staff notification route. Three exports and none of them can be handed a transport: the
+  // route is a CLASS FENCE in front of `deliverMessage`, so it adds a refusal and nothing else. It is
+  // listed rather than exempted because an export that could send is exactly what this file freezes, and
+  // the reason it is safe is that `deliverStaffNotification` calls `deliverMessage` — which calls
+  // `sendMessage` — with nothing in between, as `pnpm send-chokepoint` asserts by finding no `.send(`.
+  'STAFF_NOTIFICATION_REFUSALS',
+  'assertStaffNotificationClass',
+  'deliverStaffNotification',
   'senderIdFor',
   'senderIdRegistryFault',
   'transactionalDefaults',

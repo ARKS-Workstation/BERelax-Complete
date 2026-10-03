@@ -84,7 +84,7 @@ function runScript(cookie: string, options: { readonly ok?: boolean } = {}): Run
     })
     return Promise.resolve({ ok: options.ok !== false })
   }
-  // biome-ignore lint/security/noGlobalEval: the subject under test IS a script string, and running the real one is the only way this file can be a check rather than a copy
+  // The subject under test IS a script string, and running the real one is the only way to prove the bootstrap behaves. `new Function` rather than `eval`, and the suppression that named `noGlobalEval` was removed at the P-HR-14 merge: biome does not raise that rule here, and an unused suppression is itself an error.
   new Function('document', 'fetch', consentBootstrapScript())(document, fetchStub)
   return {
     // Getters, not values. The listener fires AFTER this function has returned — that is what a delegated

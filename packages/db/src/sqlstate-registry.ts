@@ -2837,6 +2837,20 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     translators: [],
   },
   {
+    code: 'ZY841',
+    rule: 'A credential expiry notice is append-only.',
+    migration: '0163',
+    raisedBy: ['refuse_credential_expiry_notice_change'],
+    translators: [],
+  },
+  {
+    code: 'ZY861',
+    rule: "A rate limit window's identity is immutable and its counters may only increase.",
+    migration: '0165',
+    raisedBy: ['refuse_rate_limit_window_rekey'],
+    translators: [],
+  },
+  {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',
     migration: '0093',

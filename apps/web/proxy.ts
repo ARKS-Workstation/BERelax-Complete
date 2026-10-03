@@ -66,7 +66,7 @@
 import { resolveLegacyRedirect } from '@berelax/core'
 import { type NextRequest, NextResponse } from 'next/server'
 import { localeOf, localisedPath, neutralPath } from './src/i18n/locales.ts'
-import { requiresAdminSession } from './src/routes/admin-routes.ts'
+import { isAdminPath, requiresAdminSession } from './src/routes/admin-routes.ts'
 import {
   CANONICAL_REDIRECT_STATUS,
   canonicalPath,
@@ -75,6 +75,12 @@ import {
   withoutTrailingSlash,
 } from './src/routes/canonical.ts'
 import { ROBOTS_HEADER, robotsTagFor } from './src/routes/registry.ts'
+import {
+  CSP_NONCE_HEADER,
+  mintCspNonce,
+  securityGroupFor,
+  securityHeaders,
+} from './src/security/headers.ts'
 import { ADMIN_LOGIN_PATH, adminSessionTokenFrom, RETURN_TO_PARAM } from './src/session.ts'
 
 /**
@@ -114,23 +120,62 @@ function redirectTo(requested: URL, pathname: string, status: number): NextRespo
   return NextResponse.redirect(destination, status)
 }
 
+/**
+ * The security header set, on EVERY response this file can produce (H-HARD-01).
+ *
+ * Every one of them, including the redirects and the login refusal, and that is the point rather than
+ * thoroughness: a 301 is a response a browser acts on, and an HSTS header missing from the redirect that
+ * sends a first-time visitor from `http://` is the one place it would have mattered. The same argument
+ * `next.config.ts` makes for putting `x-robots-tag` on a 401.
+ *
+ * The nonce is minted per RESPONSE and handed to the route on a request header, so an admin document's
+ * inline script can carry the same value the policy names. A nonce reused across responses is not a
+ * nonce: a cached page would carry a value an injected script could read and repeat.
+ */
+function withSecurityHeaders(
+  response: NextResponse,
+  args: { readonly pathname: string; readonly nonce: string },
+): NextResponse {
+  const group = securityGroupFor(args.pathname, isAdminPath)
+  for (const [name, value] of Object.entries(securityHeaders({ group, nonce: args.nonce }))) {
+    /*
+      `set` and not `append`, and the one case that makes the difference is the checkout.
+
+      `app/(admin)/checkout/handler.ts` builds its OWN content-security-policy, because that document
+      frames the gateway's card-entry origin and needs `frame-src` widened to it — a policy this file
+      cannot know. A route's own header is set on the response it returns, which happens AFTER this
+      middleware, so the route wins and that is the right way round: the narrow, route-specific policy
+      overrides the estate default rather than being appended beside it, which would produce two CSP
+      headers and a browser applying the INTERSECTION — frame-src 'none' included.
+    */
+    response.headers.set(name, value)
+  }
+  return response
+}
+
 export function proxy(request: NextRequest): NextResponse {
   // The path as it arrived, read from `request.url` rather than from `request.nextUrl` for the same
   // reason: `NextURL` analyses what it is handed, and the input to a canonicalisation has to be the input.
   const requested = new URL(request.url)
   const pathname = requested.pathname
+  // One nonce per response, minted before any branch so every return path below carries the same value
+  // on the header and in the request it forwards.
+  const nonce = mintCspNonce()
+  const secured = (response: NextResponse, forPath = pathname): NextResponse =>
+    withSecurityHeaders(response, { pathname: forPath, nonce })
+
   if (isProxyExempt(pathname)) {
     const trimmed = withoutTrailingSlash(pathname)
     return trimmed === pathname
-      ? NextResponse.next()
-      : redirectTo(requested, trimmed, METHOD_PRESERVING_REDIRECT_STATUS)
+      ? secured(passThrough(request, nonce))
+      : secured(redirectTo(requested, trimmed, METHOD_PRESERVING_REDIRECT_STATUS))
   }
 
   const canonical = canonicalPath(pathname)
   if (canonical !== pathname && REDIRECTABLE_METHODS.has(request.method)) {
     // One hop, because `canonicalPath` applies every rule at once and is idempotent: the destination
     // cannot itself need normalising, so there is no chain and no loop.
-    return redirectTo(requested, canonical, CANONICAL_REDIRECT_STATUS)
+    return secured(redirectTo(requested, canonical, CANONICAL_REDIRECT_STATUS), canonical)
   }
 
   /*
@@ -156,7 +201,11 @@ export function proxy(request: NextRequest): NextResponse {
     const locale = localeOf(canonical)
     const retired = resolveLegacyRedirect(neutralPath(canonical))
     if (retired !== null) {
-      return redirectTo(requested, localisedPath(retired.target, locale), CANONICAL_REDIRECT_STATUS)
+      // `secured(...)` on ONE line with the construction, which `pnpm headers` requires by name:
+      // a response built on one line and secured on another is how a later edit returns the
+      // unsecured one. W-SITE-09's legacy 301 was returned unsecured until the H-HARD-01 merge.
+      const retiredTarget = localisedPath(retired.target, locale)
+      return secured(redirectTo(requested, retiredTarget, CANONICAL_REDIRECT_STATUS), canonical)
     }
   }
 
@@ -195,7 +244,7 @@ export function proxy(request: NextRequest): NextResponse {
     // 303 rather than 307, so an unauthenticated POST to an admin route is not replayed as a POST to the
     // login screen carrying the original body. `NextResponse.redirect` defaults to 307, which preserves the
     // method — right for a canonicalisation and wrong here.
-    const redirect = NextResponse.redirect(destination, 303)
+    const redirect = secured(NextResponse.redirect(destination, 303), canonical)
     // A cached redirect to the login page would be served to the next reader, who may be signed in; and
     // the same URL answers differently depending on the cookie, which is what `Vary` says.
     redirect.headers.set('cache-control', 'no-store')
@@ -203,8 +252,23 @@ export function proxy(request: NextRequest): NextResponse {
     return redirect
   }
 
-  const response = NextResponse.next()
+  const response = secured(passThrough(request, nonce), canonical)
   const robots = robotsTagFor(canonical)
   if (robots !== null) response.headers.set(ROBOTS_HEADER, robots)
   return response
+}
+
+/**
+ * `NextResponse.next()` with the nonce on the forwarded REQUEST headers.
+ *
+ * The route needs the same value the policy names, and a response header is the wrong channel: the route
+ * runs before this file's response headers exist as far as it can see. Next's documented way round that is
+ * exactly this — rewrite the request's headers and the handler reads them — and
+ * `apps/web/src/components/admin/google-reauth-source.ts` is the one place that reads it, so no document
+ * has to remember to.
+ */
+function passThrough(request: NextRequest, nonce: string): NextResponse {
+  const headers = new Headers(request.headers)
+  headers.set(CSP_NONCE_HEADER, nonce)
+  return NextResponse.next({ request: { headers } })
 }

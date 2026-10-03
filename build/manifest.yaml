@@ -12879,7 +12879,7 @@ units:
       set (rota published, leave decided, credential expiring, swap requested) routed as transactional class
       only.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-MSG-01
@@ -12905,12 +12905,130 @@ units:
       a test showing both entry points call one function
     - 'field-policy test enumerates the exposed field set: no other employee''s salary, bank or identity
       field is reachable, and the therapist''s own bank detail is masked on display'
+    - 'NOTE: the PATH and the SHAPE this list got wrong, and the reason each correction was forced. The
+      portal is `apps/web/app/(admin)/hr/me/` and the on-behalf screen `apps/web/app/(admin)/hr/leave/`,
+      both `route.ts` handlers answering `text/html` rather than `page.tsx` documents: `registry.ts` is in
+      exact bijection with the filesystem and requires every DOCUMENT to be served in both locales
+      (`registry.test.ts`), so a `page.tsx` needs an Arabic admin document nobody has built — the same
+      correction P-HR-02, P-HR-06, P-HR-07 and P-HR-11 each recorded. The prefix is `/hr` and NOT a new
+      `/staff`, because `/hr` is already in `ADMIN_GROUP_PREFIXES`, which makes both routes noindex and
+      behind `requiresAdminSession` from the commit that creates them rather than from the commit that
+      remembers to add a prefix. The templates are in `packages/messaging/src/templates.ts` beside
+      `hr.rota_published` rather than in a `templates/staff/` directory, because `DEFAULT_TEMPLATES` is one
+      array that four corpus-wide claims iterate and a second file would be a second corpus. There is no
+      `me.e2e.ts`: see the H04 note below.'
+    - 'NOTE: DEFERRED — the H04 screenshot matrix and the axe gate (acceptance lines 2 and 5), and the
+      reason is structural rather than a shortfall of effort. `scripts/accessibility.mjs` and the capture
+      matrix both read `documentRoutes()`, which is `ROUTES.filter(kind === ''document'')`; an admin
+      handler has `locales: []` and is in neither. Putting the portal in the matrix therefore means making
+      it a DOCUMENT in both locales, which needs an Arabic admin surface and the W-SYS-01 shell, and whose
+      RTL half the matrix requires to be a real Arabic route rather than a mirrored English one. That is
+      the same wall every admin screen since P-HR-02 has hit, and it is one decision about the admin
+      estate rather than seven. HANDED TO W-SYS-01 (the admin shell), which is the unit that would make an
+      Arabic admin document exist. What IS built instead, and asserted: both routes carry
+      `<meta name="robots" content="noindex, nofollow, noarchive">` in their own bytes
+      (`apps/web/src/hr-me-render.test.ts`), the `/hr` prefix in `ADMIN_GROUP_PREFIXES` puts the header on
+      the live response, and both documents emit `renderAdminBanner` inside `<main>` so
+      `google-reauth-banner.test.ts`''s filesystem walk covers them. The accessibility claim is therefore
+      NOT MADE for these two routes, rather than made against a harness that cannot see them.'
+    - 'NOTE: the portal fence is SELF-ONLY with no permission in its condition, and that is deliberately
+      narrower than the screens next door. `mayReadPayslip` and `mayReadCommissionDerivation` both widen on
+      `payroll:read`, because an accountant running payroll legitimately reads somebody else''s figures;
+      nothing legitimately reads somebody else''s /hr/me. A rule of the form "self, or a permission" is one
+      grant away from a hole — a role given `payroll:read` tomorrow for a reporting screen acquires the
+      whole portal with it, in a diff about reports. So `assertPortalSubject` compares two employee ids and
+      refuses when they differ FOR EVERY ROLE INCLUDING THE OWNER, and the owner case is the one gate 195b
+      plants. The cost, stated: no manager can LOOK at a therapist''s portal, and diagnosing "the page is
+      wrong for her" means reading /hr/rota, /hr/commission and /hr/payroll. ADR 0117.'
+    - 'NOTE: a defect this unit shipped and the check that caught it. The first `judgeLeaveSubmission`
+      reserved `days * 100` for EVERY leave kind, so three days of unpaid leave deducted three days of
+      annual entitlement — against a ledger those days were never earned on, in a table that refuses
+      DELETE for every role (ZH001), so nothing could have taken the row back. `leave_movement` is the
+      ANNUAL ledger: sick leave has its own tiers and unpaid leave is by definition not drawn from an
+      accrual. Caught by the integration case asserting the balance DELTA for an unpaid request, which was
+      -300 and had to be 0; gate 195f restores the first draft''s arithmetic and requires the suite to
+      notice. Two smaller ones from the same file: the reservation passed `rule_effective_from`, which
+      `leave_movement_rule_matches_kind` refuses outside `accrual` and `carry_over_forfeited` (a
+      reservation is days somebody asked for, not a figure a policy version computed); and an opening
+      balance needs `day_basis`, which `leave_movement_day_basis_matches_kind` demands on that kind and
+      refuses on every other.'
+    - 'NOTE: what made the integration suite''s SHAPE, because it is not the usual one. This file creates
+      plain `employee` rows and uses NO `createFixturePrincipal`: that helper promises a `cleanup()`, and
+      an employee carrying a `leave_movement` cannot be deleted (`on delete restrict`), so the promise is
+      one the suite could not keep — the first draft discovered it by failing in `afterAll` three lines
+      before the statement that mattered. Five tables it writes refuse DELETE outright —
+      `rota_version` and `rota_version_assignment` (0081), `leave_movement` (ZH001), `leave_request`
+      (0030 revokes it) and `credential_expiry_notice` (ZY841) — so nothing is deleted at all and the
+      isolation is a per-run marker in every value that has to be unique, including the rota period, which
+      `rota_version_number_unique_per_period` would otherwise collide on from the previous run. That is
+      brief rule 9 and `hr-leave-approval.itest.ts`''s arrangement.'
+    - 'NOTE: the credential-expiry notice records the DECISION and the `message` row records the send, and
+      the order is forced by the table being append-only. The row is written BEFORE the send attempt:
+      sending first and recording after is a message that can leave twice, because the crash between the
+      two is the window a second worker races in and an SMS cannot be un-sent. The send''s own outcome then
+      cannot be written onto the row, since ZY841 refuses the UPDATE — so the message id is DERIVED from
+      the notice''s key `(employee, document, window)` and the choke point''s `templateKey:messageId`
+      idempotency covers a retry. `window_days` is IN the unique key and `expires_on` is OUT of it:
+      widening 60 days to 90 changes the question, while `employee_document.expires_on` cannot vary for one
+      document because 0030 makes a renewal a new row.'
+    - 'NOTE: NOTHING IS SENT, and the row says so rather than the pass reporting success. No table in this
+      build holds a staff phone number or an email address, so `NO_STAFF_CONTACT_ON_FILE` is the shipped
+      resolver and every notice is `skipped` with `no_recipient_on_file` — 0081''s answer for the rota
+      notice and 0075''s for the Google re-auth ladder. The resolver is INJECTED so the integration suite
+      can supply a recipient and drive the send path against a recording delivery, which is what makes "a
+      second run sends nothing" testable at all: a pass whose send branch could never run would have an
+      idempotency claim about a branch that does nothing. `NO_DELIVERY_WIRED` THROWS rather than skipping,
+      because "a recipient exists and nothing can send to them" is a configuration fault and a skip would
+      hide it behind the state the build ships in.'
+    - 'NOTE: a SHARED FILE edited beyond this unit''s own code, declared. `apps/worker/src/jobs/leave-accrual.ts`
+      had a private `asRules` mapping thirteen `leave_entitlement_rule` columns with a nested sick-leave
+      trio; this unit needed the same mapping and now `leaveEntitlementRulesFrom` in `@berelax/core` is the
+      ONE statement of it, with the worker''s copy deleted and its function delegating. Two copies of a
+      thirteen-field mapping is the "second statement of a fact" the brief refuses and the copy that stops
+      matching does it silently. `apps/web` gained `@berelax/hr` as a dependency (package.json and
+      `transpilePackages` in next.config.ts), because the portal composes the fence in `@berelax/core` with
+      the rows in `@berelax/db` and `packages/hr` is the only package that may see both.'
+    - 'NOTE: allocations. Migration 0163 used (`credential_expiry_notice`); 0164 and 0165 RELEASED UNUSED.
+      SQLSTATE ZY841 used (the notice is append-only); ZY842 through ZY850 RELEASED UNUSED and deliberately
+      unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises and everything
+      else this table has to say is a CHECK. ADR 0117 taken; 0118 and 0119 RELEASED UNUSED. Gate block
+      `// 195a-195z` used. The port band `{ start: 23_900, width: 300 }` is RELEASED UNUSED: no suite here
+      starts a server — the refusal is proved at the function boundary against real rows, and a declared
+      but unused band fails `test-ports.test.ts`.'
     files:
-    - apps/web/app/(admin)/staff/me/page.tsx
-    - apps/web/app/(admin)/staff/me/leave/page.tsx
-    - packages/messaging/src/templates/staff/*.ts
+    - packages/core/src/hr/self-service.ts
+    - packages/core/src/hr/self-service.test.ts
+    - packages/core/src/hr/leave-submission.ts
+    - packages/core/src/hr/leave-submission.test.ts
+    - packages/core/src/index.ts
+    - packages/db/migrations/0163_credential_expiry_notice.sql
+    - packages/db/src/repositories/staff-portal.ts
+    - packages/db/src/repositories/credential-expiry-notice.ts
+    - packages/db/src/schema/hr.ts
+    - packages/db/src/sqlstate-registry.ts
+    - packages/db/src/index.ts
+    - packages/hr/src/staff-portal.ts
+    - packages/hr/src/index.ts
+    - packages/shared/src/staff-notifications.ts
+    - packages/shared/src/index.ts
+    - packages/messaging/src/staff-notification.ts
+    - packages/messaging/src/staff-notification.test.ts
+    - packages/messaging/src/templates.ts
+    - packages/messaging/src/index.ts
     - apps/worker/src/jobs/credential-expiry-notice.ts
-    - apps/web/app/(admin)/staff/me/me.e2e.ts
+    - apps/worker/src/jobs/credential-expiry-notice.itest.ts
+    - apps/worker/src/jobs/leave-accrual.ts
+    - apps/web/app/(admin)/hr/me/route.ts
+    - apps/web/app/(admin)/hr/me/render.ts
+    - apps/web/app/(admin)/hr/leave/route.ts
+    - apps/web/app/(admin)/hr/leave/render.ts
+    - apps/web/src/hr-me-render.test.ts
+    - apps/web/src/routes/registry.ts
+    - apps/web/next.config.ts
+    - packages/fixtures/src/staff-portal.itest.ts
+    - packages/fixtures/src/leave-submission-entry-points.test.ts
+    - scripts/test-gates.mjs
+    - docs/adr/0117-the-portal-is-self-only-with-no-permission-that-widens-it-and-the-mask-is-the-absence-of-the-value.md
   - id: A-FIRST-01
     order: 104
     title: Analytics schema, monthly partitions, 90-day raw retention
@@ -21372,7 +21490,7 @@ units:
       plus server-side rate limits and enumeration resistance on every unauthenticated endpoint: booking,
       OTP, /api/collect and the payment webhook.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - A-FIRST-01
@@ -21412,12 +21530,141 @@ units:
       per-phone and per-IP limits return 429 after the configured attempts on /api booking, OTP, /api/collect
       and the payment webhook
     - rate-limit state is server-side and survives a worker restart, proven by an integration test
+    - 'NOTE: `apps/web/middleware.ts` in the planned file list does not exist. Next 16.3 renamed the convention and
+      the repository uses `apps/web/proxy.ts`, whose export must be named `proxy`; `withSecurityHeaders` is
+      applied on every one of its five return paths, and `scripts/check-headers.mjs` rule 6 refuses a response
+      constructed on a line that does not also call `secured(`.'
+    - 'NOTE: acceptance 1 is asserted route by route against the REAL `proxy()` over the REAL registry - 94
+      registry paths, each checked for all six headers and for the policy its group calls for - in a unit test
+      rather than against a server, because `proxy` is a pure function of a `NextRequest` and 200-odd requests to
+      `next start` for a claim about six header values would be an unreasonable use of a build. The route-by-route
+      claim is therefore total rather than a sample, and the redirect and the login refusal are included because a
+      301 is a response a browser acts on.'
+    - 'NOTE: acceptance 2''s fixture is gate block 197, split in two from one mutation (`script-src` loses its
+      nonce): 197i requires the UNIT suite to refuse it and 197j requires the BROWSER suite to. 197i proves this
+      repository''s reading of its own policy noticed; 197j proves a browser did. The report-only spelling is
+      served as a CONTROL in `security-headers.itest.ts` and asserts the un-nonced script DOES run, without which
+      the enforced case is consistent with a browser refusing inline scripts for some other reason entirely.'
+    - 'NOTE: acceptance 3''s `host-prefixed` was APPLIED, driven at a real Chromium, refused and reverted. Chromium
+      stores neither a `Secure` cookie nor a `__Host-` one from a `Set-Cookie` at `http://127.0.0.1`, and stores
+      BOTH at `http://localhost`: the exception permitting a `Secure` cookie over plain HTTP is written against
+      the hostname and not the loopback address, and `startWebServer` hands twelve admin suites the address. The
+      three properties the prefix ENFORCES - `Secure`, `Path=/`, no `Domain` - are asserted instead, off the
+      cookie a browser actually stored, and both halves of the finding are integration cases so they fail the day
+      the harness serves HTTPS. See ADR 0119 decision 5.'
+    - 'NOTE: this also corrects a sentence in three files. `adminSessionCookie`, `visitorCookie` and
+      `analyticsConsentCookie` each set `Secure` unconditionally and justify it by saying browsers treat
+      `127.0.0.1` as a secure context so the suites need nothing dropped; for cookies in Chromium that is false.
+      The DECISION survives and its argument is now the measured one: no suite relies on a browser storing these
+      cookies from a response - `installAdminCookie` adds a request header, which no cookie rule governs, and
+      `installAdminBrowserCookie` reaches the jar over CDP, which is not held to the scheme rule.'
+    - 'NOTE: acceptance 3''s `no cookie in the app escapes those flags` is `COOKIE_DECLARATIONS` plus a filesystem
+      scan, because the claim is about a SET that grows: five assertions beside five builders cannot catch the
+      sixth cookie, written by a unit that never opens the table. Three of the five miss a flag deliberately and
+      each carries a length-checked argument; `HttpOnly` on a session cookie is the one flag no reason excuses.
+      Checked in BOTH directions - a cookie that silently GAINED `HttpOnly` would break the consent gate in the
+      browser, and the only symptom would be a tag that stopped loading.'
+    - 'NOTE: acceptance 4''s OTP halves are A-FIRST-02''s and were already proved: `otp-route.itest.ts` asserts the
+      identical status, body and timing for a known and an unknown number, the 429 for
+      `OTP_MAX_REQUESTS_PER_PHONE` and the 429 for `OTP_MAX_REQUESTS_PER_IP`, each with an `otp.rate_limited`
+      audit row, over `otp_challenge` rows in PostgreSQL. This unit added a second per-IP counter of the same
+      figure, 10, in `rate_limit_window` and REMOVED it: two counters over one operation disagree the first time
+      one is tuned, after which the documented constant keeps a passing test and decides nothing. `/api/v1/otp` is
+      classified `own_rate_limit` by the scan, which NAMES the constant and fails if it moves (gate 197g).'
+    - 'NOTE: acceptance 4''s four named endpoints became SEVEN, by CLASS rather than by URL. `/api/v1/bookings`
+      shares the `booking` scope with `/api/v1/book` (one operation under two spellings), and
+      `/api/v1/consent/analytics`, `/api/v1/payments/intent` and `/api/whatsapp` are unauthenticated writes the
+      line does not name but is plainly about - each at a high ceiling that fails towards PERMITTING, with its
+      reason and its direction written beside it. The scan''s second rule refuses any `app/api` route in neither
+      list, so an endpoint added later is a failed gate rather than a bill.'
+    - 'NOTE: `/api/collect` keeps A-FIRST-03''s existing in-process per-VISITOR burst limiter (50 per second, keyed
+      on the cookie and deliberately not on an address, for a stated PDPL reason) and gains a server-side per-IP
+      window beside it. They are different claims: acceptance 5 asks for state that survives a worker restart and
+      an in-process `Map` does not. DEFECT recorded: that limiter''s `ANONYMOUS_BUCKET` is shared by every
+      cookieless caller, so one caller can exhaust the ceiling for all of them.'
+    - 'NOTE: the public group''s `script-src` is UNCHANGED at `''self'' ''unsafe-inline''` and labelled
+      `Y13-public-csp`, a new row in docs/OPEN-QUESTIONS.md. Next''s App Router emits an un-nonced inline RSC
+      bootstrap into every rendered page and a nonce makes `''unsafe-inline''` IGNORED, so tightening it needs
+      Next''s own nonce integration plus `next build` and a browser. Both alternatives were refused in writing: an
+      unverified strict policy takes the public site down, and a report-only one looks complete and refuses
+      nothing. An integration case asserts the CURRENT state, so the day somebody tightens it the case fails and
+      points at the row.'
+    - 'NOTE: `AdminChrome.cspNonce` is OPTIONAL with a written reason rather than required. Making it required
+      meant editing 51 `AdminChrome` literals in other units'' files to add a field; a missing nonce fails closed
+      and loudly, because the script simply does not run. Presence is enforced structurally instead:
+      `scripts/check-headers.mjs` rule 4 refuses a bare executable `<script>` anywhere in `app/(admin)`, and
+      counts the `inlineScriptTag(` call sites as its vacuity guard. Non-executable data blocks
+      (`application/json`, `application/ld+json`) are exempt, because `script-src` does not govern them and a
+      nonce on one would mean nothing.'
+    - 'NOTE: retention. `rate_limit_window`''s key is a caller''s IP address, which is personal data under the
+      PDPL, and the proportionality argument for holding one covers the length of a window rather than for ever.
+      `RATE_LIMIT_RETENTION_DAYS = 14` holds the bound and the reasoning, `deleteRateLimitWindowsBefore` is the
+      sweep, and both are proved by integration cases - including the control that `berelax_app` holds no DELETE
+      at all, so a caller cannot reset their own ceiling. NOTHING SCHEDULES THE SWEEP YET and the module says so
+      rather than implying a cron: C-CRM-10''s retention pass is driven by a retention profile and legal holds,
+      which is a different machine. Recorded as the second half of `Y13-rate-limits`.'
+    - 'NOTE: DEFECT in another estate''s cookie, reported rather than edited. `bookSessionCookie`''s `Secure` is a
+      parameter dropped outside production, justified by the same false premise about `127.0.0.1` - and unlike the
+      admin cookie''s, that parameter may genuinely be load-bearing, because the booking suites drive that origin
+      through a browser and would receive the cookie from a real response. Fixing it is a change to the public
+      booking flow''s session cookie and its six suites, which belongs to the unit that owns the flow. Declared as
+      an exception in `COOKIE_DECLARATIONS` with the whole reasoning.'
+    - 'NOTE: allocations. Migration 0165 USED; 0163 was used by P-HR-14 and 0164 is RELEASED UNUSED. ADR 0119 USED.
+      Gate block `// 197a-197z` USED - 197a to 197l, twelve cases plus two controls - inserted before `// 79a-79k`
+      in category order. SQLSTATE ZY861 USED; ZY862 to ZY870 RELEASED UNUSED and deliberately unregistered,
+      because `pnpm sqlstate` refuses an entry for a code no migration raises. Port band `security-headers` `{
+      start: 23_900, width: 300 }` USED by `security-headers.itest.ts`. `SCHEMA_VERSION` is 165, the highest on
+      disk in this tree; the next-free sentence is the integrator''s. The new `pnpm headers` step entered gate
+      case 29''s list, `pnpm verify` and the CI workflow in the same commit.'
     files:
-    - apps/web/middleware.ts
+    - apps/web/proxy.ts
     - apps/web/src/security/headers.ts
+    - apps/web/src/security/cookies.ts
+    - apps/web/src/security/inline-script.ts
+    - apps/web/src/security/rate-limit.ts
+    - apps/web/src/security-headers.test.ts
+    - apps/web/src/security-headers.itest.ts
+    - apps/web/src/rate-limit.itest.ts
+    - apps/web/src/session-cookie.ts
+    - apps/web/src/components/admin/google-reauth-banner.ts
+    - apps/web/src/components/admin/google-reauth-source.ts
+    - apps/web/src/components/admin/breakpoint-preview.ts
+    - apps/web/app/(admin)/calendar/render.ts
+    - apps/web/app/(admin)/crm/pipeline/render.ts
+    - apps/web/app/(admin)/messaging/templates/editor/render.ts
+    - apps/web/app/(admin)/quick-book/render.ts
+    - apps/web/app/(admin)/reviews/[id]/render.ts
+    - apps/web/app/(admin)/till/render.ts
+    - apps/web/app/(admin)/settings/media/preview/[mediaId]/route.ts
+    - apps/web/app/api/collect/route.ts
+    - apps/web/app/api/v1/book/route.ts
+    - apps/web/app/api/v1/bookings/route.ts
+    - apps/web/app/api/v1/consent/analytics/route.ts
+    - apps/web/app/api/v1/otp/route.ts
+    - apps/web/app/api/v1/payments/intent/route.ts
+    - apps/web/app/api/webhooks/payments/route.ts
+    - apps/web/app/api/whatsapp/route.ts
     - packages/shared/src/rate-limit.ts
+    - packages/shared/src/index.ts
+    - packages/db/migrations/0165_rate_limit_window.sql
+    - packages/db/src/repositories/rate-limit.ts
+    - packages/db/src/schema/security.ts
+    - packages/db/src/schema/index.ts
+    - packages/db/src/sqlstate-registry.ts
+    - packages/db/src/index.ts
+    - packages/harness/src/ports.ts
     - scripts/check-headers.mjs
     - scripts/test-gates.mjs
+    - package.json
+    - .github/workflows/ci.yml
+    - docs/adr/0119-the-csp-is-only-real-if-a-browser-refuses-it-and-a-second-ceiling-on-one-endpoint-is-the-defect.md
+    - docs/adr/README.md
+    - docs/adr/INDEX.md
+    - docs/OPEN-QUESTIONS.md
+    - apps/web/src/calendar-render.test.ts
+    - apps/web/src/pipeline-render.test.ts
+    - apps/web/src/reviews-queue-render.test.ts
+    - apps/web/src/template-editor-render.test.ts
   - id: H-HARD-02
     order: 176
     title: Dependency, secret, licence and container scanning in CI
@@ -21777,7 +22024,7 @@ units:
       records, that a partial write is impossible, and that the printed day sheet is a working fallback
       for the first fortnight.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-UI-01
@@ -21808,11 +22055,106 @@ units:
       byte-identical across two runs on the frozen seed
     - 'no transport or gateway failure path returns a bare success: a test enumerates every adapter and
       asserts each returns a typed failure or a diverted result, extending ADR 0005'
+    - 'NOTE: the PATHS and SHAPES this list got wrong. `checkout/offline.tsx` is `checkout/offline.ts` — a
+      FRAGMENT and not a component, because the checkout is a `route.ts` answering `text/html` and there is
+      no React on any admin screen (ADR 0013). `day-sheet/print/page.tsx` is `route.ts` plus `render.ts`
+      plus `view.ts`, for the correction every admin screen since P-HR-02 has recorded: `registry.ts` is in
+      bijection with the filesystem and requires every DOCUMENT to be served in both locales, which would
+      need an Arabic admin document nobody has built. `/day-sheet` was added to `ADMIN_GROUP_PREFIXES`,
+      which is what makes it noindex and session-guarded from the commit that creates it.
+      `packages/messaging/src/send-guard.test.ts` is NOT where the adapter enumeration went: that file is
+      about the staging guard alone, and the claim is about every adapter in three packages, so it is
+      `packages/fixtures/src/adapter-honesty.test.ts` — `packages/fixtures` being the only package that may
+      see messaging and payments at once.'
+    - 'NOTE: AN OFFLINE QUEUE IS THE DEFECT, which is the unit''s largest decision and the opposite of what
+      its title first reads as. A queued money movement is a promise this system cannot keep: the browser
+      closes, the device is swapped, the day is cashed up, and the queue drains into a locked period —
+      authorising a card for a customer who left two hours ago against an invoice somebody has voided. So
+      there is no queue, and `scripts/check-offline-money.mjs` (a new `pnpm offline-money` verify step,
+      registered in gate case 29 and in `.github/workflows/ci.yml` in the same commit) refuses a browser
+      store, an offline API, a deferred gateway call and a failure sentence that promises, over a declared
+      money path. The diff that would introduce one looks like resilience work and arrives with a
+      changelog entry about the wifi, which is why a review is not this check. ADR 0118.'
+    - 'NOTE: DEFERRED — the BROWSER half of acceptance line 1. `context.setOffline(true)` plus a submit
+      needs `next build`, and this container had 1.2 GB free with three other agents building; a build that
+      failed with ENOSPC would have broken their runs as well as this one, so it was not attempted (the
+      dispatch asks for this to be said rather than worked around). HANDED TO the integrator or to whoever
+      next runs `apps/web/src/checkout.itest.ts`, which already stands the application and a stand-in
+      gateway origin up under the `checkout` port band and is where the case belongs. What IS built and
+      proven instead is the stronger half: `apps/web/src/offline-checkout.itest.ts` replaces the gateway
+      with one whose `authorise` throws the way a closing socket throws, and asserts the error PROPAGATES
+      (so the route answers 503 and never renders a refusal the gateway did not make) with zero payment
+      intents and a zero delta on `invoice` and `journal_entry`. A browser going offline proves nothing
+      about the server, because the request never arrives; the dangerous case is the request that arrived
+      and whose answer did not, which is what is driven here.'
+    - 'NOTE: acceptance line 2 is partly B-AVAIL-06''s already, and the new half is named. Its
+      `booking-transaction.itest.ts` proves a REFUSAL leaves zero booking and zero appointment rows, and
+      writes neither the event nor the audit row. That is the application deciding not to proceed. This
+      unit''s premise is the other one — the connection dies at a moment nothing chose — so
+      `packages/fixtures/src/aborted-transaction.itest.ts` runs `createBooking` to completion and THROWS
+      from inside the unit of work, asserting booking, appointment and outbox absent in ONE statement, with
+      the committed control beside it and the idempotency claim asserted released so the retry is possible.'
+    - 'NOTE: the day sheet holds NO INSTANT, which is the only screen in this build that does not. Every
+      other admin screen prints the instant it was read at, deliberately; a "printed at" line here makes
+      two prints differ and the acceptance line is byte-identity, which is ADR 0105''s decision for the
+      reconciliation report. It reads `readCalendarDay` and adds NO reader: that query already joins
+      `appointment.trading_date` — the stored column that resolves the 01:30 case — and already orders by
+      `(starts_at, id)`, so a second reader would have re-derived where a trading day ends and a fallback
+      showing a different set from the screen it replaces is worse than no fallback. It NAMES NO CUSTOMER:
+      a list of who is coming, when, for what treatment is the most sensitive thing this business could
+      leave face-up, and the sheet is printed precisely so it is lying around. The "paid" column is blank,
+      because a figure this system filled in would be a claim it cannot make while the network is down and
+      the paper side is a named person''s claim (ADR 0107, which is also why this unit adds no table —
+      `parallel_run_paper_count` already models that claim).'
+    - 'NOTE: two findings from the adapter enumeration that READ as defects and are not, recorded so the
+      next reader does not "fix" them. The manual till''s `eventsSince` answers an EMPTY LIST rather than
+      throwing: `capabilities.emitsEvents` is false for cash, the behaviour matches the declared capability,
+      and a thrown refusal would make a reconciliation pass over every gateway fail on the one with nothing
+      to reconcile. And the SMS fake''s `UNDELIVERABLE_SUFFIX` makes the DELIVERY RECEIPT fail rather than
+      the send, which is also right — an absent subscriber is discovered by the network and not by the API —
+      so the probe for a typed transport failure is a promotional body from the transactional identity,
+      which the provider''s own sender-ID rule throws on (ADR 0016).'
+    - 'NOTE: a defect this unit shipped and the check that caught it. The deferred-send rule''s first
+      regular expression was `setTimeout\s*\([^)]*\b(?:authorise|capture|refund|charge)\b`, and the
+      character class excluding `)` stops at the arrow function''s own empty parameter list — so
+      `setTimeout(() => capture(), 60_000)`, which is the commonest spelling there is, read as clean. Gate
+      196c is the fixture that found it; the window is now bounded any-character and the trailing `\(`
+      requires a call rather than a mention. A second, smaller one: the day-sheet case counting
+      `data-after-midnight` matched the STYLESHEET''s own `tr[data-after-midnight="true"]` rule and
+      reported three rows for two, so it now matches the row''s opening tag.'
+    - 'NOTE: a SHARED FILE edited beyond this unit''s own code, declared.
+      `apps/web/app/(admin)/checkout/render.ts` (Y-PAY-03''s) gained one call to `renderTillOfflinePanel`
+      and one stylesheet constant, because the panel has to be on the document BEFORE a submission — after
+      a failed one there is no page, since `script-src ''none''` means nothing runs in that browser.
+      `apps/web/src/routes/registry.ts` gained the `/day-sheet` prefix and the route entry.
+      `scripts/test-gates.mjs` gained gate case 29''s `pnpm offline-money` line and block 196.'
+    - 'NOTE: allocations. NO MIGRATION: 0164 is RELEASED UNUSED, because the paper claim this unit needs is
+      `parallel_run_paper_count` (0153, ZY742/ZY743) and a second table for it would be a second statement
+      of ADR 0107''s decision. SQLSTATE ZY851 through ZY860 are RELEASED UNUSED and deliberately
+      unregistered — this unit adds no refusal to the database, and `pnpm sqlstate` refuses an entry for a
+      code no migration raises. ADR 0118 taken. Gate block `// 196a-196z` used. The port band
+      `{ start: 23_900, width: 300 }` is RELEASED UNUSED: the one suite that would have needed a server is
+      the deferred browser case, and `apps/web/src/checkout.itest.ts` already holds the `checkout` band it
+      belongs in — a declared but unused band fails `test-ports.test.ts`.'
     files:
-    - apps/web/app/(admin)/checkout/offline.tsx
-    - apps/web/app/(admin)/day-sheet/print/page.tsx
-    - packages/messaging/src/send-guard.test.ts
-    - apps/web/e2e/offline-checkout.spec.ts
+    - packages/core/src/checkout/honest-failure.ts
+    - packages/core/src/checkout/honest-failure.test.ts
+    - packages/core/src/checkout/index.ts
+    - scripts/check-offline-money.mjs
+    - scripts/test-gates.mjs
+    - package.json
+    - .github/workflows/ci.yml
+    - apps/web/app/(admin)/checkout/offline.ts
+    - apps/web/app/(admin)/checkout/render.ts
+    - apps/web/app/(admin)/day-sheet/print/route.ts
+    - apps/web/app/(admin)/day-sheet/print/render.ts
+    - apps/web/app/(admin)/day-sheet/print/view.ts
+    - apps/web/src/routes/registry.ts
+    - apps/web/src/day-sheet.itest.ts
+    - apps/web/src/offline-checkout.itest.ts
+    - packages/fixtures/src/aborted-transaction.itest.ts
+    - packages/fixtures/src/adapter-honesty.test.ts
+    - docs/adr/0118-an-offline-queue-for-a-money-movement-is-the-defect-and-the-paper-side-is-a-claim.md
   - id: H-HARD-10
     order: 181
     title: Pen-test intake, findings register and the remediation gate

@@ -120,6 +120,16 @@ export {
   senderIdFor,
   senderIdRegistryFault,
 } from './sender-identity.ts'
+/*
+  P-HR-14's staff notification route: the class fence, then the choke point. Not a second send path — it
+  calls `deliverMessage`, which calls `sendMessage`, and `pnpm send-chokepoint` finds no `.send(` in it.
+*/
+export {
+  assertStaffNotificationClass,
+  deliverStaffNotification,
+  STAFF_NOTIFICATION_REFUSALS,
+  type StaffNotificationRefusal,
+} from './staff-notification.ts'
 export {
   type CareWindow,
   type CareWindowState,

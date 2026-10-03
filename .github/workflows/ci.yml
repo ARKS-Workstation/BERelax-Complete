@@ -170,6 +170,16 @@ jobs:
       - name: Statement descriptor lint
         run: pnpm descriptor-lint
 
+      # Nothing on the money path holds a payment to try later (H-HARD-08). Four rules no type and no
+      # import rule can express: a browser store, an offline API, a deferred gateway call, and a shipped
+      # till failure sentence claiming something the terminal cannot know. The diff that introduces an
+      # offline payment queue looks like resilience work and arrives with a changelog entry about the wifi,
+      # which is why a review is not this check.
+      - name: Money path holds no offline queue
+        run: pnpm offline-money
+      - name: Security headers, CSP, ceilings and cookies
+        run: pnpm headers
+
       # One place every private document goes through. Five rules no type and no import rule can express: a
       # second `insert into private_document` (a document with no audit row), a second
       # `insert into private_document_fetch` (a fetch nobody recorded), a production caller of

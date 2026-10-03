@@ -6,6 +6,7 @@ import type { PublicationRefusal } from '@berelax/media/slots'
 import type { DerivativeSetRef, PictureSource } from '@berelax/media/srcset'
 import { fallbackDimensions, fallbackSrcFor } from '@berelax/media/srcset'
 import { tokensCss } from '@berelax/ui'
+import { inlineScriptTag } from '../../security/inline-script.ts'
 import { formatBytes, weightBadgeHtml, weightState } from './weight-badge.ts'
 
 /**
@@ -61,6 +62,16 @@ export interface PreviewRow {
 }
 
 export interface BreakpointPreviewView {
+  /**
+   * H-HARD-01's per-response CSP nonce, for this document's inline script.
+   *
+   * On the view rather than on an `AdminChrome`, because this document carries no admin chrome: it is a
+   * media preview served from `settings/media/preview/[mediaId]`, and it is the one inline-script document
+   * in the estate that renders no banner. OPTIONAL for the reason `AdminChrome.cspNonce` records: a
+   * missing nonce fails CLOSED and loudly, and the scan in `security-headers.test.ts` is what makes its
+   * presence a rule rather than a habit.
+   */
+  readonly cspNonce?: string
   readonly media: DerivativeSetRef
   readonly slotLabel: string
   /** Null for an image the row declares decorative; the empty string is a different thing. */
@@ -606,7 +617,7 @@ export function renderBreakpointPreviewHtml(view: BreakpointPreviewView): string
     '</script>',
     publishFormHtml(view),
     '</main>',
-    `<script>${PREVIEW_SCRIPT}</script>`,
+    inlineScriptTag(view.cspNonce, PREVIEW_SCRIPT),
     '</body></html>',
   ].join('')
 }

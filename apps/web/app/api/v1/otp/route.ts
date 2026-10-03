@@ -114,5 +114,20 @@ function otpRuntime(): OtpEndpointDeps {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  /*
+    No `takeRateLimit` here, and H-HARD-01 is the unit that took one out rather than the unit that
+    forgot to add one.
+
+    This endpoint's ceilings are A-FIRST-02's and they are already what acceptance line 5 asks for:
+    `OTP_MAX_REQUESTS_PER_PHONE = 3` and `OTP_MAX_REQUESTS_PER_IP = 10`, counted over `otp_challenge` rows
+    inside `issueOtpChallenge`'s transaction, with an `otp.rate_limited` audit row and a test per ceiling.
+    The state is in PostgreSQL and survives a restart.
+
+    A second per-IP counter was added here and removed: it was the same figure, 10, in a second table under
+    a second window definition. Two counters that agree today disagree the first time one is tuned, and the
+    loser is whichever is stricter — after which `OTP_MAX_REQUESTS_PER_IP` would still have a passing test
+    and would no longer decide anything. `scripts/check-headers.mjs` classifies this route `own_rate_limit`
+    and names that constant, so the exemption is checked rather than remembered.
+  */
   return await handleOtpRequest(otpRuntime(), request)
 }

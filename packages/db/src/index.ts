@@ -826,6 +826,20 @@ export {
   type SlotRecheckRoom,
   type SlotRecheckShape,
 } from './repositories/create-booking.ts'
+/*
+  P-HR-14's credential-expiry notice (0163). The idempotency is the INDEX's — `recordCredentialExpiryNotice`
+  is `on conflict do nothing` and answers null for a (employee, document, window) already decided — and the
+  reader deliberately does NO date arithmetic: the window is the evaluator's in `@berelax/core`, and a
+  `where expires_on <= …` here would be a second reading of it in the wrong zone.
+*/
+export {
+  type CredentialExpiryNoticeRow,
+  type ExpiringCandidateRow,
+  type RecordCredentialExpiryNoticeInput,
+  readCredentialExpiryNotices,
+  readExpiringCredentialCandidates,
+  recordCredentialExpiryNotice,
+} from './repositories/credential-expiry-notice.ts'
 export {
   CREDENTIAL_EXPIRING_SOON_SETTING_KEY,
   type CredentialPolicyRead,
@@ -1576,6 +1590,21 @@ export {
   recordLintPass,
   revertSurfaceTo,
 } from './repositories/publication.ts'
+/*
+  H-HARD-01's rate limit windows (0165). `recordRateLimitHit` is ONE statement — an upsert returning the
+  new count — because a read then a write is how two workers both see `hits = limit - 1` and both allow.
+  It takes an `Sql` and not a `UnitOfWork` on purpose: a counter is not an audited fact, and an audit row
+  per request on the four busiest unauthenticated endpoints would make `audit_event` a traffic log.
+*/
+export {
+  deleteRateLimitWindowsBefore,
+  type RateLimitHit,
+  type RateLimitWindowRow,
+  readRateLimitWindow,
+  readRateLimitWindows,
+  recordRateLimitHit,
+  recordRateLimitRefusal,
+} from './repositories/rate-limit.ts'
 export {
   type ClearedReassignmentFlag,
   clearReassignmentFlags,
@@ -1910,6 +1939,24 @@ export {
   settlementError,
   settlementTieAccount,
 } from './repositories/settlement.ts'
+/*
+  P-HR-14's staff portal. Every reader here REQUIRES an employee id and none has an "everybody" shape,
+  which is the difference from `readPayslips` and `readCommissionDerivation` beside them: both of those
+  take an optional filter because a payroll run legitimately reads a whole period, and an optional filter
+  is one `??` away from returning the roster. The authorisation is `@berelax/hr`'s, because the rule lives
+  in `@berelax/core` and this package may not import it.
+*/
+export {
+  type PortalBankSummaryRow,
+  type PortalLeaveRequestRow,
+  type PortalShiftRow,
+  type PortalSubject,
+  readPortalBankSummary,
+  readPortalLeaveRequests,
+  readPortalShifts,
+  type WritePortalLeaveReservationInput,
+  writePortalLeaveReservation,
+} from './repositories/staff-portal.ts'
 /*
   W-SYS-11's admin session (0090). `readStaffSession` is the only way a request learns who is reading, and
   it returns `role` as a `string`: `Role` and the matrix live in `packages/core`, which `packages/db` may
@@ -6057,4 +6104,71 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // ZY792 through ZY800 are released UNUSED and deliberately unregistered, because `pnpm sqlstate` refuses
 // an entry for a code no migration raises.
 //
-export const SCHEMA_VERSION = 158 as const
+// 163 is 0163_credential_expiry_notice.sql (P-HR-14) — one table, one function, two triggers. Mirrored in
+// `packages/db/src/schema/hr.ts`.
+//
+// THE IDEMPOTENCY IS THE INDEX'S. The acceptance line is that credential-expiry notices are "idempotent
+// per (employee, document, window) — a second run sends nothing", and `credential_expiry_notice_once` is a
+// UNIQUE on exactly those three columns with an `on conflict do nothing` insert above it. 0068's
+// reassignment flag is the precedent and the credential sweep's header argues it: a pass that REMEMBERED
+// what it had sent would be a second copy of the truth, and the copy is lost the first time a worker
+// restarts mid-run. An index also holds against two workers and against a `psql` session.
+//
+// `window_days` IS IN THE KEY AND `expires_on` IS NOT, and that asymmetry is the migration's one real
+// decision. The window is the configured `hr.credential_expiring_soon_days` (60 provisionally, against
+// Y1-licence) as it stood when the pass ran: widening it from 60 to 90 changes the QUESTION, so documents
+// that were not previously inside it now are and a notice about one of them is a new fact rather than a
+// repeat. Narrowing cannot produce a second notice, because the narrower window is a subset.
+// `employee_document.expires_on` is stored for a reader and kept OUT of the key because it cannot vary for
+// one document — 0030 makes a renewal a new row with a later expiry rather than an update — and a key with
+// a column in it that cannot vary is a key that permits a duplicate the day it does.
+//
+// A SKIPPED NOTICE IS A ROW, which is 0081's argument unchanged and the reason this is not "the sends we
+// made". No table in this build holds a staff phone or an email, so every notice today resolves to
+// `no_recipient_on_file` and nothing leaves. A table that could only record a send would be
+// indistinguishable from a notification path that does nothing, and the pass would report success for
+// ever. It also makes the idempotency honest: a skip is a notice DECIDED, so a second pass must not
+// reconsider it — otherwise the pass would re-derive the same skip every night and the claim would be true
+// only of the branch that never runs.
+//
+// ZY841 IS THE ONLY PRIVATE SQLSTATE HERE. ZY842 through ZY850 were allocated to this unit and are
+// RELEASED UNUSED and deliberately unregistered: everything else this table has to say is a CHECK — the
+// outcome vocabulary, the biconditional between a skip and its reason, the pinned template key — and
+// `pnpm sqlstate` refuses an entry for a code no migration raises. A trigger carrying a code a CHECK
+// already enforces would be a second statement of one rule.
+//
+// 165 is 0165_rate_limit_window.sql (H-HARD-01) — one table, one function, one trigger. Mirrored in
+// `packages/db/src/schema/security.ts`.
+//
+// THE STATE IS THE OBSERVATION, and that is why there is one table rather than a counter and a log. The
+// acceptance line is that rate-limit state is server-side and survives a worker restart; the dispatch's
+// rule beside it is that an unmeasured limit is a guess. One row per (scope, key, window) holding the
+// hits, the refusals and the first and last instant answers both: it is durable, it is shared between
+// workers, and "is this ceiling right" is a `select` rather than an opinion.
+//
+// REDIS WOULD HAVE BEEN THE USUAL ANSWER AND THIS BUILD HAS NONE. docs/05 contracts no cache, and adding
+// one for a counter would be a second datastore to operate, back up and reason about consistency with. A
+// row in the database the application already has is enough for a salon's traffic, because the hot path
+// is ONE statement.
+//
+// ONE STATEMENT, NOT A READ THEN A WRITE. `recordRateLimitHit` is an upsert returning `hits`. Two
+// statements is how two workers both read `hits = limit - 1` and both allow — the defect a rate limit
+// exists to prevent, reproduced inside the rate limiter. The comparison against the ceiling stays in
+// `@berelax/shared`'s `decideRateLimit`, because folding it into SQL would be a second statement of every
+// limit in a place no test of the arithmetic can reach.
+//
+// THE WINDOW IS A COLUMN AND NOT DERIVED. `windowStartFor` floors the instant by the policy's length and
+// the result is stored, because deriving it here would be a second reading of a length this table does
+// not hold — and the two would disagree the first time somebody changed a window. It is part of the
+// primary key, so a new window is a new row and the old one survives as the measurement.
+//
+// UPDATE IS KEPT FOR THE APPLICATION ROLE, which is the one place in this estate it is: the counters ARE
+// the state. DELETE is revoked, because a caller who could delete their own window could reset their own
+// ceiling. ZY861 holds the row's IDENTITY immutable — the scope, the key and the window start may not
+// move, and the counters may only increase — so the only thing an UPDATE can do is count.
+//
+// ZY862 through ZY870 are released UNUSED and deliberately unregistered: everything else this table has
+// to say is a CHECK (the scope vocabulary, the non-negative counters, `refusals <= hits`), and
+// `pnpm sqlstate` refuses an entry for a code no migration raises.
+//
+export const SCHEMA_VERSION = 165 as const

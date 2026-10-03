@@ -298,6 +298,21 @@ export const TEST_PORT_BANDS = {
   // `template-editor` and `book-flow` came to share one. [24_200, 24_500) contains none of
   // RESTRICTED_PORTS.
   dashboards: { start: 24_200, width: 300 },
+  // H-HARD-01's CSP enforcement proof, which needs a real browser and deliberately NOT a real build. The
+  // claim is that a browser REFUSES an un-nonced inline script under the policy this build emits, and
+  // every cheaper way of making it is a different claim: a header string is a string, a report-only
+  // policy reports, and `cspPermitsInlineScript` is this repository's own reading of the policy rather
+  // than a browser's. So the suite serves the real `securityHeaders()` output from a bare `node:http`
+  // server and drives Chromium at it, which is why it needs a port and not a Next build — the document
+  // under test is four lines of HTML and the subject is the header above it.
+  // The same server proves the `__Host-` cookie prefix survives loopback, in both directions a suite can
+  // acquire that cookie: a real `Set-Cookie` the browser stores and returns, and Playwright's
+  // `addCookies` through `adminCookieForBrowser`.
+  // 23_900 is the band this unit was allocated. 23_000 through 23_800 are allocations held by units in
+  // other worktrees, and a band chosen from what one worktree can see is exactly how `template-editor`
+  // and `book-flow` came to share one. [23_900, 24_200) contains none of RESTRICTED_PORTS and is below
+  // EPHEMERAL_PORT_FLOOR.
+  'security-headers': { start: 23_900, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

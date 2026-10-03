@@ -27,6 +27,43 @@
  * than the colon `berelax:theme` uses in `localStorage`, because RFC 6265 forbids a colon in a cookie name.
  * The two conventions differ by necessity and not by accident; this note is why the next person should not
  * tidy it.
+ *
+ * ## The `__Host-` prefix: asked for, measured, and NOT taken (H-HARD-01)
+ *
+ * H-HARD-01's acceptance line asks for session cookies that are *"HttpOnly, Secure, SameSite=Lax and
+ * host-prefixed"*. The first three are below. The fourth was applied, driven at a real Chromium, and
+ * reverted, and this paragraph is the measurement rather than a preference.
+ *
+ * `__Host-` is a name prefix a browser ENFORCES: it refuses to store such a cookie unless it carries
+ * `Secure`, has `Path=/` and has no `Domain`. This cookie already does all three unconditionally, so the
+ * prefix looked free — it would add no requirement and would move the enforcement from this file's care to
+ * the browser's refusal, which is worth having: an edit that added `Domain=.berelax.ae` to share the
+ * session with a subdomain would stop the cookie being STORED rather than quietly making it readable by
+ * every subdomain, including one a third party runs.
+ *
+ * It is not free, and the reason is one hostname wide. `security-headers.itest.ts` serves this exact
+ * header to Chromium at two spellings of the same server: at `http://localhost` the cookie is stored, the
+ * prefixed version too; at `http://127.0.0.1` NEITHER is. The exception that permits a `Secure` cookie
+ * over plain HTTP is written against the hostname `localhost` and not against the loopback address, and
+ * `startWebServer` hands every integration suite the address. So the prefix is free the moment the harness
+ * changes that one constant — a change to the origin twelve suites in other worktrees match on, which
+ * H-HARD-01 proves rather than makes.
+ *
+ * ## The paragraph below about `Secure` is right, and its reason was wrong
+ *
+ * `Secure` is set unconditionally here, in `visitorCookie` and in `analyticsConsentCookie`, and all three
+ * justify it by saying browsers treat `127.0.0.1` as a secure context so the suites need nothing dropped.
+ * For cookies in Chromium that is false, as above. The DECISION survives unchanged and the argument for it
+ * is now the measured one: no suite relies on a browser storing this cookie from a response.
+ * `installAdminCookie` adds a `Cookie` request header, which no cookie rule governs; `installAdminBrowserCookie`
+ * goes through `addCookies`, which reaches the jar over CDP and is not held to the scheme rule; and
+ * `session.itest.ts` asserts the `Set-Cookie` header rather than a browser's acceptance of it. A
+ * `secure: boolean` parameter would still be a switch somebody eventually defaults the wrong way, and an
+ * admin session cookie sent in clear text is still the whole estate on the wire.
+ *
+ * `berelax_consent`, `berelax_visitor`, `berelax_book` and the Google OAuth `state` cookie are not
+ * prefixed either, each for its own stated reason — see `COOKIE_DECLARATIONS` in `src/security/cookies.ts`,
+ * which is the one table of what every cookie in this app is allowed to be and why.
  */
 export const ADMIN_SESSION_COOKIE = 'berelax_admin'
 

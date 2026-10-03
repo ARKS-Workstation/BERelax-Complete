@@ -4,6 +4,7 @@ import {
   accrueMonth,
   type LeaveEntitlementRules,
   latestCompletedAccrualMonth,
+  leaveEntitlementRulesFrom,
   leaveRulesFor,
   leaveYearStart,
   localDate,
@@ -127,24 +128,18 @@ export interface LeaveAccrualResult {
 }
 
 /** The row shape `@berelax/db` returns, in the shape the pure engine takes. */
+/**
+ * One policy row as a policy version.
+ *
+ * It USED to map the thirteen fields here. P-HR-14 needed the same mapping for the leave-submission
+ * judgement, and two copies of a thirteen-field mapping with a nested trio in it is the second statement
+ * of a fact the brief refuses: the copy that stops matching does it silently, and the symptom is an
+ * entitlement figure nobody can trace. `leaveEntitlementRulesFrom` in `@berelax/core` is the one
+ * statement; `LeaveEntitlementRuleRow` satisfies its structural argument, so a column renamed in
+ * `@berelax/db` is a type error here.
+ */
 function asRules(row: LeaveEntitlementRuleRow): LeaveEntitlementRules {
-  return {
-    effectiveFrom: localDate(row.effectiveFrom),
-    annualEntitlementDays: row.annualEntitlementDays,
-    monthlyAccrualHundredths: row.monthlyAccrualHundredths,
-    probationMonths: row.probationMonths,
-    accruesDuringProbation: row.accruesDuringProbation,
-    carryOverCapHundredths: row.carryOverCapHundredths,
-    carryOverExpiresAfterOneLeaveYear: row.carryOverExpiresAfterOneLeaveYear,
-    leaveYearStartsOnAnniversary: row.leaveYearStartsOnAnniversary,
-    unpaidLeaveReducesAccrual: row.unpaidLeaveReducesAccrual,
-    absentDayReducesAccrual: row.absentDayReducesAccrual,
-    sickLeave: {
-      fullPayDays: row.sickFullPayDays,
-      halfPayDays: row.sickHalfPayDays,
-      unpaidDays: row.sickUnpaidDays,
-    },
-  }
+  return leaveEntitlementRulesFrom(row)
 }
 
 /**

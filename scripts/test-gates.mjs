@@ -63384,6 +63384,929 @@ export function chargebackNetEffectFils(`,
   }
 }
 
+// 195a-195z. (P-HR-14) The staff portal: the self-only fence shown to be able to open, the field policy
+//            shown to be able to go quiet, and the staff notification shown to be able to leave from the
+//            promotional identity.
+//
+//            The unit's claim is that a therapist sees their own data and nobody else's, and that the
+//            refusal is in the QUERY rather than a filter in the view. Four things defend it — the
+//            unconditional comparison in `assertPortalSubject`, the closed field set, the delegation to
+//            P-HR-11's and P-HR-12's own guarded readers, and the fact that the notice table's
+//            idempotency is a UNIQUE index rather than a memory in a pass — and each case here removes
+//            one and requires the suite to say so BY NAME.
+//
+//            Every mutation leaves a system that WORKS. A fence that returns true, a field-policy branch
+//            that never fires, a class fence moved behind the choke point, an `on conflict do nothing`
+//            turned into a plain insert: each one is a diff a reviewer would wave through, and three of
+//            them make the application MORE permissive while every screen still renders.
+//
+//            195a to 195f run unit suites and are fast. 195g and 195h drive the integration suite.
+{
+  const SELF_SERVICE_TS = 'packages/core/src/hr/self-service.ts'
+  const SELF_SERVICE_TEST = 'packages/core/src/hr/self-service.test.ts'
+  const SUBMISSION_TS = 'packages/core/src/hr/leave-submission.ts'
+  const SUBMISSION_TEST = 'packages/core/src/hr/leave-submission.test.ts'
+  const NOTIFICATION_TS = 'packages/messaging/src/staff-notification.ts'
+  const NOTIFICATION_TEST = 'packages/messaging/src/staff-notification.test.ts'
+  const PORTAL_HR_TS = 'packages/hr/src/staff-portal.ts'
+  const PORTAL_ITEST = 'packages/fixtures/src/staff-portal.itest.ts'
+  const NOTICE_REPO_TS = 'packages/db/src/repositories/credential-expiry-notice.ts'
+  const NOTICE_ITEST = 'apps/worker/src/jobs/credential-expiry-notice.itest.ts'
+  const ENTRY_POINTS_TEST = 'packages/fixtures/src/leave-submission-entry-points.test.ts'
+  const PORTAL_ROUTE_TS = 'apps/web/app/(admin)/hr/me/route.ts'
+
+  const portalUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const portalIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // The control for the whole block. Every case asserts that a BROKEN tree is caught, and that says
+  // nothing unless the committed tree passes.
+  {
+    const fence = run('pnpm', portalUnit(SELF_SERVICE_TEST))
+    check(
+      'portal: the committed self-service suite passes, which is the control for 195a to 195c',
+      !fence.failed,
+      `the self-service suite does not pass on the committed tree:\n${fence.output}`,
+    )
+    const notice = run('pnpm', portalUnit(NOTIFICATION_TEST))
+    check(
+      'portal: the committed staff-notification suite passes, which is the control for 195d and 195e',
+      !notice.failed,
+      `the staff-notification suite does not pass on the committed tree:\n${notice.output}`,
+    )
+  }
+
+  /*
+    195a. The self-only fence opened.
+
+    The whole unit in one line. `isPortalSubjectTheViewer` is the comparison the portal's refusal is made
+    of, and a fence that answers true is a fence that is not there — every screen still renders, every
+    read still returns rows, and a therapist can read a colleague's wage. The mutation is the plausible
+    one: somebody debugging a 403 makes the predicate permissive "temporarily".
+  */
+  checkRejectedBy(
+    'portal: 195a a self-only fence that answers true for everybody is caught',
+    withEditedFile(
+      SELF_SERVICE_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  return args.viewerEmployeeId === args.subjectEmployeeId',
+          '  return true',
+        ),
+      () => runExpectingFailure('pnpm', portalUnit(SELF_SERVICE_TEST)),
+    ),
+    'portal_subject_is_not_the_viewer',
+  )
+
+  /*
+    195b. The fence widened by a ROLE, which is the version that survives a review.
+
+    Not opened — narrowed to "everybody except the owner", which reads like a reasonable exception and is
+    the exact failure mode the unit refuses: the admin estate already has per-employee screens with their
+    own authority, and the portal is not a second way in. The case that catches it is the one asserting
+    the OWNER is refused, and it exists for this mutation.
+  */
+  checkRejectedBy(
+    'portal: 195b a fence with a role exception in it is caught',
+    withEditedFile(
+      SELF_SERVICE_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (isPortalSubjectTheViewer(args)) return',
+          "  if (isPortalSubjectTheViewer(args) || args.role === 'owner') return",
+        ),
+      () => runExpectingFailure('pnpm', portalUnit(SELF_SERVICE_TEST)),
+    ),
+    'portal_subject_is_not_the_viewer',
+  )
+
+  /*
+    195c. The field policy's non-open branch made unreachable.
+
+    `portalFieldPolicyProblems` is what holds the exposed field set to `EMPLOYEE_FIELD_GROUPS`, and a
+    branch that never fires makes it answer "no problems" for a salary column. The empty answer for the
+    REAL set then proves nothing, which is why the suite's control case asks it about a wage field, an
+    identity field and an unclassified one and requires all three to be reported.
+  */
+  checkRejectedBy(
+    'portal: 195c a field policy that can never report a non-open field is caught',
+    withEditedFile(
+      SELF_SERVICE_TS,
+      (text) =>
+        replaceOnce(text, "    if (sensitivity !== 'open') {", '    if (false as boolean) {'),
+      () => runExpectingFailure('pnpm', portalUnit(SELF_SERVICE_TEST)),
+    ),
+    'portal-field-policy-refuses-a-non-open-field',
+  )
+
+  /*
+    195d. The staff notification's class fence removed.
+
+    The route is one fence plus the choke point. With the fence gone a promotional template addressed at a
+    member of staff goes through `deliverMessage` and is handled by the gate — which means a rota notice
+    published at 22:00 would be HELD until 07:00 and one published while campaigns were paused would not
+    arrive at all. Both are staffing failures caused by a marketing control, and neither looks like a bug
+    anywhere near the notice.
+  */
+  checkRejectedBy(
+    'portal: 195d a staff notification route with no class fence is caught',
+    withEditedFile(
+      NOTIFICATION_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  assertStaffNotificationClass(request.template)',
+          '  // fence removed by gate 195d',
+        ),
+      () => runExpectingFailure('pnpm', portalUnit(NOTIFICATION_TEST)),
+    ),
+    // The TEST NAME and not the refusal's own name, and the reason is the harness rather than the rule:
+    // a vitest failure's rule string sits in the diff, and `elideMiddle` keeps the head and the tail of a
+    // long output — so the name that is reliably present is the one on the `×` line. 195a to 195c carry
+    // their rule in the assertion MESSAGE, which survives for the same reason.
+    'refuses it at the route, before the gate or the transport sees anything',
+  )
+
+  /*
+    195e. The class comparison inverted, so the fence refuses the RIGHT class.
+
+    Deleting the fence is 195d. This is the subtler one and it is a single-token diff: the comparison is
+    made against `'promotional'` instead of the declared constant, so every staff notice is refused and a
+    promotional one sails through. It is the shape an inverted constant always takes, and the case that
+    fails is the one asserting the four declared notices leave from the transactional identity — the
+    normal path, which 195d leaves working.
+  */
+  checkRejectedBy(
+    'portal: 195e a class fence inverted onto the wrong class is caught',
+    withEditedFile(
+      NOTIFICATION_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (template.messageClass !== STAFF_NOTIFICATION_CLASS) {',
+          "  if (template.messageClass !== 'promotional') {",
+        ),
+      () => runExpectingFailure('pnpm', portalUnit(NOTIFICATION_TEST)),
+    ),
+    'routes every declared notice to the transactional identity',
+  )
+
+  /*
+    195f. The leave submission's non-annual guard removed, so unpaid leave spends annual entitlement.
+
+    This is the defect this unit actually shipped and the case that caught it. `leave_movement` is the
+    ANNUAL ledger; reserving against it for unpaid or sick leave deducts days nobody earned there, and the
+    table is append-only (ZH001) so nothing can take the row back. The mutation restores the first draft's
+    arithmetic, which looks tidier than the version that is right.
+  */
+  checkRejectedBy(
+    'portal: 195f a submission that reserves annual days for unpaid leave is caught',
+    withEditedFile(
+      SUBMISSION_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  const hundredths = leaveKind === 'annual' ? days * HUNDREDTHS_PER_DAY : 0",
+          '  const hundredths = days * HUNDREDTHS_PER_DAY',
+        ),
+      () => runExpectingFailure('pnpm', portalIntegration(PORTAL_ITEST)),
+    ),
+    'reserves NOTHING for unpaid leave',
+  )
+
+  /*
+    195g. The portal's fence replaced by a FILTER, which is the whole acceptance line.
+
+    `readPortalSchedule` refuses before it composes a statement. Remove the fence and the reader still
+    works perfectly — it returns the rows of whatever employee it was asked about, because the repository
+    takes a required employee id and has no idea whose session asked. So the mutation is a silent
+    horizontal-access hole with no error anywhere, and the only thing that can see it is a suite that asks
+    for a COLLEAGUE'S row with that row present. An empty table would have proved nothing.
+  */
+  checkRejectedBy(
+    'portal: 195g a schedule reader with no fence in front of the statement is caught',
+    withEditedFile(
+      PORTAL_HR_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  fence('schedule', args.viewer, args.subjectEmployeeId)",
+          '  // fence removed by gate 195g',
+        ),
+      () => runExpectingFailure('pnpm', portalIntegration(PORTAL_ITEST)),
+    ),
+    'refuses every surface for the colleague, by name, with the rows present',
+  )
+
+  /*
+    195h. The notice insert's conflict clause removed.
+
+    The acceptance line is that the credential-expiry notices are idempotent per (employee, document,
+    window) and that a second run SENDS NOTHING. With `on conflict do nothing` gone the insert raises on
+    the second pass instead of answering null — so the pass throws rather than sending twice, which looks
+    safe and is not: the transaction aborts after the first document, every later document in the file
+    goes undecided, and the failure arrives as a constraint name in a worker log. The suite catches it on
+    the second run.
+  */
+  checkRejectedBy(
+    'portal: 195h a notice insert that cannot answer "already decided" is caught',
+    withEditedFile(
+      NOTICE_REPO_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '    on conflict (employee_id, employee_document_id, window_days) do nothing\n',
+          '',
+        ),
+      () => runExpectingFailure('pnpm', portalIntegration(NOTICE_ITEST)),
+    ),
+    'sends NOTHING on a second run, which is the acceptance line',
+  )
+
+  /*
+    195i. A second leave-submission path, planted in the portal route.
+
+    The scan's whole purpose. `submitLeaveRequest` is the one validator — the balance, the probation rule
+    and the leave year are judged there once — and the way that stops being true is a route that inserts a
+    request itself. The mutation is the shape it would really take: an import of the repository insert
+    beside the validator's, which compiles, and a call that writes a row with none of the judgement.
+  */
+  checkRejectedBy(
+    'portal: 195i a second leave submission path in a route is caught',
+    withEditedFile(
+      PORTAL_ROUTE_TS,
+      (text) => replaceOnce(text, '  readSetting,\n', '  readSetting,\n  writeLeaveRequest,\n'),
+      () =>
+        withEditedFile(
+          PORTAL_ROUTE_TS,
+          (text) =>
+            replaceOnce(
+              text,
+              'export async function GET(request: Request): Promise<Response> {',
+              'export async function GET(request: Request): Promise<Response> {\n' +
+                // A CALL and not a reference: the scan matches `writeLeaveRequest(`, because an import
+                // and a re-export are mentions rather than second paths. The first version of this case
+                // planted `void writeLeaveRequest` and the scan correctly ignored it, which is the gate
+                // proving its own discriminator works.
+                '  void writeLeaveRequest(undefined as never, undefined as never)\n',
+            ),
+          () => runExpectingFailure('pnpm', portalUnit(ENTRY_POINTS_TEST)),
+        ),
+    ),
+    'leave-request-has-one-validator',
+  )
+
+  /*
+    195j. A wage field printed on the portal document.
+
+    The field policy says what MAY appear; this is the other direction, and the two catch different
+    things. A figure can arrive in the document through a field the policy has nothing to say about — a
+    view widened by a later unit, a label carrying a number — and only a scan of the BYTES sees it. The
+    mutation adds the one line somebody would add in good faith: the wage on the screen about your own
+    pay.
+  */
+  checkRejectedBy(
+    'portal: 195j a wage figure on the portal document is caught',
+    withEditedFile(
+      'apps/web/app/(admin)/hr/me/render.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          "    '<dt>Contract</dt>',",
+          "    '<dt>Basic wage</dt>', '<dd>AED 5000.00</dd>',\n    '<dt>Contract</dt>',",
+        ),
+      () => runExpectingFailure('pnpm', portalUnit('apps/web/src/hr-me-render.test.ts')),
+    ),
+    'portal-document-must-not-contain-a-wage',
+  )
+
+  /*
+    195k. The leave-submission validator's balance probe answering from a re-derivation.
+
+    The judgement asks the LEDGER ENGINE — `applyLeaveLedgerEvent`'s `request` event — rather than
+    comparing two numbers, so `insufficient_balance` on a screen and `insufficient_balance` in the
+    engine's property test are one rule. The mutation puts a comparison in FRONT of the engine, off by
+    exactly one day, which is what a hand-written balance check gets wrong: the engine is never reached
+    for a request the comparison already accepted, and the request that is one day over the balance is
+    filed. Caught by the case that funds exactly the balance and not one day more, which exists for this.
+  */
+  checkRejectedBy(
+    'portal: 195k a balance check re-derived instead of asked is caught',
+    withEditedFile(
+      SUBMISSION_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const step = applyLeaveLedgerEvent(seeded.ledger, {',
+          '  if (opening + HUNDREDTHS_PER_DAY >= hundredths) {\n' +
+            "    return { kind: 'accepted', leaveKind, days, hundredths, leaveYearStart: yearStart }\n" +
+            '  }\n' +
+            '  const step = applyLeaveLedgerEvent(seeded.ledger, {',
+        ),
+      () => runExpectingFailure('pnpm', portalUnit(SUBMISSION_TEST)),
+    ),
+    'funds exactly the balance and not one day more',
+  )
+}
+
+// 196a-196z. (H-HARD-08) The till's honest failure: the no-queue scan shown to be able to go blind, the
+//            sentence vocabulary shown to be able to promise, the day sheet shown to be able to lose the
+//            treatments after midnight, and the rollback shown to be able to leave a row.
+//
+//            The unit's claim is that failure produces a NAMED error and zero phantom records, and that an
+//            offline tolerance which silently queues a money movement is the defect rather than the
+//            feature. Four things defend it — `scripts/check-offline-money.mjs`, the shipped sentence
+//            table, `readCalendarDay`'s join on the STORED trading date, and the transaction boundary —
+//            and each case here removes one and requires the check to say so BY NAME.
+//
+//            Every mutation leaves a system that WORKS, and three of them look like improvements: a
+//            scan narrowed to the files somebody thought mattered, a sentence that reassures the
+//            operator, a day sheet keyed on the calendar date the way every other report is.
+//
+//            196a to 196d are the scan and the vocabulary and are fast. 196e and 196f drive the
+//            integration suite.
+{
+  const OFFLINE_SCAN = 'scripts/check-offline-money.mjs'
+  const HONEST_FAILURE_TS = 'packages/core/src/checkout/honest-failure.ts'
+  const HONEST_FAILURE_TEST = 'packages/core/src/checkout/honest-failure.test.ts'
+  const DAY_SHEET_VIEW = 'apps/web/app/(admin)/day-sheet/print/view.ts'
+  const DAY_SHEET_ITEST = 'apps/web/src/day-sheet.itest.ts'
+  const OFFLINE_ITEST = 'apps/web/src/offline-checkout.itest.ts'
+  const ABORT_ITEST = 'packages/fixtures/src/aborted-transaction.itest.ts'
+  const CHECKOUT_PANEL = 'apps/web/app/(admin)/checkout/offline.ts'
+
+  const tillUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const tillIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // The control for the whole block. Every case asserts that a BROKEN tree is caught, and that says
+  // nothing unless the committed tree passes.
+  {
+    const clean = run('pnpm', ['offline-money'])
+    check(
+      'till: the money-path scan passes on the committed tree, which is the control for 196a to 196c',
+      !clean.failed,
+      `pnpm offline-money does not pass on the committed tree:\n${clean.output}`,
+    )
+    const sentences = run('pnpm', tillUnit(HONEST_FAILURE_TEST))
+    check(
+      'till: the committed honest-failure suite passes, which is the control for 196d',
+      !sentences.failed,
+      `the honest-failure suite does not pass on the committed tree:\n${sentences.output}`,
+    )
+  }
+
+  /*
+    196a. A browser store on the money path.
+
+    The defect the unit exists to refuse, in the shape it would really arrive in: the checkout remembers
+    the attempt so it can be sent when the connection comes back. Everything still works, the operator
+    sees a tick, and the charge lands an hour after the customer left — against an invoice somebody may
+    have voided, into a period that may be locked.
+  */
+  checkRejectedBy(
+    'till: 196a a payment held in localStorage is caught',
+    withFixture(
+      'apps/web/app/(admin)/checkout/__gate_fixture__offline-queue.ts',
+      [
+        'export function remember(attempt: string): void {',
+        "  window.localStorage.setItem('pendingPayments', attempt)",
+        '}',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', ['offline-money']),
+    ),
+    'money-path-holds-no-browser-store',
+  )
+
+  /*
+    196b. An offline API on the money path.
+
+    A service worker is the one that matters most, because it survives the tab: an operator who closes the
+    browser still has a payment queued somewhere they cannot see. `navigator.onLine` is the detection that
+    leads there, and it is what somebody adds first.
+  */
+  checkRejectedBy(
+    'till: 196b a service worker on the checkout is caught',
+    withFixture(
+      'apps/web/app/(admin)/checkout/__gate_fixture__offline-api.ts',
+      [
+        'export async function arm(): Promise<void> {',
+        '  if (!navigator.onLine) return',
+        "  await navigator.serviceWorker.register('/till-sync.js')",
+        '}',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', ['offline-money']),
+    ),
+    'money-path-reads-no-offline-api',
+  )
+
+  /*
+    196c. A deferred gateway call.
+
+    The server-side version of the same defect, and the one no browser rule would catch: a capture handed
+    to a timer. A gateway call is made while somebody is standing there or it is not made.
+  */
+  checkRejectedBy(
+    'till: 196c a capture handed to a timer is caught',
+    withFixture(
+      'packages/payments/src/__gate_fixture__deferred.ts',
+      [
+        'export function later(capture: () => void): void {',
+        '  setTimeout(() => capture(), 60_000)',
+        '}',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', ['offline-money']),
+    ),
+    'money-path-defers-no-send',
+  )
+
+  /*
+    196d. The path list narrowed to the files somebody thought mattered.
+
+    This is the mutation that makes the gate DECORATION rather than a check, and it is the one a reviewer
+    would wave through: the list is tidied and the scan still reports success. It passes for ever while
+    the invoice writer sits somewhere else. The vacuity guard is the rule that catches it, and it is why
+    the list is asserted to EXIST on disk rather than merely iterated.
+  */
+  checkRejectedBy(
+    'till: 196d a money-path list that names nothing is caught',
+    withEditedFile(
+      OFFLINE_SCAN,
+      (text) =>
+        replaceOnce(
+          text,
+          "  'packages/db/src/repositories/invoice.ts',",
+          "  'packages/db/src/repositories/__renamed_invoice__.ts',",
+        ),
+      () => runExpectingFailure('pnpm', ['offline-money']),
+    ),
+    'money-path-list-is-stale',
+  )
+
+  /*
+    196e. A till failure sentence that promises a retry.
+
+    The forbidden vocabulary, in the shape it would arrive in: somebody softens the hardest sentence on
+    the screen. *"We will send it when the connection is back"* is kinder to read and is a promise this
+    system cannot keep, and the operator who believes it does not take payment at all.
+  */
+  checkRejectedBy(
+    'till: 196e a failure sentence promising a retry is caught',
+    withEditedFile(
+      HONEST_FAILURE_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "    'The request left this terminal and no answer came back, so WHETHER THE PAYMENT WAS TAKEN IS NOT ' +",
+          "    'The request was saved offline and will be sent when the connection is back. ' +",
+        ),
+      () => runExpectingFailure('pnpm', ['offline-money']),
+    ),
+    'till-failure-sentence-claims-nothing-it-cannot-know',
+  )
+
+  /*
+    196f. The day sheet keyed on the CALENDAR date.
+
+    Trading runs 11:00-02:00, so a treatment at 01:30 has a calendar date of the next day and a trading
+    date of this one. The mutation is how every other report in this build would be written and it loses
+    exactly the two hours of each day with the fewest people on the floor and the most need for a printed
+    list. Nothing errors: the sheet is shorter, and a shorter sheet looks like a quiet night.
+  */
+  checkRejectedBy(
+    'till: 196f a day sheet that marks every row after midnight is caught',
+    withEditedFile(
+      DAY_SHEET_VIEW,
+      (text) =>
+        replaceOnce(
+          text,
+          '        afterMidnight: DUBAI_DATE.format(new Date(appointment.treatment.startsAt)) !== tradingDate,',
+          '        afterMidnight: true,',
+        ),
+      () => runExpectingFailure('pnpm', tillIntegration(DAY_SHEET_ITEST)),
+    ),
+    'marks the after-midnight treatment and ONLY that one',
+  )
+
+  /*
+    196g. A gateway error swallowed into a refusal.
+
+    `authoriseCheckout` already states the rule in a comment — *"swallowing everything here would turn a
+    lost connection into 'the ledger refused the write', which sends somebody to look at the wrong
+    thing"* — and this is the case that holds it. The mutation reports every error as `write_refused`,
+    which renders a refusal on the page: the operator reads that the payment was refused, when the truth
+    is that nobody knows. That is the one sentence the till must not say.
+  */
+  checkRejectedBy(
+    'till: 196g a lost connection reported as a refusal is caught',
+    withEditedFile(
+      'packages/payments/src/checkout.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          '    if (paymentIntentError(error) !== null) {',
+          '    if (true as boolean) {',
+        ),
+      () => runExpectingFailure('pnpm', tillIntegration(OFFLINE_ITEST)),
+    ),
+    'propagates rather than rendering a refusal the gateway never made',
+  )
+
+  /*
+    196h. The offline panel taken off the checkout document.
+
+    There is no code running in that browser, so the panel is the only thing the operator will have when
+    the network goes. Removing it leaves a checkout that works perfectly and tells somebody nothing at the
+    moment they need the reference written down.
+  */
+  checkRejectedBy(
+    'till: 196h a checkout with no honest-failure panel is caught',
+    withEditedFile(
+      'apps/web/app/(admin)/checkout/render.ts',
+      (text) => replaceOnce(text, '    renderTillOfflinePanel({', "    ((): string => '')({"),
+      () => runExpectingFailure('pnpm', tillIntegration(OFFLINE_ITEST)),
+    ),
+    'carries the standing offline panel and the attempt reference',
+  )
+
+  /*
+    196i. The panel given something to press.
+
+    The Google re-auth banner's argument in a second subject: a panel with a control is a panel that is not
+    there the one time it matters. Here it is worse than there, because no script runs on this document —
+    so the control could not work even if somebody pressed it, and the `data-dismissible` attribute is the
+    thing a stylesheet or a future script would target first.
+  */
+  checkRejectedBy(
+    'till: 196i a dismissible offline panel is caught',
+    withEditedFile(
+      CHECKOUT_PANEL,
+      (text) => replaceOnce(text, '\'data-dismissible="false" ', '\'data-dismissible="true" '),
+      () => runExpectingFailure('pnpm', tillIntegration(OFFLINE_ITEST)),
+    ),
+    'has nothing to press, because no script runs on this document',
+  )
+
+  /*
+    196j. The booking's unit of work replaced by a bare connection.
+
+    `withUnitOfWork` is the transaction, and without it `createBooking`'s writes land one at a time and
+    stay. The mutation is the shape a performance change takes — "the transaction is not needed here" —
+    and what it leaves behind after an interruption is a booking with no appointment, or an appointment
+    nothing announced. Caught by the abort case, which asserts all three tables at once.
+  */
+  checkRejectedBy(
+    'till: 196j an abort that leaves a booking row behind is caught',
+    withEditedFile(
+      ABORT_ITEST,
+      (text) =>
+        replaceOnce(
+          text,
+          "        throw new Error('the connection dropped here, after the writes and before the commit')",
+          '        return created',
+        ),
+      () => runExpectingFailure('pnpm', tillIntegration(ABORT_ITEST)),
+    ),
+    'rolls back the booking, the appointment AND the outbox event together',
+  )
+}
+
+// 197a-197z. (H-HARD-01) The header policy, the nonce and the ceilings, each shown to be able to go
+//            blind. The unit's claim is that EVERY response carries the header set, that a CSP violation
+//            is REFUSED rather than reported, and that every unauthenticated endpoint takes a ceiling
+//            whose state is a row. Five things defend it — `scripts/check-headers.mjs`, the policy
+//            builder, the proxy's single `secured(` wrapper, the cookie declaration table, and the one
+//            upsert that counts — and each case here removes one and requires the check to say so.
+//
+//            Every mutation leaves a system that WORKS, and four of them look like improvements: a
+//            report-only policy "so we can see violations before enforcing", a bare inline script that
+//            runs fine on the public estate, a ceiling moved one off so the limit is "exactly N", a
+//            cookie builder written beside the thing that needs the cookie.
+//
+//            197a to 197h are the scan and the unit suite and are fast. 197i to 197k drive the browser
+//            and the database.
+{
+  const HEADERS_TS = 'apps/web/src/security/headers.ts'
+  const HEADERS_TEST = 'apps/web/src/security-headers.test.ts'
+  const HEADERS_ITEST = 'apps/web/src/security-headers.itest.ts'
+  const COOKIES_TS = 'apps/web/src/security/cookies.ts'
+  const BOOK_ROUTE = 'apps/web/app/api/v1/book/route.ts'
+  const OTP_REPOSITORY = 'packages/db/src/repositories/otp.ts'
+  const PROXY_TS = 'apps/web/proxy.ts'
+  const RATE_LIMIT_SHARED = 'packages/shared/src/rate-limit.ts'
+  const RATE_LIMIT_REPOSITORY = 'packages/db/src/repositories/rate-limit.ts'
+  const RATE_LIMIT_ITEST = 'apps/web/src/rate-limit.itest.ts'
+
+  const headerUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const headerIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // The control for the whole block. Every case asserts that a BROKEN tree is caught, and that says
+  // nothing unless the committed tree passes.
+  {
+    const clean = run('pnpm', ['headers'])
+    check(
+      'headers: the header scan passes on the committed tree, which is the control for 197a to 197h',
+      !clean.failed,
+      `pnpm headers does not pass on the committed tree:\n${clean.output}`,
+    )
+    const unit = run('pnpm', headerUnit(HEADERS_TEST))
+    check(
+      'headers: the committed header suite passes, which is the control for 197i',
+      !unit.failed,
+      `the security-headers suite does not pass on the committed tree:\n${unit.output}`,
+    )
+  }
+
+  /*
+    197a. An unauthenticated endpoint added and nobody looked.
+
+    The shape the hole really arrives in. Nothing is removed and nothing is broken: a route is added, it
+    works, it is unauthenticated, and it writes. The scan's job is to refuse an endpoint it has never been
+    told about rather than to notice a missing call — which is the direction that makes every other rule
+    in the file mean something.
+  */
+  checkRejectedBy(
+    'headers: 197a an api route in neither classification is caught',
+    withFixture(
+      // `apps/web/app/api/v1/route.ts`, which is a real route path with no file today — `withFixture`
+      // writes a file and does not create directories, and a fixture directory left behind would be read
+      // by the next `tsc` in a package nobody touched.
+      'apps/web/app/api/v1/route.ts',
+      [
+        "export const dynamic = 'force-dynamic'",
+        '',
+        'export async function POST(request: Request): Promise<Response> {',
+        '  const body = await request.text()',
+        '  return new Response(body, { status: 201 })',
+        '}',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', ['headers']),
+    ),
+    'api-route-without-a-classification',
+  )
+
+  /*
+    197b. The ceiling taken off an endpoint that is declared to have one.
+
+    A refactor removes the two lines; the endpoint still answers 200 and every test of what it DOES still
+    passes. The only symptom is a bill, or a slot enumeration nobody noticed.
+  */
+  checkRejectedBy(
+    'headers: 197b a declared endpoint that stopped taking its ceiling is caught',
+    withEditedFile(
+      BOOK_ROUTE,
+      (source) =>
+        replaceOnce(
+          source,
+          "  const limit = await takeRateLimit({ scope: 'booking', request, nowIso: new Date().toISOString() })\n  if (limit.kind === 'refused') return limit.response\n",
+          '',
+        ),
+      () => runExpectingFailure('pnpm', ['headers']),
+    ),
+    'unauthenticated-endpoint-without-a-ceiling',
+  )
+
+  /*
+    197c. A report-only policy.
+
+    The one that arrives with the best intentions: ship it report-only, watch the violations, enforce it
+    later. The header name is the whole difference between a control and a mailing list, and "later" is
+    the part nobody schedules.
+  */
+  checkRejectedBy(
+    'headers: 197c a report-only content-security-policy is caught',
+    withFixture(
+      'apps/web/src/__gate_fixture__report-only.ts',
+      [
+        'export function headersFor(policy: string): Record<string, string> {',
+        "  return { 'content-security-policy-report-only': policy }",
+        '}',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', ['headers']),
+    ),
+    'csp-is-report-only',
+  )
+
+  /*
+    197d. A bare inline script in an admin document.
+
+    Under the nonce policy this script does not run, so the mutation produces a DEAD FEATURE rather than a
+    hole — which is why it needs a scan: nothing throws, nothing 500s, and the button simply does nothing
+    for the one operator who presses it.
+  */
+  checkRejectedBy(
+    'headers: 197d an un-nonced inline script in an admin document is caught',
+    withFixture(
+      'apps/web/app/(admin)/__gate_fixture__bare-script.ts',
+      [
+        'export function panel(): string {',
+        '  return [',
+        "    '<section>',",
+        '    \'<script>document.title = "ready"</script>\',',
+        "    '</section>',",
+        "  ].join('')",
+        '}',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', ['headers']),
+    ),
+    'inline-script-without-a-nonce',
+  )
+
+  /*
+    197e. A cookie builder written beside the thing that needs the cookie.
+
+    Which is where a sixth cookie would really be written, by a unit that never opens
+    `security/cookies.ts`. The acceptance line's claim is about the SET — *no cookie in the app escapes
+    those flags* — so an undeclared cookie is the one the claim is about.
+  */
+  checkRejectedBy(
+    'headers: 197e a Set-Cookie builder with no declaration is caught',
+    withFixture(
+      'apps/web/src/__gate_fixture__cookie.ts',
+      [
+        'export function rememberLocale(locale: string): string {',
+        "  return [`berelax_locale=${locale}`, 'Path=/', 'SameSite=Lax'].join('; ')",
+        '}',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', ['headers']),
+    ),
+    'set-cookie-builder-without-a-declaration',
+  )
+
+  /*
+    197f. A proxy return that skips the header set.
+
+    The 308 for an exempt path with a trailing slash — the least interesting response in the file, and
+    therefore the one a refactor would drop the wrapper from. A redirect is a response a browser acts on.
+  */
+  checkRejectedBy(
+    'headers: 197f a proxy return that skips the header set is caught',
+    withEditedFile(
+      PROXY_TS,
+      (source) =>
+        replaceOnce(
+          source,
+          ': secured(redirectTo(requested, trimmed, METHOD_PRESERVING_REDIRECT_STATUS))',
+          ': redirectTo(requested, trimmed, METHOD_PRESERVING_REDIRECT_STATUS)',
+        ),
+      () => runExpectingFailure('pnpm', ['headers']),
+    ),
+    'proxy-return-without-the-header-set',
+  )
+
+  /*
+    197g. The ceiling the OTP exemption points at, renamed.
+
+    H-HARD-01 removed its own OTP counter because A-FIRST-02 already had one, and the exemption that
+    records that decision names the constant. This is the mutation that would make the exemption a lie:
+    the constant moves, the endpoint is unlimited, and the scan still says seven routes are classified.
+  */
+  checkRejectedBy(
+    'headers: 197g an own_rate_limit exemption whose constant has moved is caught',
+    withEditedFile(
+      OTP_REPOSITORY,
+      // Both occurrences — the declaration and its one use. Renaming only the declaration left the
+      // name in the file, and the scan greps the file: the first draft of this case passed because the
+      // constant it had "moved" was still mentioned two hundred lines below.
+      (source) => source.replaceAll('OTP_MAX_REQUESTS_PER_IP', 'OTP_IP_CAP'),
+      () => runExpectingFailure('pnpm', ['headers']),
+    ),
+    'unauthenticated-endpoint-without-a-ceiling',
+  )
+
+  /*
+    197h. A cookie that quietly stopped claiming a flag.
+
+    The table's whole value is that a missing flag is either carried or ARGUED, so the mutation is a
+    declaration that drops one and says nothing — which is how an exception table becomes a list of
+    everything: not by somebody arguing badly, but by somebody deleting a line. The visitor cookie and not
+    the admin one, because the admin one has its own refusal (`cookieTableProblems` excuses no session
+    cookie for missing `HttpOnly`) and this case is about the general rule.
+  */
+  checkRejectedBy(
+    'headers: 197h a cookie declaration that drops a flag with no reason is caught',
+    withEditedFile(
+      COOKIES_TS,
+      (source) =>
+        replaceOnce(
+          source,
+          "    builder: 'apps/web/app/api/collect/ingest.ts',\n    flags: ['httpOnly', 'secure', 'sameSiteLax', 'pathRoot'],",
+          "    builder: 'apps/web/app/api/collect/ingest.ts',\n    flags: ['secure', 'sameSiteLax', 'pathRoot'],",
+        ),
+      () => runExpectingFailure('pnpm', ['headers']),
+    ),
+    'header-scan-is-stale',
+  )
+
+  /*
+    197i. The nonce replaced by `'unsafe-inline'`.
+
+    The policy still has a `script-src`, the header is still enforced, and every structural check passes —
+    `check-headers.mjs` reads the proxy and the documents, not the directive's contents. What is gone is
+    the only thing the directive was for. The unit suite is what notices, which is why the mutation is
+    required to fail it BY CASE NAME rather than merely to fail something.
+  */
+  checkRejectedBy(
+    'headers: 197i a script-src that permits any inline script is caught by the unit suite',
+    withEditedFile(
+      HEADERS_TS,
+      (source) =>
+        replaceOnce(
+          source,
+          "  const scriptSrc = group === 'admin' ? `'nonce-${nonce}'` : PUBLIC_SCRIPT_SRC",
+          '  const scriptSrc = PUBLIC_SCRIPT_SRC',
+        ),
+      () => runExpectingFailure('pnpm', headerUnit(HEADERS_TEST)),
+    ),
+    'refuses an un-nonced inline script and permits a nonced one, on the admin group',
+  )
+
+  /*
+    197j. The same mutation, against a real browser.
+
+    197i proves this repository's own reading of its policy noticed. This proves a BROWSER did — which is
+    the claim the unit actually makes, and the one a header-string assertion cannot make at all. If this
+    case ever passes while 197i fails, the browser suite has stopped loading the real policy.
+  */
+  checkRejectedBy(
+    'headers: 197j a script-src that permits any inline script is caught by the browser suite',
+    withEditedFile(
+      HEADERS_TS,
+      (source) =>
+        replaceOnce(
+          source,
+          "  const scriptSrc = group === 'admin' ? `'nonce-${nonce}'` : PUBLIC_SCRIPT_SRC",
+          '  const scriptSrc = PUBLIC_SCRIPT_SRC',
+        ),
+      () => runExpectingFailure('pnpm', headerIntegration(HEADERS_ITEST)),
+    ),
+    'refuses the un-nonced inline script and runs the nonced one',
+  )
+
+  /*
+    197k. The boundary moved one off.
+
+    `hits <= limit` becomes `hits < limit`, which reads like a correction — "a limit of twenty should
+    permit twenty" is precisely what the mutation breaks, and the arithmetic looks more careful afterwards.
+    A limit one lower than the figure it documents is the quietest possible version of this bug: nothing
+    fails, and the first symptom is a customer who cannot book.
+  */
+  checkRejectedBy(
+    'headers: 197k a rate-limit boundary moved one off is caught',
+    withEditedFile(
+      RATE_LIMIT_SHARED,
+      (source) =>
+        replaceOnce(source, '  if (hits <= policy.limit) {', '  if (hits < policy.limit) {'),
+      () => runExpectingFailure('pnpm', headerIntegration(RATE_LIMIT_ITEST)),
+    ),
+    'permits exactly the policy limit and refuses the next one',
+  )
+
+  /*
+    197l. The refusal stops recording itself.
+
+    The limit still works perfectly: requests are counted, the ceiling fires, the 429 goes out. What is
+    gone is the MEASUREMENT — `refusals` stays zero, so the table says this ceiling never fired and the
+    question "is this figure right" is unanswerable. An unmeasured limit is a guess (brief rule 15), and
+    this is the mutation that turns a measured one back into one.
+  */
+  checkRejectedBy(
+    'headers: 197l a refusal that no longer records itself is caught',
+    withEditedFile(
+      RATE_LIMIT_REPOSITORY,
+      (source) =>
+        replaceOnce(
+          source,
+          '  await sql`\n    update rate_limit_window\n       set refusals = refusals + 1',
+          '  if (args.scope !== undefined) return\n  await sql`\n    update rate_limit_window\n       set refusals = refusals + 1',
+        ),
+      () => runExpectingFailure('pnpm', headerIntegration(RATE_LIMIT_ITEST)),
+    ),
+    'records the traffic and the refusals separately',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -64249,6 +65172,8 @@ export function chargebackNetEffectFils(`,
     'pnpm dry-runs',
     'pnpm descriptor-lint',
     'pnpm perf-layers',
+    'pnpm offline-money',
+    'pnpm headers',
     'pnpm egress',
     // And the SAQ-A scan beside it, for the same reason in the other direction: it is the one check that
     // says no card number can reach anything this build renders, logs or stores, and its whole value is

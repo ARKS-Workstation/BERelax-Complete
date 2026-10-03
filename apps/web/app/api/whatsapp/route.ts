@@ -1,6 +1,7 @@
 import { loadConfig } from '@berelax/config'
 import type { Clock, Instant } from '@berelax/core'
 import { createConnection } from '@berelax/db'
+import { takeRateLimit, withRateLimitHeaders } from '../../../src/security/rate-limit.ts'
 import { handleWhatsappIssueRequest, type WhatsappIssueDeps } from './issue.ts'
 
 /**
@@ -46,5 +47,15 @@ function whatsappRuntime(): WhatsappIssueDeps {
 }
 
 export async function GET(request: Request): Promise<Response> {
-  return await handleWhatsappIssueRequest(whatsappRuntime(), request)
+  // H-HARD-01: a GET that WRITES — a reference-code row — which is why it is limited although it is a read
+  // by method. The ceiling fails towards PERMITTING: a refused tap is a customer who reaches WhatsApp
+  // without a reference code, which is an attribution gap rather than a refusal anybody sees.
+  const limit = await takeRateLimit({
+    scope: 'whatsapp_ref',
+    request,
+    nowIso: new Date().toISOString(),
+  })
+  if (limit.kind === 'refused') return limit.response
+  const response = await handleWhatsappIssueRequest(whatsappRuntime(), request)
+  return withRateLimitHeaders(response, limit.headers)
 }

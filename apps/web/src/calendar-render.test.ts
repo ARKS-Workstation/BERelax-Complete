@@ -160,7 +160,9 @@ describe('the document carries one live region, one grid and the script', () => 
     expect(html.split('data-testid="calendar-live"').length - 1).toBe(1)
     expect(html).toContain('role="status" aria-live="polite"')
     expect(html).toContain('data-calendar-moves="0"')
-    expect(html).toContain('<script>')
+    // `<script nonce=` and not `<script>`: H-HARD-01's admin CSP is `script-src 'nonce-…'`, so every
+    // inline script in this estate carries the per-response nonce through `inlineScriptTag`.
+    expect(html).toContain('<script nonce=')
     // The no-JavaScript path: a POST form, never a GET, because a GET that moved an appointment would be a
     // write on a link a crawler could follow.
     expect(html).toContain('<form class="move" method="post" action="/calendar?date=2099-06-17"')
@@ -233,8 +235,9 @@ describe('nothing a row carries can become markup', () => {
         appointments: [appointment({ serviceLabel: nasty })],
       }),
     )
-    // The page has exactly one script element — its own — and the injected one is text.
-    expect(html.split('<script>').length - 1).toBe(1)
+    // The page has exactly one script element — its own, nonced — and the injected one is text.
+    expect(html.split('<script nonce=').length - 1).toBe(1)
+    expect(html.split('<script>').length - 1).toBe(0)
     expect(html).not.toContain('<script>alert(1)</script>')
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
     // The control on the assertion: the same value unescaped WOULD be markup, so the escaping is doing the

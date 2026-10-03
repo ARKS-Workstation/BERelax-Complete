@@ -193,9 +193,7 @@
   },
   "matrixCoverage": {
     "note": "The MEASURED gap, committed as data rather than excused. W-SITE-11's fifth acceptance line asks that every route in the registry be covered by both an axe run and a visual-regression baseline. Derived from the suites rather than declared — a suite's subject is the `probePath` it hands `startWebServer`, and it covers that route when the same file both calls `auditPage(` and takes a screenshot — the answer on the day this gate was written was that ONE public document is covered (`/book`) and twelve are not. `pnpm a11y` audits the design specimen across the whole matrix and the per-route sweeps live in individual browser suites, so the gap is real rather than an artefact of the scan. A gate that failed the build on twelve routes would have been switched off within the week, so what the rule refuses is an ADDITION: a public document written after this gate is covered or it is refused, and a path removed from this list cannot be put back — `scripts/check-performance-layers.mjs` reports a stale entry as its own violation. INTEGRATOR, at the W-SITE-11 merge: /tag-loader, /therapists and /therapists/[slug] were added by A-MEAS-04 and W-SITE-06 in branches running in PARALLEL with this gate, so they were uncovered when it was written even though they appear newer. They are recorded here rather than excused: public-site.itest.ts asserts server-rendered HTML by fetch and starts no browser, so adding axe to it is a new browser matrix, not a line. B-M1 drives these routes in a real browser and is the unit that covers them; a NOTE on its manifest entry says so.",
-    "coveredWhenWritten": [
-      "/book"
-    ],
+    "coveredWhenWritten": ["/book"],
     "alreadyUncovered": [
       "/",
       "/about",

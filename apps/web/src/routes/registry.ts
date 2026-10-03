@@ -1003,6 +1003,35 @@ export const ROUTES = [
       'beside it arrive excluded rather than being indexed until somebody reads Search Console.',
   },
   {
+    id: 'day-sheet-print',
+    path: '/day-sheet/print',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'H-HARD-08s printable day sheet: the paper the floor works from when the network is gone. It reads ' +
+      'readCalendarDay and adds no reader of its own, which is the decision - that one statement already ' +
+      'joins on appointment.trading_date, the STORED column that resolves the 01:30 case, so an ' +
+      'after-midnight treatment is on the sheet; and it orders by (starts_at, id), so two prints of an ' +
+      'unchanged day are byte-identical. A second reader would have re-derived where a trading day ends, ' +
+      'and a fallback showing a different set from the screen it replaces is worse than no fallback. It ' +
+      'holds NO instant of its own, which is the one way it differs from every other admin screen: a ' +
+      '"printed at" line makes two prints differ, and ADR 0105 took the same decision for the ' +
+      'reconciliation report. It NAMES NO CUSTOMER - a list of who is coming, when, for what treatment is ' +
+      'the most sensitive thing this business could leave face-up, and this sheet is printed precisely so ' +
+      'it is lying around - so the columns are the time, the room, the therapists handle (ADR 0020), the ' +
+      'treatment and an eight-character appointment reference a till entry is reconciled against. The ' +
+      '"paid" column is deliberately BLANK: a figure this system filled in would be a claim it cannot ' +
+      'make while the network is down, and the paper side is a named persons claim (ADR 0107). A handler ' +
+      'answering text/html rather than a document, for the reason every admin screen since P-HR-02 gives: ' +
+      'a document must be served in both locales. Dynamic and never cached, because a cached day sheet is ' +
+      'yesterdays floor plan handed to todays shift. The /day-sheet prefix in ADMIN_GROUP_PREFIXES is ' +
+      'what makes it noindex, and authenticated since W-SYS-11.',
+  },
+  {
     id: 'private-document',
     path: '/documents/[id]',
     kind: 'handler',
@@ -1113,6 +1142,35 @@ export const ROUTES = [
       'and authenticated since W-SYS-11, exactly as the routes under /settings record.',
   },
   {
+    id: 'hr-leave-filing',
+    path: '/hr/leave',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'P-HR-14s leave filing screen: the SECOND entry point into submitLeaveRequest, which is the one ' +
+      'validator the staff portal also enters. It exists because nineteen employees have no phone and no ' +
+      'email on file (0081), so a therapist who cannot reach /hr/me still has to be able to take a ' +
+      'holiday and a manager typing it in is how that happens; the acceptance line is "both entry points ' +
+      'call one function" and a scan of the source asserts neither reaches writeLeaveRequest itself. It ' +
+      'FILES and never decides: the row is created pending, the days are reserved because 0066 says a ' +
+      'request reserves when it is made, and approving it is /hr/leave/[id]s with its own coverage and ' +
+      'authority checks. The authority to file for somebody else is leave:approve and never ' +
+      'leave:request - every therapist holds the second, which is what lets them file their OWN - and it ' +
+      'is checked against the session before the form renders as well as before the write. The subject is ' +
+      'a row id in the POST BODY and never a query parameter: admin-guard.test.ts refuses a principal, a ' +
+      'role or a permission taken from the query across the whole of apps/web, and a GET URL carrying an ' +
+      'employee id is a URL that gets shared. A handler answering text/html rather than a document, for ' +
+      'the reason the six HR screens beside it give: a document must be served in both locales, which ' +
+      'would need an Arabic admin document nobody has built. It names no therapist: staff_reference is ' +
+      'the handle (ADR 0020). Dynamic because the candidate list is current employment and the balance it ' +
+      'judges against moves. The /hr prefix in ADMIN_GROUP_PREFIXES is what makes it noindex, and ' +
+      'authenticated since W-SYS-11.',
+  },
+  {
     id: 'hr-leave-request',
     path: '/hr/leave/[id]',
     kind: 'handler',
@@ -1141,6 +1199,38 @@ export const ROUTES = [
       'answer are both claims about rows a reassignment changes minute by minute, so a prerendered copy ' +
       'would show a conflict somebody had already resolved. The /hr prefix in ADMIN_GROUP_PREFIXES is what ' +
       'makes it noindex.',
+  },
+  {
+    id: 'hr-me',
+    path: '/hr/me',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'P-HR-14s staff portal: a therapist sees their own published shifts, their leave balance and ' +
+      'requests, their commission derivation and their payslips, and NOTHING belonging to anyone else. ' +
+      'That last clause is a refusal in the query and not a filter on the page - assertPortalSubject in ' +
+      '@berelax/core compares the subject against the session and refuses when they differ, for every ' +
+      'role INCLUDING the owner, which is deliberately narrower than mayReadPayslip and ' +
+      'mayReadCommissionDerivation beside it: an accountant running payroll legitimately reads somebody ' +
+      'elses figures and nothing legitimately reads somebody elses /hr/me. There is no ?employee= to ' +
+      'authorise, because admin-guard.test.ts refuses a principal taken from the query across the whole ' +
+      'of apps/web; the refusal lives at the FUNCTION boundary where a caller naming a subject also hits ' +
+      'it, and the integration suite drives it with a colleagues rows present in every table so a ' +
+      'refusal is distinguishable from an empty one. The field policy is CLOSED: PORTAL_EMPLOYEE_FIELDS ' +
+      'enumerates what may appear and portalFieldPolicyProblems refuses anything whose sensitivity is not ' +
+      'open, so no wage and no identity document can reach the page, and the viewers own bank account is ' +
+      'shown as a MASK over nothing - the portal never decrypts one, so there is no field a number could ' +
+      'arrive in. Its one write is filing the viewers own leave, through submitLeaveRequest, which ' +
+      '/hr/leave also calls. A handler answering text/html rather than a document, for the reason the six ' +
+      'HR screens beside it give: a document must be served in both locales, which would need an Arabic ' +
+      'admin document nobody has built, and it would join a screenshot matrix whose RTL half has to be a ' +
+      'real Arabic route. Dynamic and never cached: this document is one persons wage, leave and roster, ' +
+      'and a cached copy is served to the next reader at the same terminal. The /hr prefix in ' +
+      'ADMIN_GROUP_PREFIXES is what makes it noindex, and authenticated since W-SYS-11.',
   },
   {
     id: 'hr-payroll',
@@ -2119,6 +2209,12 @@ export const ADMIN_GROUP_PREFIXES: readonly string[] = [
   '/clients',
   '/compliance',
   '/crm',
+  // H-HARD-08. `/day-sheet` holds one route today — the printable paper fallback — and it is a PREFIX
+  // rather than a bare path because what goes beside it is the screen that offers the print and whatever
+  // records the paper claim afterwards (ADR 0107's shape), and a sheet listing every treatment of a
+  // trading day is the floor plan of a licensed premises. A prefix added with the first route covers the
+  // second on the commit that creates it rather than on the commit that remembers to.
+  '/day-sheet',
   // W-SYS-14. `/documents` holds one route today — the signed private-document download — and it is a
   // prefix rather than an entry because what goes beside it is the screen that OFFERS the download, and a
   // screen listing which documents exist for a customer or an employee is the index of the filing cabinet.

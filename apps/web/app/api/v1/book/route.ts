@@ -8,6 +8,7 @@ import {
   TDRA_PROMOTIONAL_WINDOW,
 } from '@berelax/messaging'
 import { createSmsalaTransport } from '@berelax/messaging/transports/smsala'
+import { takeRateLimit, withRateLimitHeaders } from '../../../../src/security/rate-limit.ts'
 import { type BookFlowDeps, handleBookFlowRequest, handleBookIcsRequest } from './handler.ts'
 
 /**
@@ -98,7 +99,12 @@ function bookFlowRuntime(): BookFlowDeps {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  return await handleBookFlowRequest(bookFlowRuntime(), request)
+  // H-HARD-01: the ceiling, before the work. A refused request does no database work beyond the one
+  // upsert that counted it, which is the point of taking it here rather than inside the handler.
+  const limit = await takeRateLimit({ scope: 'booking', request, nowIso: new Date().toISOString() })
+  if (limit.kind === 'refused') return limit.response
+  const response = await handleBookFlowRequest(bookFlowRuntime(), request)
+  return withRateLimitHeaders(response, limit.headers)
 }
 
 export async function GET(request: Request): Promise<Response> {

@@ -1,6 +1,7 @@
 import { loadConfig } from '@berelax/config'
 import type { Clock, Instant } from '@berelax/core'
 import { createConnection } from '@berelax/db'
+import { takeRateLimit, withRateLimitHeaders } from '../../../../../src/security/rate-limit.ts'
 import { type ConsentEndpointDeps, handleConsentRequest } from './handler.ts'
 
 /**
@@ -42,5 +43,11 @@ function consentRuntime(): ConsentEndpointDeps {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  return await handleConsentRequest(consentRuntime(), request)
+  // H-HARD-01: an unauthenticated INSERT, which is the class the acceptance line is about even though it
+  // names four other URLs. The ceiling is high and fails towards PERMITTING, because a refused decision is
+  // a visitor who cannot WITHDRAW consent — the one direction this endpoint must never fail in.
+  const limit = await takeRateLimit({ scope: 'consent', request, nowIso: new Date().toISOString() })
+  if (limit.kind === 'refused') return limit.response
+  const response = await handleConsentRequest(consentRuntime(), request)
+  return withRateLimitHeaders(response, limit.headers)
 }
