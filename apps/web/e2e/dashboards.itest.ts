@@ -30,7 +30,7 @@ import { ADMIN_SESSION_COOKIE } from '../src/session-cookie.ts'
  * ## Why `.itest.ts` and not `.spec.ts`
  *
  * The manifest names this file `dashboards.spec.ts`. `vitest.integration.config.ts` includes
- * `apps/**​/*.itest.ts` and nothing else, so a `.spec.ts` here would be a suite nothing runs — which is
+ * `apps/**/*.itest.ts` and nothing else, so a `.spec.ts` here would be a suite nothing runs — which is
  * worse than no suite, because it would look like coverage. The two files already in this directory,
  * `collector.itest.ts` and `walk-in-speed.itest.ts`, are the convention.
  *
