@@ -4636,4 +4636,45 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // ZY341-ZY342 of the band ZY341-ZY350 are used; ZY343 through ZY350 are released UNUSED and deliberately
 // unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
 //
-export const SCHEMA_VERSION = 128 as const
+// 137 is 0137_analytics_dispatch_transport.sql (A-MEAS-03) — the transport half of `analytics_dispatch`:
+// the shared event identity, the payload that went out, the action source, the instant the conversion
+// actually happened, the attempt counter, the per-destination idempotency index and the `failed` state.
+// The Drizzle mirror in `packages/db/src/schema/analytics-dispatch.ts` carries all of it, so `pnpm
+// db:drift` compares the two.
+//
+// 0125 created this table and left exactly these columns out, in its own words: *a column with no producer
+// is indistinguishable from one whose producer stopped working*. The producer is
+// `apps/worker/src/jobs/analytics-dispatch.ts`, and it arrives in the same commit as the columns.
+//
+// **The consent gate is not re-answered.** `dispatch_consent_gap` and the ZY312 trigger are 0125's, this
+// file touches neither, and the consumer reads the decision rather than making it a second time — a second
+// consent check in the consumer is the defect A-MEAS-02 exists to prevent (ADR 0076, ADR 0091). The
+// trigger firing on UPDATE is what makes a retry safe without the consumer knowing: a dispatch that failed
+// while consent stood and is retried after a withdrawal is refused on the way back to `queued`.
+//
+// Three of 0125's constraints are RELAXED here rather than worked around, which 0125 asked for by name:
+// `analytics_dispatch_reason_known` gains `transport_failed`, `analytics_dispatch_reason_iff_refused` gains
+// `failed`, and a third narrow sibling is added beside the two instead of folding all three into one
+// alternation — three narrow rules fail by name, where one wide rule fails by saying a row is wrong.
+//
+// `event_id` is NOT NULL with no default, which is safe here and nowhere later: the table is created by
+// 0125 in the same ordered run and nothing between them writes a row. A nullable column would also have
+// made the idempotency index stop being one, because two NULLs are distinct to a unique index. That index
+// is on `(event_id, destination)` across EVERY state and is deliberately not partial — a `suppressed` row
+// and a later `queued` row for one pair would be two answers to whether that conversion was permitted.
+//
+// ZY451 and ZY452 are used of the band ZY451-ZY460; ZY453 through ZY460 are released UNUSED and
+// deliberately unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
+// Both are triggers rather than CHECKs because both compare NEW against OLD. ZY451 freezes a transmitted
+// dispatch, which is what A-MEAS-07 rests on: comparing internal truth against what was pushed is only a
+// comparison while the pushed side cannot be edited to agree with the other. ZY452 refuses an attempt
+// counter that decreases, because the backoff delay is a function of the attempt number and a reset
+// restarts the ladder at its shortest delay for ever.
+//
+// It also inserts the consumer's `agent_definition` and its `agent_heartbeat` row, 0031's convention as
+// restated by 0110 and 0122 — 0107 shipped `gratuity_accrual` without the heartbeat and nothing caught it
+// until a suite read the table; `pnpm jobs` now does. `budget_fils_per_run` is 0 and that is a measured
+// figure rather than a placeholder: both adapters are named fakes behind the provider port, `real`
+// resolves to `notImplemented`, and the pass performs no outbound call of any kind.
+//
+export const SCHEMA_VERSION = 137 as const

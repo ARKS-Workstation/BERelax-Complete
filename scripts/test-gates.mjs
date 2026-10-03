@@ -52269,6 +52269,322 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 169a-169z. (A-MEAS-03) The dispatch consumer: the brand shown to be forgeable, the stored payload shown
+//            to be able to arrive as nothing at all, the gate shown NOT to be re-asked, and the backoff
+//            shown to be able to stop growing.
+//
+// Every claim in this unit fails SILENTLY if it is wrong, and two of them did before this block existed.
+// The commit this unit inherited cast `JSON.parse(row.payload) as EgressPayload`, which satisfies the
+// brand perfectly — and the row it parsed held a jsonb *string*, because a JS string parameter cast with
+// `::jsonb` is JSON-ENCODED by the driver. Together those two defects would have posted a conversion with
+// no event type, no category code and no value to GA4, which answers 200 to it. Nothing errored, every
+// unit case passed, and the only evidence would have been an advertising account reporting conversions
+// worth nothing.
+//
+// So the fixtures below are mutations of shipped source, each one the plausible version of the mistake,
+// and each is required to be caught by a rule or a case that names it.
+{
+  const CONSUMER = 'apps/worker/src/jobs/analytics-dispatch.ts'
+  const GUARD = 'packages/core/src/analytics/egress-guard.ts'
+  const GUARD_SUITE = 'packages/core/src/analytics/egress-guard.test.ts'
+  const WRITER = 'packages/db/src/repositories/analytics-consent.ts'
+  const READER = 'packages/db/src/repositories/analytics-dispatch.ts'
+  const EVENT_ID = 'packages/analytics/src/event-id.ts'
+  const EVENT_ID_SUITE = 'packages/analytics/src/event-id.test.ts'
+  const FAKES = 'packages/analytics/src/fakes.ts'
+  const FAKES_SUITE = 'packages/analytics/src/fakes.test.ts'
+  const PORT = 'packages/analytics/src/port.ts'
+  const ADAPTERS_SUITE = 'packages/analytics/src/adapters.test.ts'
+  const BARREL = 'packages/analytics/src/index.ts'
+  const DISPATCH_ITEST = 'apps/worker/src/jobs/analytics-dispatch.itest.ts'
+
+  const unitFails = (...files) =>
+    runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const itestFails = (...files) =>
+    runExpectingFailure('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      ...files,
+    ])
+  /** Breaks one shipped file and requires a named refusal from a repository-wide script gate. */
+  const scriptRefuses = (file, find, into, script) =>
+    withEditedFile(
+      file,
+      (source) => replaceOnce(source, find, into),
+      () => runExpectingFailure('pnpm', [script]),
+    )
+  /** Breaks one shipped file and requires a named case back from a suite. */
+  const brokenUnit = (file, find, into, ...suites) =>
+    withEditedFile(
+      file,
+      (source) => replaceOnce(source, find, into),
+      () => unitFails(...suites),
+    )
+
+  // 169a. THE defect this unit inherited. A stored payload re-entering the branded type by a cast is a
+  //       payload the guard never built: no allowlist has been applied to it, so it may carry a service
+  //       name or a price on a non-terminal event, and every adapter accepts it because the type says it
+  //       is fine. `egressPayloadFromStored` is the re-entry; this is what happens without it.
+  checkRejectedBy(
+    'dispatch consumer: a stored payload cast back into the brand is caught',
+    scriptRefuses(
+      CONSUMER,
+      '    return egressPayloadFromStored(dispatch.payload)',
+      '    return JSON.parse(dispatch.payload) as EgressPayload',
+      'egress',
+    ),
+    'egress-brand-minted-outside-the-guard',
+  )
+
+  // 169b. And the control on the rule that catches it: the guard must mint exactly ONCE. A second mint
+  //       inside the guard is the version of 169a that the module-level exemption would hide, and the
+  //       re-entry function is precisely where somebody would add it.
+  checkRejectedBy(
+    'dispatch consumer: a second mint inside the guard itself is caught',
+    scriptRefuses(
+      GUARD,
+      '  return payload\n}',
+      '  return { ...payload } as unknown as EgressPayload\n}',
+      'egress',
+    ),
+    'mints a branded payload',
+  )
+
+  // 169c. The second half of the inherited defect, and the one no type could see. `${payload}::jsonb`
+  //       looks exactly right and the driver JSON-ENCODES the string, so the column holds a jsonb string
+  //       whose text is the payload — `jsonb_typeof` of `string` rather than `object`. Every field then
+  //       reads as `undefined` in the consumer. The guard's re-entry is what notices.
+  checkRejectedBy(
+    'dispatch writer: a payload double-encoded into a jsonb string is caught',
+    withEditedFile(
+      WRITER,
+      (source) => replaceOnce(source, '${input.payload}::text::jsonb,', '${input.payload}::jsonb,'),
+      () => itestFails(DISPATCH_ITEST),
+    ),
+    'A stored egress payload is not an object',
+  )
+
+  // 169d. The round trip is what makes the re-entry a PROOF rather than a second construction of the same
+  //       document. Remove it and a renumbered category table posts the stale document and reconciles
+  //       against the new one — which is A-MEAS-07 reporting a variance nobody can attribute.
+  checkRejectedBy(
+    'dispatch consumer: a stored payload that does not rebuild to itself must be refused',
+    brokenUnit(
+      GUARD,
+      '  if (rebuilt !== asStored) {',
+      '  if (rebuilt !== asStored && false) {',
+      GUARD_SUITE,
+    ),
+    'does not rebuild to itself',
+  )
+
+  // 169e. A key the allowlist does not name is REFUSED on a stored payload rather than projected away. A
+  //       drop is right for a caller handing the guard what it held; an extra key on a stored payload
+  //       means the row was not written by the serialiser, and projecting it away hides that.
+  checkRejectedBy(
+    'dispatch consumer: a smuggled field on a stored payload must be refused, not dropped',
+    brokenUnit(
+      GUARD,
+      '    if ((EGRESS_PAYLOAD_FIELDS as readonly string[]).includes(key)) continue',
+      '    if (true) continue',
+      GUARD_SUITE,
+    ),
+    'does not name',
+  )
+
+  // 169f. The funnel stage is part of the event identity, and dropping it is the mistake that reads as a
+  //       simplification. One booking contributes `booking_created`, `confirmed`, `attended` and `paid`;
+  //       an id over the aggregate alone makes all four one event, three are discarded as duplicates, and
+  //       the campaign appears to produce bookings that never got paid.
+  checkRejectedBy(
+    'dispatch identity: an event id that ignores the funnel stage is caught',
+    brokenUnit(
+      EVENT_ID,
+      '  return [subject.kind, aggregateId, stage].join(EVENT_ID_SEPARATOR)',
+      '  return [subject.kind, aggregateId].join(EVENT_ID_SEPARATOR)',
+      EVENT_ID_SUITE,
+    ),
+    'a different id',
+  )
+
+  // 169g. The separator is what keeps two distinct conversions from producing one canonical form. A bare
+  //       concatenation is not an error anywhere: it is one conversion reported instead of two, for ever.
+  //
+  //       The case this fires is the CONTROL inside 'the separator', and that is worth stating because the
+  //       obvious candidate does not fire. 'keeps apart two subjects a bare concatenation would merge'
+  //       still passes under this mutation: both vocabularies are closed, no kind is a prefix of another
+  //       and no stage is a suffix of one, so a colliding pair cannot be built out of them — which means
+  //       the only thing that can catch a dropped separator is an assertion about the canonical form
+  //       ITSELF. Running this case is how that was found.
+  checkRejectedBy(
+    'dispatch identity: a canonical form that drops its separators is caught',
+    brokenUnit(
+      EVENT_ID,
+      '  return [subject.kind, aggregateId, stage].join(EVENT_ID_SEPARATOR)',
+      "  return [subject.kind, aggregateId, stage].join('')",
+      EVENT_ID_SUITE,
+    ),
+    'cannot appear in any kind or any stage',
+  )
+
+  // 169h. The egress guard that stops a staging run reaching a real advertising account. There is no test
+  //       recipient for a conversion — a staging event lands in the property the owner reads, inflates
+  //       what a campaign is optimised on, and cannot be removed — so this one has no allowlist to widen
+  //       and the only way to break it is to make it answer `transmit`.
+  checkRejectedBy(
+    'dispatch transport: an egress guard that transmits outside production is caught',
+    brokenUnit(
+      FAKES,
+      "  if (isProduction(appEnv)) return { kind: 'transmit' }",
+      "  if (true) return { kind: 'transmit' }",
+      FAKES_SUITE,
+      ADAPTERS_SUITE,
+    ),
+    'transmits in production and in nothing else',
+  )
+
+  // 169i. The backoff that stops growing. `2 ** attemptsMade` relaxed to a constant delay is not an error
+  //       and not a slow test: it is a destination that is down being retried at the shortest interval
+  //       for ever, and the symptom is a consumer that looks busy.
+  checkRejectedBy(
+    'dispatch transport: a backoff ladder that stops growing is caught',
+    brokenUnit(
+      FAKES,
+      '  return ANALYTICS_RETRY_BASE_SECONDS * ANALYTICS_RETRY_FACTOR ** attemptsMade',
+      '  return ANALYTICS_RETRY_BASE_SECONDS',
+      FAKES_SUITE,
+    ),
+    'grows, and the first delay is the base',
+  )
+
+  // 169j. A fractional or negative attempt count computes a delay BELOW the base — `2 ** -1` is 0.5 — so
+  //       the ladder's first rung becomes an immediate retry, which is the one failure a backoff exists to
+  //       prevent. The refusal is what keeps that unreachable.
+  checkRejectedBy(
+    'dispatch transport: a backoff that computes a delay for a negative attempt count is caught',
+    brokenUnit(
+      FAKES,
+      '  if (!Number.isInteger(attemptsMade) || attemptsMade < 0) {',
+      '  if (false) {',
+      FAKES_SUITE,
+    ),
+    'refuses a fractional or negative attempt count',
+  )
+
+  // 169k. The action source is refused and never defaulted. The value a default reaches is `website`, so
+  //       the defect reports a walk-in as a web order in somebody else's advertising report — a figure
+  //       rather than an error.
+  checkRejectedBy(
+    'dispatch transport: an action source defaulted to website instead of refused is caught',
+    brokenUnit(
+      PORT,
+      '  if (mapped !== undefined) return mapped',
+      "  return mapped ?? 'website'",
+      ADAPTERS_SUITE,
+    ),
+    'REFUSES an unknown source rather than defaulting to website',
+  )
+
+  // 169l. THE BARREL IS THE LOOPHOLE. A re-export of either adapter from `index.ts` makes the
+  //       module-matching rule match nothing, and the consumer then keeps the fake in production with
+  //       nothing saying so — worse than the payments case, because the dispatch rows would read `sent`.
+  checkRejectedBy(
+    'dispatch registry: an adapter re-exported through the barrel is caught by rule name',
+    withEditedFile(
+      BARREL,
+      (source) =>
+        replaceOnce(
+          source,
+          'export {\n  ANALYTICS_AGGREGATE_KINDS,',
+          "export { GA4_MEASUREMENT_PROTOCOL } from './ga4.ts'\nexport {\n  ANALYTICS_AGGREGATE_KINDS,",
+        ),
+      () => runExpectingFailure('pnpm', ['boundaries']),
+    ),
+    'analytics-adapters-only-through-the-registry',
+  )
+
+  // 169m. A destination the consent gate will enqueue to and no adapter serves must THROW rather than be
+  //       skipped. A skipped row stays queued for ever with nothing saying why, which reads exactly like
+  //       a consumer that stopped running — ADR 0002's failure in a queue.
+  checkRejectedBy(
+    'dispatch registry: a destination no adapter serves must throw rather than be skipped',
+    brokenUnit(
+      'packages/analytics/src/registry.ts',
+      '      if (adapter !== undefined) return adapter',
+      '      if (adapter !== undefined) return adapter\n      return ga4',
+      'packages/analytics/src/registry.test.ts',
+    ),
+    'throws for a destination no adapter serves',
+  )
+
+  // 169n. The reader's instants. `timestamptz::text` is PostgreSQL's display form and not ISO-8601, so a
+  //       field named `occurredAtIso` held `2026-09-30 09:00:00+00` — which both adapters put through
+  //       `new Date(...)`, outside the format `Date.parse` is specified for. It happens to work in V8 and
+  //       is the shape that dates a conversion wrongly where it does not.
+  checkRejectedBy(
+    'dispatch reader: a non-ISO instant on a field named Iso is caught',
+    withEditedFile(
+      READER,
+      (source) =>
+        replaceOnce(
+          source,
+          '    occurredAtIso: row.occurred_at.toISOString(),',
+          '    occurredAtIso: String(row.occurred_at),',
+        ),
+      () => itestFails(DISPATCH_ITEST),
+    ),
+    'carries the instant the conversion HAPPENED',
+  )
+
+  // 169o. The empty backoff ladder, which is what a mis-wired caller passes. An empty array makes every
+  //       failed row due on every pass — the hammering the ladder exists to prevent — and a limit of zero
+  //       drains nothing while reporting a clean pass, which is ADR 0002's failure exactly.
+  checkRejectedBy(
+    'dispatch reader: an empty ladder or a zero limit must be refused rather than obeyed',
+    brokenUnit(
+      READER,
+      '  if (query.backoffSeconds.length === 0) {',
+      '  if (false) {',
+      'packages/db/src/analytics-dispatch.test.ts',
+    ),
+    'refuses an empty backoff ladder',
+  )
+
+  // 169p. The vacuity control for this whole block, and it is not a formality: every case above asserts
+  //       that a MUTATED tree fails, and a tree that fails for its own reasons satisfies all of them. So
+  //       the unmutated suites must pass, and the script gates must answer clean.
+  {
+    const suites = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.config.ts',
+      GUARD_SUITE,
+      EVENT_ID_SUITE,
+      FAKES_SUITE,
+      ADAPTERS_SUITE,
+      'packages/analytics/src/registry.test.ts',
+      'packages/analytics/src/identity.test.ts',
+      'packages/db/src/analytics-dispatch.test.ts',
+    ])
+    check(
+      'dispatch gate: the unmutated suites pass, so every case above measured its own mutation',
+      !suites.failed,
+      suites.output,
+    )
+    const egress = run('pnpm', ['egress'])
+    check(
+      'dispatch gate: and the egress guard answers clean on the real tree',
+      !egress.failed,
+      egress.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

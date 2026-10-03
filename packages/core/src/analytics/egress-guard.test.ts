@@ -50,6 +50,7 @@ import {
   EGRESS_EVENT_TYPES,
   EGRESS_PAYLOAD_FIELDS,
   type EgressEventType,
+  egressPayloadFromStored,
   egressPermittedVocabulary,
   egressTokensOf,
   HEALTH_TERM_LEXICON,
@@ -484,5 +485,123 @@ describe('the event types are the funnel’s, derived', () => {
         )
       }
     }
+  })
+})
+
+/**
+ * The stored payload's way back into the branded type (A-MEAS-03's consumer).
+ *
+ * Every case comes with the half that could fail. "It round-trips" is satisfied by a function that returns
+ * its input, so each claim below is paired with an input the function must REFUSE — and the refusals are
+ * the point: the consumer reads a row written minutes or days earlier, and the brand cannot survive
+ * `jsonb`, so this is the one place a stale or hand-written payload can be stopped.
+ */
+describe('a stored payload re-entering the guard', () => {
+  const ref: CatalogueRef = { kind: 'package_template' }
+  const stage = FUNNEL_TERMINAL_STAGE
+  if (stage === undefined) throw new Error('FUNNEL_STAGES is empty, so no stage is terminal.')
+
+  const built = buildEgressPayload({
+    ref,
+    eventType: stage,
+    quantity: 2,
+    valueFils: 32_010,
+  }).payload
+  const stored = serialiseEgressPayload(built)
+
+  it('rebuilds the same payload from what the serialiser wrote', () => {
+    expect(serialiseEgressPayload(egressPayloadFromStored(stored))).toBe(stored)
+  })
+
+  it('rebuilds from the shape jsonb hands back, which is not the bytes that were written', () => {
+    // PostgreSQL normalises whitespace and orders jsonb keys by length then bytewise, so `payload::text`
+    // is not what `serialiseEgressPayload` wrote. A byte comparison would therefore have failed for every
+    // row, and the check would have been deleted rather than fixed.
+    const asJsonb = JSON.stringify(
+      Object.fromEntries(
+        Object.entries(JSON.parse(stored) as Record<string, unknown>).toSorted(([a], [b]) =>
+          a.length === b.length ? a.localeCompare(b) : a.length - b.length,
+        ),
+      ),
+      null,
+      1,
+    )
+    expect(asJsonb).not.toBe(stored)
+    expect(serialiseEgressPayload(egressPayloadFromStored(asJsonb))).toBe(stored)
+  })
+
+  it('rebuilds a payload with no value, which is every non-terminal event', () => {
+    const nonTerminal = FUNNEL_STAGES.find((candidate) => candidate !== stage)
+    expect(
+      nonTerminal,
+      'the funnel must have a non-terminal stage for this case to measure anything',
+    ).toBeDefined()
+    const withoutValue = serialiseEgressPayload(
+      buildEgressPayload({
+        ref,
+        eventType: nonTerminal as (typeof FUNNEL_STAGES)[number],
+        quantity: 1,
+      }).payload,
+    )
+    expect(serialiseEgressPayload(egressPayloadFromStored(withoutValue))).toBe(withoutValue)
+  })
+
+  it('refuses a key the allowlist does not name rather than projecting it away', () => {
+    // A drop is the right answer for a caller handing the guard what it happened to hold. An extra key on
+    // a STORED payload means the row was not written by the serialiser at all, and projecting it away
+    // silently would hide that.
+    const smuggled = JSON.stringify({
+      ...(JSON.parse(stored) as Record<string, unknown>),
+      serviceName: 'Arabic Hot Oil Massage',
+    })
+    expect(() => egressPayloadFromStored(smuggled)).toThrow(/does not name/)
+  })
+
+  it('refuses a category code nothing maps to, which is what a renumbered table produces', () => {
+    const renumbered = JSON.stringify({
+      ...(JSON.parse(stored) as Record<string, unknown>),
+      categoryCode: 'ZZZ_99',
+    })
+    expect(() => egressPayloadFromStored(renumbered)).toThrow(/no catalogue ref maps to/)
+  })
+
+  it('refuses an event type that is not a funnel stage', () => {
+    const wrongStage = JSON.stringify({
+      ...(JSON.parse(stored) as Record<string, unknown>),
+      eventType: 'purchase',
+    })
+    expect(() => egressPayloadFromStored(wrongStage)).toThrow(/not a funnel stage/)
+  })
+
+  it('refuses a quantity or a value that is not a number', () => {
+    const fields = JSON.parse(stored) as Record<string, unknown>
+    expect(() => egressPayloadFromStored(JSON.stringify({ ...fields, quantity: '2' }))).toThrow(
+      /not a number/,
+    )
+    expect(() =>
+      egressPayloadFromStored(JSON.stringify({ ...fields, valueFils: '320.10' })),
+    ).toThrow(/not a number/)
+  })
+
+  it('refuses a payload that is not an object, and one that is not JSON', () => {
+    expect(() => egressPayloadFromStored('[]')).toThrow(/not an object/)
+    expect(() => egressPayloadFromStored('null')).toThrow(/not an object/)
+    expect(() => egressPayloadFromStored('{not json')).toThrow(/not JSON/)
+  })
+
+  it('refuses a payload that does not rebuild to itself', () => {
+    // The value rule is the one that can disagree: a figure on a non-terminal stage is DROPPED by the
+    // builder, so a stored row carrying one does not rebuild to itself. That is the renumbered-catalogue
+    // failure in miniature, and the alternative is a stale document posted to a platform and then
+    // reconciled against the new one.
+    const nonTerminal = FUNNEL_STAGES.find((candidate) => candidate !== stage)
+    const impossible = JSON.stringify({
+      eventType: nonTerminal,
+      categoryCode: (JSON.parse(stored) as Record<string, unknown>)['categoryCode'],
+      quantity: 1,
+      valueFils: 32_010,
+      currency: 'AED',
+    })
+    expect(() => egressPayloadFromStored(impossible)).toThrow(/does not rebuild to itself/)
   })
 })

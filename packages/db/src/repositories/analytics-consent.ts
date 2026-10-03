@@ -279,7 +279,16 @@ export async function enqueueAnalyticsDispatch(
      * computes — which is the one fact that must be identical on both surfaces.
      */
     readonly eventId: string
-    /** The serialised egress payload, from `dispatchPayloadBytes`. Stored so A-MEAS-07 has both sides. */
+    /**
+     * The serialised egress payload, from `dispatchPayloadBytes`. Stored so A-MEAS-07 has both sides.
+     *
+     * Written with `::text::jsonb` and NOT `::jsonb`, which is not noise. postgres.js resolves a bare
+     * `$1::jsonb` to a json parameter and JSON-ENCODES the string it is given, so the column ended up
+     * holding a jsonb *string* whose text is the payload — `jsonb_typeof` of `'string'` rather than
+     * `'object'`. Nothing failed: the consumer's `JSON.parse` returned a string, every field read as
+     * `undefined`, and both adapters would have posted a conversion with no event type and no value,
+     * which GA4 accepts. `egressPayloadFromStored` is what caught it, and the `::text` is what fixes it.
+     */
     readonly payload: string
     /**
      * Where the conversion happened, from `BOOKING_SOURCE_ACTION_SOURCE` in `@berelax/analytics`.
@@ -321,7 +330,7 @@ export async function enqueueAnalyticsDispatch(
         case when cardinality(gap.missing) = 0 then null else 'consent_denied' end,
         ${input.decidedAtIso}::timestamptz,
         ${input.eventId},
-        ${input.payload}::jsonb,
+        ${input.payload}::text::jsonb,
         ${input.actionSource},
         ${input.occurredAtIso}::timestamptz
         from gap

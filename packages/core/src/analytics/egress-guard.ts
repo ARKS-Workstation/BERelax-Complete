@@ -58,6 +58,7 @@ import {
   categoryCodeFor,
   EGRESS_CATEGORY_CODES,
   type EgressCategoryCode,
+  enumerateCatalogueRefs,
 } from './category-codes.ts'
 
 /**
@@ -416,3 +417,155 @@ export function unpermittedEgressTokens(serialised: string): readonly string[] {
     (token) => !permitted.has(token) && !/^[0-9]+$/.test(token),
   )
 }
+
+/**
+ * The payload a STORED dispatch row carries, re-entering the branded type through the guard.
+ *
+ * ## Why a stored payload needs a function at all
+ *
+ * `analytics_dispatch.payload` holds what `serialiseEgressPayload` produced at enqueue time, and the
+ * consumer that drains the queue runs minutes or days later in another process (A-MEAS-03). The brand is a
+ * `unique symbol`, so it cannot survive a round trip through `jsonb` — and the obvious repair,
+ * `JSON.parse(stored) as EgressPayload`, is the exact cast
+ * `scripts/check-egress-guard.mjs` rule 1 refuses, for the reason the rule gives: a payload the guard never
+ * built has had no allowlist applied, and an adapter accepts it because the type says it is fine. The
+ * consumer wrote that cast and the gate caught it, which is why this function exists rather than an
+ * exemption.
+ *
+ * ## It REBUILDS and then proves the rebuild equals what was stored
+ *
+ * The objection to rebuilding is real — a second construction of one document is two documents the day the
+ * catalogue is renumbered — and it is answered by making the equality an ASSERTION rather than an
+ * assumption. The stored fields name a category code; `CATEGORY_CODE_BY_REF` is injective, so the code
+ * identifies the ref it was derived from; the payload is built again from that ref through the one builder,
+ * with the allowlist walked and the required fields proved; and the rebuilt payload's own serialisation is
+ * then held against the stored fields. A renumbered catalogue makes that comparison fail loudly, where a
+ * cast would have carried the stale document to a platform.
+ *
+ * The comparison is over the CANONICAL serialisation of both sides and not over the stored bytes, because
+ * `jsonb` is not a byte store: PostgreSQL normalises whitespace and orders keys by length then bytewise, so
+ * `payload::text` is not what `serialiseEgressPayload` wrote. A byte comparison would therefore have failed
+ * for every row, which is the failure that gets a check deleted rather than fixed.
+ *
+ * A key the allowlist does not name is REFUSED rather than dropped. A drop is the right answer for a
+ * dispatcher handing the guard whatever it was holding; a stored payload with an extra key was not written
+ * by the serialiser at all, and silently projecting it away would hide that.
+ */
+export function egressPayloadFromStored(stored: string): EgressPayload {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(stored)
+  } catch (error) {
+    throw new AppError(
+      'invariant_violated',
+      'A stored egress payload is not JSON, so there is nothing to transmit. The column is written only ' +
+        'by the one serialiser, so this is a row somebody wrote by hand.',
+      { details: { reason: error instanceof Error ? error.message : String(error) } },
+    )
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new AppError(
+      'invariant_violated',
+      'A stored egress payload is not an object, so no field of it can be read. A conversion with no ' +
+        'event type is not a smaller conversion: it is one an ad platform cannot attribute and will not ' +
+        'refuse.',
+      { details: { storedType: parsed === null ? 'null' : typeof parsed } },
+    )
+  }
+  const fields = parsed as Readonly<Record<string, unknown>>
+
+  for (const key of Object.keys(fields)) {
+    if ((EGRESS_PAYLOAD_FIELDS as readonly string[]).includes(key)) continue
+    throw new AppError(
+      'invariant_violated',
+      `A stored egress payload carries ${JSON.stringify(key)}, which ${EGRESS_PAYLOAD_FIELDS.join(', ')} ` +
+        'does not name. Refused rather than projected away: a drop is the right answer for a caller ' +
+        'handing the guard what it happened to hold, and an extra key on a STORED payload means the row ' +
+        'was not written by the serialiser.',
+      { details: { key, allowlist: [...EGRESS_PAYLOAD_FIELDS] } },
+    )
+  }
+
+  const eventType = fields['eventType']
+  if (typeof eventType !== 'string' || !(FUNNEL_STAGES as readonly string[]).includes(eventType)) {
+    throw new AppError(
+      'invariant_violated',
+      `A stored egress payload names event type ${JSON.stringify(eventType)}, which is not a funnel ` +
+        'stage. The dispatchable event types ARE the funnel stages (ADR 0046), so a stage this build does ' +
+        'not have is a conversion nothing can be reconciled against.',
+      { details: { eventType } },
+    )
+  }
+
+  const code = fields['categoryCode']
+  const ref = typeof code === 'string' ? REF_BY_EGRESS_CATEGORY_CODE.get(code) : undefined
+  if (ref === undefined) {
+    throw new AppError(
+      'invariant_violated',
+      `A stored egress payload names category code ${JSON.stringify(code)}, which no catalogue ref maps ` +
+        'to. The code is how a payload says what converted without naming a treatment (ADR 0018), so one ' +
+        'nothing maps to is a conversion about nothing — and a renumbered table is how it arises.',
+      { details: { categoryCode: code } },
+    )
+  }
+
+  const quantity = fields['quantity']
+  if (typeof quantity !== 'number') {
+    throw new AppError(
+      'invariant_violated',
+      `A stored egress payload holds quantity ${JSON.stringify(quantity)}, which is not a number.`,
+      { details: { quantity } },
+    )
+  }
+
+  const valueFils = fields['valueFils']
+  if (valueFils !== undefined && typeof valueFils !== 'number') {
+    throw new AppError(
+      'invariant_violated',
+      `A stored egress payload holds valueFils ${JSON.stringify(valueFils)}, which is not a number. A ` +
+        'conversion value that is not a figure would be posted as one.',
+      { details: { valueFils } },
+    )
+  }
+
+  const { payload } = buildEgressPayload({
+    ref,
+    eventType: eventType as FunnelStage,
+    quantity,
+    valueFils,
+  })
+
+  /*
+   * The equality that makes this a round trip rather than a second construction. Both sides are put
+   * through the one serialiser's field ORDER, because `jsonb` does not preserve the order the bytes were
+   * written in — see the header.
+   */
+  const canonicalStored: Record<string, unknown> = {}
+  for (const field of EGRESS_PAYLOAD_FIELDS) {
+    if (Object.hasOwn(fields, field)) canonicalStored[field] = fields[field]
+  }
+  const rebuilt = serialiseEgressPayload(payload)
+  const asStored = JSON.stringify(canonicalStored)
+  if (rebuilt !== asStored) {
+    throw new AppError(
+      'invariant_violated',
+      'A stored egress payload does not rebuild to itself, so the row and the guard disagree about what ' +
+        'was pushed. The first way this happens is a renumbered category table, and the consequence of ' +
+        'not noticing is a stale document posted to a platform and reconciled against the new one.',
+      { details: { rebuilt, asStored } },
+    )
+  }
+  return payload
+}
+
+/**
+ * The inverse of {@link categoryCodeFor}, derived rather than written.
+ *
+ * `CATEGORY_CODE_BY_REF` is total over the ref keys and injective by assertion, so the code identifies its
+ * ref. Built by enumerating the refs and asking the one mapping, so there is no second table to drift —
+ * which is rule 3's subject one direction along: a reverse table written by hand would be a second
+ * statement of what a code stands for.
+ */
+const REF_BY_EGRESS_CATEGORY_CODE: ReadonlyMap<string, CatalogueRef> = new Map(
+  enumerateCatalogueRefs().map((ref) => [categoryCodeFor(ref) as string, ref] as const),
+)

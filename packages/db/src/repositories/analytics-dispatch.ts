@@ -40,6 +40,22 @@ import type { Sql } from '../connection.ts'
  * worker should take the next row rather than wait for the first to finish an HTTPS call.
  */
 
+/**
+ * The two refusals migration 0137 adds, so a caller can branch on the RULE and not on prose.
+ *
+ * Spelled here and nowhere else: a code is an identity (ADR 0043), and a second literal of one in another
+ * module makes the registry entry's translator list wrong — which is what `pnpm sqlstate` caught in
+ * `analytics-consent.ts` for `ZP002`. Neither is translated into a named refusal by a function in this
+ * file, because neither can arise from a call this module makes: `recordDispatchAttempt` never edits a
+ * `sent` row and never lowers `attempts`. They are registered so that a caller which DOES hit one — a
+ * later unit, a psql session, a correction written as an edit instead of as a new statement (A-MEAS-05) —
+ * gets a code it can name rather than a constraint message.
+ */
+export const ANALYTICS_DISPATCH_SQLSTATE = {
+  transmissionIsFrozen: 'ZY451',
+  attemptsAreMonotonic: 'ZY452',
+} as const
+
 /** A dispatch the consumer may act on, with everything it needs and nothing it does not. */
 export interface DueDispatch {
   readonly dispatchId: string
@@ -54,7 +70,16 @@ export interface DueDispatch {
   readonly decidedAtIso: string
   /** Where the conversion happened, as the enqueuer recorded it. One of the three platform values. */
   readonly actionSource: string
-  /** When the conversion HAPPENED. For an offline upload, days before `decidedAtIso`. */
+  /**
+   * When the conversion HAPPENED. For an offline upload, days before `decidedAtIso`.
+   *
+   * ISO-8601 by `Date.toISOString()` and NOT by `occurred_at::text`, which was the first spelling and is
+   * the convention every other repository here avoids for a reason the integration suite measured:
+   * `timestamptz::text` is PostgreSQL's own display form (`2026-09-30 09:00:00+00`), so the field was
+   * named `...Iso` and did not hold one. Both adapters put this value through `new Date(...)`, and a
+   * space-separated instant is outside the format `Date.parse` is specified for — it happens to work in
+   * V8 and is the shape that dates a conversion wrongly where it does not.
+   */
   readonly occurredAtIso: string
 }
 
@@ -103,9 +128,9 @@ export async function dueAnalyticsDispatches(
       event_id: string
       payload: string
       attempts: number
-      decided_at: string
+      decided_at: Date
       action_source: string
-      occurred_at: string
+      occurred_at: Date
     }[]
   >`
     select d.dispatch_id,
@@ -116,9 +141,9 @@ export async function dueAnalyticsDispatches(
            d.event_id,
            d.payload::text       as payload,
            d.attempts,
-           d.decided_at::text    as decided_at,
+           d.decided_at,
            d.action_source,
-           d.occurred_at::text   as occurred_at
+           d.occurred_at
       from analytics_dispatch d
      where d.state in ('queued', 'failed')
        /*
@@ -149,9 +174,9 @@ export async function dueAnalyticsDispatches(
     eventId: row.event_id,
     payload: row.payload,
     attempts: row.attempts,
-    decidedAtIso: row.decided_at,
+    decidedAtIso: row.decided_at.toISOString(),
     actionSource: row.action_source,
-    occurredAtIso: row.occurred_at,
+    occurredAtIso: row.occurred_at.toISOString(),
   }))
 }
 

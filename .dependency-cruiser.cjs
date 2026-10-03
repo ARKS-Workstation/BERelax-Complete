@@ -521,9 +521,12 @@ module.exports = {
         'dispatch rows would be written `sent`. The registry also owns the shared local outbox and the ' +
         'shared transport script, so a directly constructed adapter writes to an outbox the admin panel ' +
         'and A-MEAS-07 do not read. ' +
-        'THE BARREL IS THE LOOPHOLE, and it is closed the way the payments and messaging rules close ' +
-        'theirs: packages/analytics/src/index.ts re-exports the body BUILDERS and the adapter CONSTANTS ' +
-        'THE BARREL IS THE LOOPHOLE, and it is closed harder than the payments one: packages/analytics/src/index.ts does not reach either adapter module AT ALL, not even for a constant, because a re-export of any kind makes a module-matching rule match nothing. A consumer names a destination through DISPATCH_DESTINATIONS, which the registry assembles. Any test or integration suite is exempt: registry.test.ts and ga4.test.ts have to reach the adapters to test them, and packages/fixtures asserts the bodies they build.',
+        'THE BARREL IS THE LOOPHOLE, and it is closed harder than the payments one: ' +
+        'packages/analytics/src/index.ts does not reach either adapter module AT ALL, not even for a ' +
+        'constant, because a re-export of any kind makes a module-matching rule match nothing. A ' +
+        'consumer names a destination through DISPATCH_DESTINATIONS, which the registry assembles. Any ' +
+        'test or integration suite is exempt: registry.test.ts and adapters.test.ts have to reach the ' +
+        'adapters to test them, and packages/fixtures asserts the bodies they build.',
       severity: 'error',
       from: {
         pathNot: ['^packages/analytics/src/registry\\.ts$', '\\.(test|itest)\\.ts$'],

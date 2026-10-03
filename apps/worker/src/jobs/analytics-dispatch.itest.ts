@@ -25,18 +25,29 @@ import {
   CONSENT_MODE_SIGNALS,
   type ConsentModeSignal,
   FUNNEL_TERMINAL_STAGE,
+  type FunnelStage,
 } from '@berelax/shared'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { runAnalyticsDispatchPass } from '../../../apps/worker/src/jobs/analytics-dispatch.ts'
+import { ANALYTICS_RETRY_LADDER, runAnalyticsDispatchPass } from './analytics-dispatch.ts'
 
 /**
  * The dispatch consumer against a real PostgreSQL (A-MEAS-03).
  *
- * ## Why this file is in `packages/fixtures` and could be nowhere else
+ * ## Why this file is in `apps/worker/src/jobs` and not in `packages/fixtures`
  *
- * It holds four pairs equal that no other package may see together:
+ * Its subject is the PASS, which is this directory's, and that is where a suite about a worker pass lives
+ * — `gratuity-accrual.itest.ts` and `automation/interpreter.itest.ts` are the precedent. The first draft
+ * put it in `packages/fixtures` and imported the pass by a relative path, reasoning that
+ * `nothing-imports-an-app` forbids the package import; `pnpm boundaries` refused it, and the refusal is
+ * right — the rule matches the resolved module and not the spelling of the specifier, so the relative path
+ * was the same violation written differently. An app is an entry point, and the thing that reaches into it
+ * is its own suite.
  *
- *   - the `BOOKING_SOURCES` tuple in `@berelax/analytics` against `booking_source_known` as the DATABASE
+ * Nothing is lost by the move. The four pairs below need `@berelax/core` and `@berelax/db` in one file,
+ * which `packages/fixtures` exists to allow — and `apps/worker` already depends on both, because the pass
+ * itself does. It holds four pairs equal:
+ *
+ *   - the `BOOKING_SOURCES` tuple in `@berelax/analytics` against `booking_source_check` as the DATABASE
  *     holds it, in both directions — the second statement the port's own header admits to, arriving with
  *     the check (brief: "if you must write one twice, add the check that holds the two equal");
  *   - the registry's `DISPATCH_DESTINATIONS` against `CONSENT_GATED_TARGETS`' server-dispatch surface, so
@@ -46,9 +57,8 @@ import { runAnalyticsDispatchPass } from '../../../apps/worker/src/jobs/analytic
  *   - the branded payload the guard built against the bytes the row stores and the adapter posts.
  *
  * `packages/db` may never import `packages/core` (ADR 0001) and `packages/core` may reach no
- * infrastructure, so this is the only package that may hold both — brief rule 4's own reason for it
- * existing. `@berelax/analytics` sits beside them and `apps/worker`'s pass is imported by RELATIVE path,
- * because `nothing-imports-an-app` forbids the package import and this suite's subject is that pass.
+ * infrastructure, so these four can only be held equal somewhere that may see both — which is
+ * `packages/fixtures` and, for a pass's own suite, the app that already depends on both.
  *
  * ## What it deletes
  *
@@ -83,11 +93,21 @@ const AT = '2026-10-02T09:00:00.000Z'
  * `noUncheckedIndexedAccess` makes that `FunnelStage | undefined`. A `?? 'paid'` here would be the second
  * statement of which stage is terminal — exactly what the taxonomy module exists to prevent — so the
  * narrowing is a refusal instead: it fails loudly, at import, if the tuple is ever empty.
+ *
+ * Narrowed inside a function that RETURNS the stage, rather than by a bare `if` beside the `const`.
+ * TypeScript does not carry a module-level narrowing into a hoisted `function` declaration — such a
+ * function could be called before the check ran — so `queuedConversion` below saw `FunnelStage |
+ * undefined` and `pnpm typecheck` refused two of its arguments. The annotation on the `const` is what
+ * makes the narrowing a property of the binding instead of of the position.
  */
-const TERMINAL = FUNNEL_TERMINAL_STAGE
-if (TERMINAL === undefined) {
-  throw new Error('FUNNEL_STAGES is empty, so there is no terminal stage to dispatch a conversion for.')
-}
+const TERMINAL: FunnelStage = ((stage: FunnelStage | undefined): FunnelStage => {
+  if (stage === undefined) {
+    throw new Error(
+      'FUNNEL_STAGES is empty, so there is no terminal stage to dispatch a conversion for.',
+    )
+  }
+  return stage
+})(FUNNEL_TERMINAL_STAGE)
 
 /** Everything granted, because this file's subject is the TRANSPORT and not the gate. */
 const ALL_SIGNALS: readonly ConsentModeSignal[] = CONSENT_MODE_SIGNALS
@@ -154,7 +174,7 @@ describe('the booking-source vocabulary', () => {
       select pg_get_constraintdef(oid) as definition
         from pg_constraint
        where conrelid = 'public.booking'::regclass
-         and conname = 'booking_source_known'
+         and conname = 'booking_source_check'
     `
     expect(row?.definition, 'the CHECK must exist or this case measures nothing').toBeTruthy()
     const inDatabase = [...(row?.definition ?? '').matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).sort()
@@ -414,12 +434,35 @@ describe('the pass', () => {
     // And nothing was recorded as a push: the refusal is on the row, not in the outbox.
     expect(registry.outbox.all().filter((row) => row.eventId === eventId)).toHaveLength(0)
 
-    // Not due yet, which is the backoff. Running the pass again at the same instant claims nothing.
+    /*
+     * Not due yet, which is the backoff — asserted about THIS dispatch rather than about the pass's total.
+     *
+     * `claimed === 0` was the first spelling and it is a claim about the whole table: the integration
+     * suite runs sequentially against one database and an earlier file's queued row would fail it (brief
+     * rule 12). What the backoff actually says is that this row is not due at this instant and is due
+     * later, and that is what the two reads below measure.
+     */
+    const dueNow = await dueAnalyticsDispatches(sql, {
+      nowIso: AT,
+      backoffSeconds: ANALYTICS_RETRY_LADDER,
+      limit: 200,
+    })
+    expect(dueNow.some((entry) => entry.dispatchId === dispatchId)).toBe(false)
     const immediate = await runAnalyticsDispatchPass(sql, registry, AT)
-    expect(immediate.claimed).toBe(0)
+    expect(immediate.sent).toBe(0)
 
-    // Past the first delay, it is due and it goes.
+    // Past the first delay, it is due and it goes. The control for the read above: the same query at a
+    // later instant DOES return it, so "not due" was about the delay and not about the query missing it.
     const later = new Date(Date.parse(AT) + 10 * 60 * 1000).toISOString()
+    expect(
+      (
+        await dueAnalyticsDispatches(sql, {
+          nowIso: later,
+          backoffSeconds: ANALYTICS_RETRY_LADDER,
+          limit: 200,
+        })
+      ).some((entry) => entry.dispatchId === dispatchId),
+    ).toBe(true)
     await runAnalyticsDispatchPass(sql, registry, later)
     const settled = await sql<{ state: string; attempts: number }[]>`
       select state::text as state, attempts
@@ -438,9 +481,13 @@ describe('the pass', () => {
     // And a sent row is never claimed again, whatever instant the pass runs at.
     const again = await runAnalyticsDispatchPass(sql, registry, later)
     expect(
-      (await dueAnalyticsDispatches(sql, { nowIso: later, backoffSeconds: [30], limit: 50 })).some(
-        (row) => row.dispatchId === dispatchId,
-      ),
+      (
+        await dueAnalyticsDispatches(sql, {
+          nowIso: later,
+          backoffSeconds: ANALYTICS_RETRY_LADDER,
+          limit: 50,
+        })
+      ).some((row) => row.dispatchId === dispatchId),
     ).toBe(false)
     expect(again.sent).toBe(0)
   })
@@ -591,7 +638,15 @@ describe('the database refuses what the consumer must not do', () => {
     const registry = dispatchers('test')
     let at = AT
     for (let attempt = 0; attempt < ANALYTICS_MAX_ATTEMPTS + 2; attempt += 1) {
-      registry.script.arm('server_error', 1)
+      /*
+       * Armed for far MORE calls than one pass can make, and that is a correction rather than caution.
+       * `arm(…, 1)` was the first spelling: a pass claims every row that is due, the earlier cases in
+       * this file leave rows behind, and the single refusal went to whichever row `order by decided_at`
+       * put first — so this dispatch was TRANSMITTED on the pass that was supposed to refuse it, and the
+       * case failed naming the state rather than the arming. The script is shared on purpose (a rate
+       * limit hits everything at once), so the fix is to refuse everything.
+       */
+      registry.script.arm('server_error', 50)
       await runAnalyticsDispatchPass(sql, registry, at)
       // Far enough forward to clear any delay the ladder holds.
       at = new Date(Date.parse(at) + 24 * 60 * 60 * 1000).toISOString()
@@ -603,9 +658,13 @@ describe('the database refuses what the consumer must not do', () => {
     expect(row?.state).toBe('failed')
     expect(row?.attempts).toBe(ANALYTICS_MAX_ATTEMPTS)
     // And it is not due again, which is what makes giving up a state somebody can see.
+    // `ANALYTICS_RETRY_LADDER` and not a hand-written `[30, 60, 120, 240, 480]`, which was the first
+    // spelling and is the brief's "a second statement of a fact drifts" in four lines: the real ladder has
+    // one entry FEWER than the attempt ceiling — the last attempt is not followed by a wait — so the
+    // written copy made a dispatch with every attempt spent read as due again.
     const due = await dueAnalyticsDispatches(sql, {
       nowIso: at,
-      backoffSeconds: [30, 60, 120, 240, 480],
+      backoffSeconds: ANALYTICS_RETRY_LADDER,
       limit: 50,
     })
     expect(due.some((entry) => entry.dispatchId === dispatchId)).toBe(false)

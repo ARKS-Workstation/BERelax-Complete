@@ -13,9 +13,11 @@
  * outside production and `notImplemented` would still throw for `real` — and the conversions would still
  * go nowhere, because that call site never asked the configuration anything.
  *
- * **THE BARREL IS THE LOOPHOLE**, and it is closed the way the payments one is: `./index.ts` re-exports
- * the BODY BUILDERS and the adapter CONSTANTS from `./ga4.ts` and `./meta-capi.ts` but not the two
- * `createFake…` functions, because a re-export makes a module-matching rule match nothing.
+ * **THE BARREL IS THE LOOPHOLE**, and it is closed harder than the payments one: `./index.ts` does not
+ * reach either adapter module AT ALL, not even for a constant, because a re-export of ANY kind makes a
+ * module-matching rule match nothing — so there is no shorter list to keep right. A consumer names a
+ * destination through {@link DISPATCH_DESTINATIONS}, which this module assembles, and a test that needs a
+ * body builder imports the adapter directly, which the rule permits for a test and for nothing else.
  *
  * ## Two destinations and one registry, not one adapter per destination
  *

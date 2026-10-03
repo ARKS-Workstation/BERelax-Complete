@@ -2189,6 +2189,35 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['refuse_delivered_reply_change'],
     translators: ['packages/db/src/repositories/reviews.ts'],
   },
+  // ZY451-ZY452 are A-MEAS-03's, of the band ZY451-ZY460; ZY453 through ZY460 are left free and
+  // deliberately absent, because an entry for a code no migration raises is direction 3.
+  //
+  // Both are TRIGGERS rather than CHECKs because both compare NEW against OLD, which a CHECK cannot see,
+  // and both are about a row the consumer has already finished with.
+  //
+  // ZY451 is the one A-MEAS-07 rests on. Reconciling internal truth against what was PUSHED is only a
+  // comparison while the pushed side cannot be edited to agree with the other one: a payload rewritten to
+  // the corrected figure makes every variance zero, and nothing errors. It is also why a corrected
+  // conversion value is a NEW dispatch with its own event_id (A-MEAS-05) rather than an edit of this row.
+  //
+  // ZY452 has no statutory half and is the subtler of the two. The backoff delay is a function of the
+  // attempt number, so a reset restarts the ladder at its shortest delay for ever — a destination that is
+  // down is then retried at the shortest interval and the failed row never ages out. The symptom is not an
+  // error: it is a consumer that looks busy.
+  {
+    code: 'ZY451',
+    rule: 'A transmitted dispatch may not leave `sent`, and its event id, payload and transmission instant may not change.',
+    migration: '0137',
+    raisedBy: ['refuse_transmitted_dispatch_change'],
+    translators: ['packages/db/src/repositories/analytics-dispatch.ts'],
+  },
+  {
+    code: 'ZY452',
+    rule: "A dispatch's transport attempt counter may only increase.",
+    migration: '0137',
+    raisedBy: ['assert_dispatch_attempts_monotonic'],
+    translators: ['packages/db/src/repositories/analytics-dispatch.ts'],
+  },
   {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',

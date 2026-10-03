@@ -14153,7 +14153,7 @@ units:
       retries with backoff and per-destination idempotency, with both providers behind the H02 fake-adapter
       interface in a new packages/analytics package.'
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - A-MEAS-01

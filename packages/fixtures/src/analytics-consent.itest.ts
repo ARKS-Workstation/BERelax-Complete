@@ -516,11 +516,25 @@ describe('enqueueing a dispatch', () => {
 
   it('refuses a queued row the gate would not permit, by ZY312, whatever the caller', async () => {
     const { sessionId } = await sessionWith(['analytics_storage'])
-    // The call site is bypassed entirely: a direct INSERT, as a worker or a psql session would make it.
+    /*
+     * The call site is bypassed entirely: a direct INSERT, as a worker or a psql session would make it.
+     *
+     * The transport columns 0137 added are NOT NULL, so every one of these statements carries them — and
+     * the CONTROL at the bottom is why that matters rather than being paperwork. A control insert missing
+     * `event_id` fails with a not-null violation, which is not the gate refusing anything, and the two
+     * `rejects` above would still have passed. The case would then have been green about a statement that
+     * never reached the trigger.
+     */
+    const eventId = dispatchEventId(sessionId, 'booking_created')
+    const payload = dispatchPayload('booking_created')
     await expect(
       sql`
-        insert into analytics_dispatch (session_id, destination, funnel_stage, state, decided_at)
+        insert into analytics_dispatch (
+          session_id, destination, funnel_stage, state, decided_at, event_id, payload, action_source,
+          occurred_at
+        )
         values (${sessionId}::uuid, 'advertising_conversion_push', 'booking_created', 'queued',
+                ${AT}::timestamptz, ${eventId}, ${payload}::text::jsonb, 'website',
                 ${AT}::timestamptz)
       `,
     ).rejects.toMatchObject({ code: ANALYTICS_CONSENT_SQLSTATE.dispatchConsentGate })
@@ -528,17 +542,23 @@ describe('enqueueing a dispatch', () => {
     await expect(
       sql`
         insert into analytics_dispatch (
-          session_id, destination, funnel_stage, state, decided_at, transmitted_at
+          session_id, destination, funnel_stage, state, decided_at, transmitted_at, attempts,
+          event_id, payload, action_source, occurred_at
         )
         values (${sessionId}::uuid, 'advertising_conversion_push', 'booking_created', 'sent',
-                ${AT}::timestamptz, ${AT}::timestamptz)
+                ${AT}::timestamptz, ${AT}::timestamptz, 1, ${eventId},
+                ${payload}::text::jsonb, 'website', ${AT}::timestamptz)
       `,
     ).rejects.toMatchObject({ code: ANALYTICS_CONSENT_SQLSTATE.dispatchConsentGate })
     // The control: the destination this session DOES consent to inserts directly without complaint, so
     // the two refusals are about the gate rather than about the statement.
     await sql`
-      insert into analytics_dispatch (session_id, destination, funnel_stage, state, decided_at)
+      insert into analytics_dispatch (
+        session_id, destination, funnel_stage, state, decided_at, event_id, payload, action_source,
+        occurred_at
+      )
       values (${sessionId}::uuid, 'analytics_measurement_push', 'booking_created', 'queued',
+              ${AT}::timestamptz, ${eventId}, ${payload}::text::jsonb, 'website',
               ${AT}::timestamptz)
     `
   })

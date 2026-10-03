@@ -12,7 +12,7 @@ import {
   transportRefusalOf,
 } from '@berelax/analytics'
 import { type Config, loadConfig } from '@berelax/config'
-import type { EgressPayload } from '@berelax/core'
+import { type EgressPayload, egressPayloadFromStored } from '@berelax/core'
 import {
   type DispatchAttemptOutcome,
   type DueDispatch,
@@ -132,33 +132,30 @@ function actionSourceOf(stored: string): AnalyticsActionSource {
 }
 
 /**
- * The payload, re-parsed from the row rather than rebuilt.
+ * The payload, re-entered through the guard rather than cast.
  *
  * The stored bytes ARE the payload: they were produced by `buildEgressPayload` and serialised by the one
- * serialiser at enqueue time, and A-MEAS-07 compares them. Rebuilding one here from the row's other
- * columns would be a second construction of the same document, and the two would first disagree on the day
- * the catalogue was renumbered — with the row saying one thing and the push saying another.
+ * serialiser at enqueue time, and A-MEAS-07 compares them. The first draft of this function wrote
+ * `JSON.parse(row.payload) as EgressPayload`, which is the cast `scripts/check-egress-guard.mjs` rule 1
+ * refuses — and the gate caught it before any check was run against this file. `egressPayloadFromStored`
+ * is the guard's own re-entry: it rebuilds the payload through the one builder and then PROVES the rebuild
+ * equals what the row stored, so a renumbered catalogue fails loudly here instead of posting a stale
+ * document to a platform.
  *
- * The cast is the one place a stored payload re-enters the branded type, and it is NOT a forgery: the
- * bytes were minted by the guard. `scripts/check-egress-guard.mjs` rule 1 covers `as unknown as
- * EgressPayload`, so this is written as a `JSON.parse` whose result is handed to the adapter through the
- * port's own type — the parse returns `unknown`, and the single assertion below is annotated rather than
- * hidden.
+ * The refusal names the dispatch, because the guard cannot: it is handed a string and knows nothing about
+ * the queue.
  */
 function storedPayload(dispatch: DueDispatch): EgressPayload {
-  const parsed: unknown = JSON.parse(dispatch.payload)
-  if (parsed === null || typeof parsed !== 'object') {
+  try {
+    return egressPayloadFromStored(dispatch.payload)
+  } catch (error) {
     throw new AppError(
       'invariant_violated',
-      `analytics_dispatch ${dispatch.dispatchId} holds a payload that is not an object, so there is ` +
-        'nothing to transmit. The column is written only by the enqueue, from the one serialiser.',
+      `analytics_dispatch ${dispatch.dispatchId} holds a payload the egress guard will not rebuild, so ` +
+        `there is nothing it may transmit: ${error instanceof Error ? error.message : String(error)}`,
       { details: { dispatchId: dispatch.dispatchId } },
     )
   }
-  // The stored bytes were minted by `buildEgressPayload` and serialised by `serialiseEgressPayload`; this
-  // is the round trip rather than a new payload. A rebuild from the row's columns would be a second
-  // construction of one document — see the header.
-  return parsed as EgressPayload
 }
 
 /** One dispatch, attempted. Returns what to record, or the named refusal that stops it being attempted. */
@@ -179,13 +176,24 @@ async function attemptOne(
       readonly detail: string
     }
 > {
-  if (dispatch.bookingSource === null) {
+  /*
+   * The action source is read off the ROW and is refused rather than defaulted.
+   *
+   * An earlier draft of this function asked for a `bookingSource` the repository does not select and the
+   * schema does not link — `pnpm typecheck` refused it, and the refusal was right twice over: nothing in
+   * this schema joins an analytics session to the booking it produced (A-FIRST-08 owns attribution), and
+   * `action_source` is a NOT NULL column the enqueuer writes. So the only way it can be wrong is a
+   * relaxed CHECK, and that is a REFUSAL and not a default: the value a default would reach is `website`,
+   * which reports a walk-in as a web order in somebody else's advertising account.
+   */
+  let actionSource: AnalyticsActionSource
+  try {
+    actionSource = actionSourceOf(dispatch.actionSource)
+  } catch (error) {
     return {
       kind: 'refused',
       reason: 'action_source',
-      detail:
-        'no booking channel is on file for this session, and action_source is not defaulted: the value ' +
-        'a default would reach is `website`, which would report a walk-in as a web order.',
+      detail: error instanceof Error ? error.message : String(error),
     }
   }
   let request: AnalyticsDispatchRequest
@@ -196,10 +204,7 @@ async function attemptOne(
       eventId: dispatch.eventId,
       destination: dispatch.destination,
       payload: storedPayload(dispatch),
-      // Read off the row. `actionSourceOf` parses it rather than the string being passed through: the
-      // column's CHECK already holds it to the three values, and parsing is what makes a relaxed CHECK a
-      // refusal here instead of an `undefined` on the wire that Meta rejects the whole batch for.
-      actionSource: actionSourceOf(dispatch.actionSource),
+      actionSource,
       // The instant the conversion HAPPENED, which is `occurred_at` and never `decided_at`: the gate's
       // instant would date an offline upload on the night the worker ran.
       eventTimeIso: dispatch.occurredAtIso,
@@ -260,12 +265,18 @@ export async function runAnalyticsDispatchPass(
   let sent = 0
   let requeued = 0
   let failed = 0
+  let refusedForActionSource = 0
   let refusedForDestination = 0
 
   for (const dispatch of due) {
     const attempt = await attemptOne(dispatchers, dispatch, nowIso)
     if (attempt.kind === 'refused') {
-      refusedForDestination += 1
+      // Counted by REASON and not together, because the two name different things to go and do: an
+      // unserved destination is a deployment somebody has to finish, and an unparseable action source is a
+      // CHECK that was relaxed without this parser being widened. One counter would have made the second
+      // read as the first.
+      if (attempt.reason === 'action_source') refusedForActionSource += 1
+      else refusedForDestination += 1
       // Left exactly as it is. The row is still `queued` or `failed`, no attempt is recorded against it,
       // and the count below is what makes the refusal visible — a row quietly dropped from a pass is
       // indistinguishable from a consumer that stopped running.
@@ -289,6 +300,7 @@ export async function runAnalyticsDispatchPass(
     sent,
     requeued,
     failed,
+    refusedForActionSource,
     refusedForDestination,
   }
 }
@@ -296,10 +308,15 @@ export async function runAnalyticsDispatchPass(
 /** A log line on every pass, including an empty one. A pass that logged only what changed would be
  * indistinguishable from a pass that had stopped — `reporting-refresh.ts`' argument, same shape. */
 export function describeDispatchPass(result: DispatchPassResult): string {
-  const refusals =
+  const refused = [
+    result.refusedForActionSource === 0
+      ? null
+      : `${result.refusedForActionSource} for an unparseable action source`,
     result.refusedForDestination === 0
-      ? ''
-      : ` REFUSED: ${result.refusedForDestination} for an unserved destination`
+      ? null
+      : `${result.refusedForDestination} for an unserved destination`,
+  ].filter((part): part is string => part !== null)
+  const refusals = refused.length === 0 ? '' : ` REFUSED: ${refused.join(', ')}`
   return (
     `claimed ${result.claimed}, sent ${result.sent}, requeued ${result.requeued}, ` +
     `failed ${result.failed}${refusals}`

@@ -53,7 +53,7 @@ export const META_CONVERSIONS_API = Object.freeze({
   name: 'meta-conversions-api',
   /** The destination id this adapter serves, from `CONSENT_GATED_TARGETS`. Opaque: it names no host. */
   destination: 'advertising_conversion_push',
-})
+} as const)
 
 /**
  * The past-event window, which this build does not know.

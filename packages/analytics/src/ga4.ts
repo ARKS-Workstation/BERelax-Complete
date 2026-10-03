@@ -48,7 +48,7 @@ export const GA4_MEASUREMENT_PROTOCOL = Object.freeze({
   name: 'ga4-measurement-protocol',
   /** The destination id this adapter serves, from `CONSENT_GATED_TARGETS`. Opaque: it names no host. */
   destination: 'analytics_measurement_push',
-})
+} as const)
 
 /**
  * Why `client_id` is absent from every body this build produces.

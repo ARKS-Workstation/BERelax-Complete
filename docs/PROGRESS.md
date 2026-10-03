@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**165 / 211 units complete.**
+**166 / 211 units complete.**
 
 ## Next up
 
@@ -134,7 +134,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 113 | `A-FIRST-10` | The /analytics admin page | `A-FIRST-09`, `F07`, `H04` | — | — |
 | [x] | 114 | `A-MEAS-01` | Egress guard: opaque category codes with an enumerating test | `A-FIRST-02`, `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06` | — | — |
 | [x] | 115 | `A-MEAS-02` | Analytics consent: Consent Mode v2 gating client tags and server pushes | `A-FIRST-05`, `C-CRM-01`, `C-CRM-02`, `C-CRM-03`, `C-CRM-04`, `C-CRM-05`, `C-CRM-06`, `C-CRM-07`, `C-CRM-08`, `C-CRM-09`, `C-CRM-10` | — | Y5-analytics-basis |
-| [ ] | 116 | `A-MEAS-03` | analytics_dispatch consumer with GA4 MP and Meta CAPI behind fakes | `A-MEAS-01`, `A-MEAS-02`, `F06`, `H02` | — | — |
+| [x] | 116 | `A-MEAS-03` | analytics_dispatch consumer with GA4 MP and Meta CAPI behind fakes | `A-MEAS-01`, `A-MEAS-02`, `F06`, `H02` | — | — |
 | [ ] | 117 | `A-MEAS-04` | Consent-gated tag loader and web-vitals field reporting | `A-FIRST-06`, `A-MEAS-02` | — | — |
 | [ ] | 118 | `A-MEAS-05` | Offline conversion loop: corrected values, no-show void, past event_time | `A-FIRST-09`, `A-MEAS-03`, `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13` | M7 | Y11-vat-package |
 | [ ] | 119 | `A-MEAS-06` | Heartbeat, watchdog and dead-letter for the dispatcher and rollups | `A-FIRST-09`, `A-MEAS-03`, `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04` | — | — |

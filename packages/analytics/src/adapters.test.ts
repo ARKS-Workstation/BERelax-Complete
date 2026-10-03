@@ -1,5 +1,5 @@
 import { buildEgressPayload, serialiseEgressPayload, unpermittedEgressTokens } from '@berelax/core'
-import { FUNNEL_TERMINAL_STAGE } from '@berelax/shared'
+import { FUNNEL_TERMINAL_STAGE, type FunnelStage } from '@berelax/shared'
 import { describe, expect, it } from 'vitest'
 import {
   createDispatchOutbox,
@@ -41,12 +41,27 @@ import {
 const AT = '2026-10-01T18:30:00.000Z'
 const EVENT_TIME = '2026-09-29T14:15:30.500Z'
 
+/**
+ * The terminal funnel stage, narrowed once.
+ *
+ * `FUNNEL_TERMINAL_STAGE` is the tuple's last element and `noUncheckedIndexedAccess` makes that
+ * `FunnelStage | undefined`, which `buildEgressPayload` will not take. Narrowed by a function that
+ * RETURNS it rather than by a `?? 'paid'`, which would be a second statement of which stage is terminal —
+ * the thing the taxonomy module exists to prevent.
+ */
+const TERMINAL: FunnelStage = ((stage: FunnelStage | undefined): FunnelStage => {
+  if (stage === undefined) {
+    throw new Error('FUNNEL_STAGES is empty, so there is no conversion stage to build a body for.')
+  }
+  return stage
+})(FUNNEL_TERMINAL_STAGE)
+
 const conversion = (actionSource: AnalyticsActionSource): AnalyticsDispatchRequest => ({
   eventId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
   destination: GA4_MEASUREMENT_PROTOCOL.destination,
   payload: buildEgressPayload({
     ref: { kind: 'package_template' },
-    eventType: FUNNEL_TERMINAL_STAGE,
+    eventType: TERMINAL,
     quantity: 2,
     valueFils: 32_010,
   }).payload,
