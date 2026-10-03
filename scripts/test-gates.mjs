@@ -62307,6 +62307,235 @@ export function chargebackNetEffectFils(`,
   }
 }
 
+// 203a-203z. (H-HARD-10) The findings register shown to be unable to stop refusing, and the stand-in scan
+//            shown to be able to find something. The engagement is not booked (`Y13-pentest`), so every
+//            claim this unit makes rests on two things being true: that the register refuses a report it
+//            cannot represent, and that the scan standing in for the engagement is not reporting nothing.
+//            ADR 0003 is the acceptance line here rather than a convention behind it.
+{
+  const REGISTER = 'artifacts/security/findings.json'
+  const FIXTURE = 'artifacts/security/__gate_fixture__register.json'
+  const SCAN_SUITE = 'packages/fixtures/src/security-baseline-scan.itest.ts'
+  const findings = (path) => ['findings', '--register', path]
+  const goLive = (path) => ['go-live:security', '--register', path]
+
+  /** A register with one finding, so each case below can spoil one field of it. */
+  const register = (finding) =>
+    `${JSON.stringify(
+      {
+        registerVersion: 1,
+        engagement: {
+          booked: true,
+          standIn: 'a gate fixture register, removed in a finally',
+          openQuestionId: 'Y13-pentest',
+        },
+        findings: [
+          {
+            id: 'GF-0001',
+            title: 'A gate fixture finding',
+            severity: 'critical',
+            status: 'open',
+            source: 'penetration_test',
+            detail: 'Written by a gate case to prove one rule of the register fires.',
+            surface: '/settings/integrations',
+            raisedAtIso: '2026-10-03T00:00:00.000Z',
+            ...finding,
+          },
+        ],
+      },
+      null,
+      2,
+    )}\n`
+
+  // 203a. The acceptance line: severity is a CLOSED set and an unknown one FAILS rather than defaulting.
+  //
+  //       `Critical` rather than `critical` is the realistic case — it is how three of the four
+  //       commercial report formats spell it — and with any defaulting at all it becomes whatever the
+  //       default is. The default nobody would notice is the one that lets a critical through as a
+  //       medium.
+  checkRejectedBy(
+    'a register whose severity is not in the closed set is refused by name',
+    withFixture(FIXTURE, register({ severity: 'Critical' }), () =>
+      runExpectingFailure('pnpm', findings(FIXTURE)),
+    ),
+    'finding-severity-not-in-closed-set',
+  )
+
+  // 203b. The closing rule, first half: "fixed" with neither a commit nor a test reference.
+  checkRejectedBy(
+    'closing a finding as fixed with no commit and no test reference is refused by name',
+    withFixture(FIXTURE, register({ status: 'fixed' }), () =>
+      runExpectingFailure('pnpm', findings(FIXTURE)),
+    ),
+    'finding-closed-without-evidence',
+  )
+
+  // 203c. The closing rule, second half: an accepted risk with no rationale and no role behind it.
+  //       Accepting a risk is a decision, and a decision with no stated reason cannot be revisited.
+  checkRejectedBy(
+    'accepting a finding with no rationale is refused by name',
+    withFixture(FIXTURE, register({ status: 'accepted_with_rationale' }), () =>
+      runExpectingFailure('pnpm', findings(FIXTURE)),
+    ),
+    'finding-accepted-without-rationale',
+  )
+
+  // 203d. The remediation gate, in both directions. A seeded critical finding makes the go-live check
+  //       exit non-zero NAMING that finding; triaging it to fixed with evidence clears it. Without the
+  //       second half this is a check that refuses everything.
+  {
+    const blocked = withFixture(FIXTURE, register({}), () =>
+      runExpectingFailure('pnpm', goLive(FIXTURE)),
+    )
+    checkRejectedBy(
+      'a seeded critical finding makes the go-live check exit non-zero',
+      blocked,
+      'go-live-blocked-by-finding',
+    )
+    check(
+      'and names the finding, rather than reporting a count',
+      blocked.output.includes('GF-0001'),
+      blocked.output,
+    )
+    const cleared = withFixture(
+      FIXTURE,
+      register({ status: 'fixed', remediation: { commit: 'deadbee' } }),
+      () => run('pnpm', goLive(FIXTURE)),
+    )
+    check(
+      'and triaging it to fixed with a commit clears the gate',
+      !cleared.failed && cleared.output.includes('VERDICT: go'),
+      cleared.output,
+    )
+    const accepted = withFixture(
+      FIXTURE,
+      register({
+        status: 'accepted_with_rationale',
+        remediation: {
+          rationale: 'rate limiting is H-HARD-01 and is not built',
+          acceptedBy: 'owner',
+        },
+      }),
+      () => run('pnpm', goLive(FIXTURE)),
+    )
+    check(
+      'as does accepting it with a rationale and a role',
+      !accepted.failed && accepted.output.includes('VERDICT: go'),
+      accepted.output,
+    )
+  }
+
+  // 203e. An EMPTY register does not pass, and the committed one is the fixture: no penetration test has
+  //       been performed, so the register being clear says nothing. "No findings" and "nobody looked"
+  //       are the same register, which is ADR 0002's shape applied to a security review — and it is why
+  //       `pnpm go-live:security` is not in `pnpm verify`.
+  checkRejectedBy(
+    'the committed register, which is empty, is a no-go because nobody has looked',
+    runExpectingFailure('pnpm', ['go-live:security']),
+    'go-live-blocked-engagement-not-performed',
+  )
+
+  // 203f. And the control for 203a to 203c: the committed register is well formed, so those three are
+  //       about the defect rather than about a checker that refuses everything.
+  {
+    const clean = run('pnpm', ['findings'])
+    check(
+      'the committed register passes its integrity check',
+      !clean.failed && clean.output.includes('closed set'),
+      clean.output,
+    )
+  }
+
+  // 203g. The scan is not passing on nothing — proved by breaking the RULE and watching the suite that
+  //       points the scan at a deliberately vulnerable origin go red.
+  //
+  //       This is the case the acceptance line asks for, one level deeper than the suite itself: the
+  //       suite asserts the scan finds a 200 on an unauthenticated admin path, and this asserts the
+  //       suite would NOTICE if the scan stopped looking. The mutation adds 200 to the statuses a
+  //       guarded path may answer, which is exactly the mistake a well-meaning fix for a false positive
+  //       would make.
+  checkRejectedBy(
+    'the baseline scan suite fails when the admin-route rule stops refusing a 200',
+    withEditedFile(
+      'packages/core/src/security/baseline.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          'Object.freeze([301, 302, 303, 307, 308, 401, 403, 404])',
+          'Object.freeze([200, 301, 302, 303, 307, 308, 401, 403, 404])',
+        ),
+      () =>
+        runExpectingFailure('pnpm', [
+          'exec',
+          'vitest',
+          'run',
+          '-c',
+          'vitest.integration.config.ts',
+          SCAN_SUITE,
+        ]),
+    ),
+    'finds the intentionally vulnerable origin and names each hole',
+  )
+
+  // 203h. A target that cannot be reached is an ERROR and not an empty result. This is the quietest way
+  //       a scan can lie: pointed at a server that was not running, it finds nothing wrong.
+  {
+    const unreachable = runExpectingFailure('pnpm', [
+      'security-scan',
+      '--target',
+      'http://127.0.0.1:1',
+    ])
+    check(
+      'a scan whose target cannot be reached fails rather than reporting nothing found',
+      unreachable.failed && unreachable.output.includes('could not be reached'),
+      unreachable.output,
+    )
+  }
+
+  // 203i. And no target at all.
+  {
+    const noTarget = runExpectingFailure('pnpm', ['security-scan'])
+    check(
+      'a scan with no target refuses to run',
+      noTarget.failed && noTarget.output.includes('examines nothing'),
+      noTarget.output,
+    )
+  }
+
+  // 203j. The admin path list is DERIVED from the route registry, and that is load-bearing. With
+  //       `requiresAdminSession` answering false for everything, the scan has nothing to probe and must
+  //       say so — rather than reporting that no admin route is reachable without a session, which would
+  //       be a claim about no routes.
+  checkRejectedBy(
+    'the scan refuses to report success when the registry yields no guarded admin path',
+    withEditedFile(
+      'apps/web/src/routes/admin-routes.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          'export function requiresAdminSession(pathname: string): boolean {',
+          'export function requiresAdminSession(pathname: string): boolean {\n  if (pathname !== undefined) return false',
+        ),
+      () => runExpectingFailure('pnpm', ['security-scan', '--target', 'http://127.0.0.1:1']),
+    ),
+    'finding-register-examined-nothing',
+  )
+
+  // 203k. Neither script spells a rule name, so every case above would notice a rule renamed in one
+  //       place only. The rules live in `packages/core/src/security/findings.ts` beside the tests that
+  //       exercise them.
+  for (const script of ['scripts/go-live-security.mjs', 'scripts/security-baseline-scan.mjs']) {
+    const text = readFileSync(script, 'utf8')
+    const body = text.slice(text.indexOf('*/') + 2)
+    check(
+      `${script} takes its rule names from the registry rather than spelling them`,
+      !/'(?:finding-[a-z-]+|go-live-blocked[a-z-]*)'/.test(body),
+      'a rule name is written as a literal, so renaming it in packages/core would leave the script ' +
+        'printing the old one and every case above would still pass',
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -63175,6 +63404,10 @@ export function chargebackNetEffectFils(`,
     // silent loss of the one check that says a backup has ever been restored: the evidence is a file, and
     // a file nothing re-judges is a claim nobody is holding to anything.
     'pnpm drill-age',
+    // H-HARD-10's register integrity, in the position `pnpm verify` runs it. The go/no-go check is
+    // NOT registered and is not in CI, for `go-live-payments.mjs`'s reason: it exits non-zero while no
+    // penetration test has been performed, which is the honest answer and not a build failure.
+    'pnpm findings',
     // H-MIG-09's driver as a CI step, which that unit deferred to H-HARD-04 for want of a restore drill.
     // CI-only by construction: it creates and drops a database, which `pnpm verify` runs against one that
     // already exists. Declared in `scripts/check-gate-registry.mjs`'s CI_ONLY with that reason.

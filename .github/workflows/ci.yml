@@ -358,6 +358,15 @@ jobs:
       - name: The committed restore drill is evidence about this schema
         run: pnpm drill-age
 
+      # H-HARD-10's register integrity: closed severity and status sets, and the closing rule — a
+      # finding is fixed with a commit or a test reference, accepted with a rationale and a role,
+      # dismissed with a reason, or marked a duplicate naming the original. The go/no-go check itself
+      # (`pnpm go-live:security`) is deliberately NOT here: it exits non-zero today because no
+      # penetration test has been performed, and a gate that fails on a business fact nobody can fix in
+      # code is a gate people delete. The SCAN that stands in runs inside the integration suite.
+      - name: Findings register integrity
+        run: pnpm findings
+
       # H-MIG-09's driver, run as a CI step. Its own NOTE deferred this to H-HARD-04 because the restore
       # drill did not exist; it does now, so the driver runs here against a fresh database it creates and
       # drops inside the service container — which is the unit's first acceptance line, and the only place

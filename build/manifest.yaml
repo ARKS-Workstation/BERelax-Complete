@@ -21605,7 +21605,7 @@ units:
       any critical or high finding is untriaged, and an automated baseline scan that stands in until the
       engagement is booked — proven to examine something by an intentionally vulnerable fixture route.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - H-HARD-01
@@ -21625,10 +21625,49 @@ units:
       defaulting'
     - the register's contents are surfaced in the go/no-go output, asserted by a snapshot test
     files:
-    - packages/db/migrations/00XX-security-finding.sql
+    - packages/core/src/security/findings.ts
+    - packages/core/src/security/findings.test.ts
+    - packages/core/src/security/baseline.ts
+    - packages/core/src/security/baseline.test.ts
+    - packages/fixtures/src/security-baseline-scan.itest.ts
+    - artifacts/security/findings.json
     - scripts/security-baseline-scan.mjs
     - scripts/go-live-security.mjs
-    - apps/web/app/(admin)/compliance/findings/page.tsx
+    - scripts/test-gates.mjs
+    - docs/adr/0125-a-findings-register-is-a-reviewed-file-and-an-empty-one-is-not-a-clean-one.md
+    notes:
+    - 'NOTE: THE REGISTER IS A COMMITTED FILE AND NOT A TABLE, so the declared migration
+      00XX-security-finding.sql was NOT written and migrations 0169/0170 are released unused. The
+      decisive reason is in ADR 0125 decision 1: a release gate that reads database state cannot be
+      re-run from the commit — "was this build clear to ship on the 3rd" has to be answerable by git
+      show, and a findings table is mutable by exactly the person the gate is about. Closing a finding
+      is a repository fact (a commit, a test reference, a written acceptance), so the finding and its
+      remediation belong where a reviewer sees both in one diff.'
+    - 'NOTE: THE ADMIN PAGE apps/web/app/(admin)/compliance/findings/page.tsx IS NOT BUILT and is not
+      declared above. A new route needs a next build before a clean typecheck can be believed (brief
+      rule 17) and this unit''s dispatch forbids a web build for disk, so shipping one unbuilt would be
+      a route nothing has typechecked. No acceptance line asks for it: line 5 asks that the register be
+      surfaced in the GO/NO-GO output, which renderGoNoGo does and an inline snapshot test asserts.
+      Whoever adds the page should render it from parseFindingsRegister and add it to the route
+      registry.'
+    - 'NOTE: pnpm go-live:security is deliberately NOT in pnpm verify. It exits non-zero today and is
+      supposed to: engagement.booked is false (Y13-pentest) and an empty register is a NO-GO, because
+      "no findings" and "nobody looked" are the same register. go-live-payments.mjs set that precedent
+      for the same reason — a gate that fails on a business fact nobody can fix in code is a gate people
+      delete. What IS in verify is pnpm findings, the register''s integrity, registered in gate case
+      29''s array and in .github/workflows/ci.yml in the same commit.'
+    - 'NOTE: THE INTENTIONALLY VULNERABLE FIXTURE ROUTE IS A FIXTURE ORIGIN, not a route in apps/web. A
+      route that bypassed guardAdminRoute would be refused by this repository''s own admin-guard scan
+      and would be a real hole the first time an environment check went the wrong way, so the suite
+      starts a plain node:http origin serving the same shapes. The scan therefore runs in CI through
+      pnpm test:integration rather than needing a CI step of its own, and the real built application is
+      NOT scanned here — the scan takes --target, so pointing it at a running deployment is one flag.'
+    - 'NOTE: no migration, no private SQLSTATE and no test port band. The fixture origin listens on a
+      kernel-assigned port (listen(0)), which apps/web/src/checkout.itest.ts already does for the
+      gateway origin and which brief rule 18 permits — a declared band nothing claims fails
+      test-ports.test.ts, and the claimant scan only reads apps/web anyway. So migrations 0169 and 0170,
+      the band ZY921-ZY930 and the port band { start: 24_500, width: 300 } are RELEASED UNUSED;
+      SCHEMA_VERSION is untouched. Gate block 203a-203k, fifteen cases.'
   - id: H-HARD-11
     order: 182
     title: Load and concurrency soak at realistic peak

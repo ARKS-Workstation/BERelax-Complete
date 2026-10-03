@@ -4,7 +4,7 @@
 
 # ADR index
 
-105 records, generated from the front matter of each one. Every column below is read
+106 records, generated from the front matter of each one. Every column below is read
 out of the record it describes, so a row cannot be wrong without the record being wrong — which is
 the whole reason this file is not maintained by hand. For the argument behind any of them, read
 [README.md](README.md) and then the record.
@@ -116,3 +116,4 @@ the whole reason this file is not maintained by hand. For the argument behind an
 | [0113](0113-a-301-map-is-a-function-and-the-proxy-resolves-it-from-a-committed-module.md) | A 301 map is a FUNCTION with no gaps and no loops, and the proxy resolves it from a committed module | accepted | 2026-10-03 | W-SITE-09 | docs/01 decisions — none; this is the relaunch-shaped consequence of migration 0029's |
 | [0123](0123-a-restore-drill-reads-rows-back-and-staleness-is-a-prefix-not-a-calendar.md) | A restore drill restores into a database made from nothing and READS ROWS BACK, and its evidence goes stale by prefix and not by calendar | accepted | 2026-10-03 | H-HARD-04 | docs/01 decisions — none; this is ADR 0002 applied to disaster recovery, ADR 0034 |
 | [0124](0124-a-runbook-is-machine-checked-or-it-is-decoration.md) | A runbook is machine-checked or it is decoration, and its front matter is a narrow format rather than YAML | accepted | 2026-10-03 | H-HARD-06 | docs/01 decisions — none; this extends H-HARD-09's documentation chain (`pnpm docs-set`) |
+| [0125](0125-a-findings-register-is-a-reviewed-file-and-an-empty-one-is-not-a-clean-one.md) | A findings register is a REVIEWED FILE, an empty one is not a clean one, and the vulnerable fixture route may not be in the application | accepted | 2026-10-03 | H-HARD-10 | docs/01 decisions — none; this is ADR 0002 applied to a security review, ADR 0003 applied |
