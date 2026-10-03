@@ -370,8 +370,30 @@ for (const [file, code] of codeOf) {
 }
 
 // --- rule 7: one policy builder, and no literal gateway origin ----------------------------------
+/**
+ * The ONE file besides {@link POLICY} that may write these directives, and what it must prove.
+ *
+ * H-HARD-01 added the admin and public content-security policy, which legitimately writes `script-src`
+ * (a nonce for the admin estate) and `frame-src` — and writing `frame-src 'none'` for every page that
+ * is NOT the checkout is the opposite of widening it. This rule exists to stop a SECOND place deciding
+ * what the checkout may frame, so the allowance is conditional, not a blanket exemption: the file is
+ * permitted only while every `frame-src` it writes is `'none'` and it holds no literal origin. The day
+ * somebody widens it for a gateway, the condition fails and this rule fires again.
+ *
+ * Added by the integrator at the final verify, where this rule first saw that file.
+ */
+const POLICY_SECOND_BUILDER = 'apps/web/src/security/headers.ts'
+const secondBuilderStaysNarrow = (code) => {
+  // Counted, not matched loosely: EVERY `frame-src` this file writes must be the `'none'` one, so a
+  // tenth directive added later cannot hide behind the nine that are fine.
+  const all = (code.match(/\bframe-src\b/g) ?? []).length
+  const none = (code.match(/\bframe-src\s+'none'/g) ?? []).length
+  return all > 0 && all === none && !/'https?:\/\//.test(code)
+}
+
 for (const [file, code] of codeOf) {
   if (file === POLICY || IS_TEST(file)) continue
+  if (file === POLICY_SECOND_BUILDER && secondBuilderStaysNarrow(code)) continue
   if (/\bframe-src\b|\bscript-src\b/.test(code)) {
     problems.push(
       `${file}  [${RULES.onePolicy}] writes a frame-src or script-src directive. The checkout's ` +
