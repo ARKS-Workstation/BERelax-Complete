@@ -67007,6 +67007,7 @@ export function chargebackNetEffectFils(`,
     // request carries labels.
     'pnpm freeze',
     'pnpm perf-budget',
+    'pnpm coverage:core',
     'pnpm egress',
     // And the SAQ-A scan beside it, for the same reason in the other direction: it is the one check that
     // says no card number can reach anything this build renders, logs or stores, and its whole value is

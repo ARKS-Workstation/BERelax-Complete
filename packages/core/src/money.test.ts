@@ -8,9 +8,11 @@ import {
   compare,
   fils,
   filsFrom,
+  filsFromStoredDigits,
   formatAmount,
   formatMoney,
   grossFromNet,
+  isZero,
   money,
   multiply,
   roundHalfUp,
@@ -239,5 +241,51 @@ describe('formatting', () => {
     // ever bare by accident.
     expect(formatMoney(aed(1234))).toContain('AED')
     expect(formatMoney(aed(1234))).toContain('1,234.00')
+  })
+})
+
+describe('filsFromStoredDigits', () => {
+  // The guard Y-PAY-09 needed and nothing tested. A bigint column comes back from the driver as a
+  // STRING, and that unit found five money defects around exactly this seam — one of them a
+  // comparison of a string against a number that made every settlement line diverge. The function
+  // refuses a value that does not survive a round trip through a JavaScript number, which is the
+  // only way a stored figure can be trusted as `Fils` (ADR 0007).
+  it('accepts the digits a bigint column actually returns', () => {
+    expect(filsFromStoredDigits('0', 'price')).toBe(0)
+    expect(filsFromStoredDigits('733337', 'price')).toBe(733_337)
+    expect(filsFromStoredDigits(String(Number.MAX_SAFE_INTEGER), 'price')).toBe(
+      Number.MAX_SAFE_INTEGER,
+    )
+  })
+
+  it('refuses a figure larger than a JavaScript number can hold exactly', () => {
+    // One past the safe integer: `Number.parseInt` answers a number that is CLOSE, and
+    // `String(parsed) !== value` is what catches it. A silent nearest-value here is a price that is
+    // wrong by a fil in a column nobody re-reads.
+    const past = '9007199254740993'
+    expect(() => filsFromStoredDigits(past, 'invoice.gross_total')).toThrow(AppError)
+    expect(() => filsFromStoredDigits(past, 'invoice.gross_total')).toThrow(/round trip/)
+    // The label is in the message because the caller is two boundaries from the query.
+    expect(() => filsFromStoredDigits(past, 'invoice.gross_total')).toThrow(/invoice\.gross_total/)
+  })
+
+  it('refuses the shapes a numeric column can also hold', () => {
+    // Each of these parses to a number and then fails the round trip, which is the point: a
+    // `numeric` column, a value with a decimal part, and whitespace from a hand-edited fixture are
+    // all values somebody could put in front of this function, and none of them is integer fils.
+    for (const value of ['12.50', ' 12', '12 ', '0x0c', '1e3', '', 'twelve']) {
+      expect(() => filsFromStoredDigits(value, 'price'), value).toThrow(AppError)
+    }
+  })
+})
+
+describe('isZero', () => {
+  it('is true only of a nil amount', () => {
+    expect(isZero(aed(0))).toBe(true)
+    // AED is the only currency this build has (ADR 0007); `isZero` reads the amount and not
+    // the currency, which is the claim, so the second case is the same amount built the long way.
+    expect(isZero(money(filsFrom(0)))).toBe(true)
+    expect(isZero(aed(1))).toBe(false)
+    expect(isZero(aedFrom(-1))).toBe(false)
   })
 })
