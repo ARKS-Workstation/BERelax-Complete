@@ -73,14 +73,27 @@ Three consequences:
   exercised it. Brief rule 22's rule applied to a census rather than to a generator: count how many of
   the examined rows could actually disagree, and say so out loud when the answer is zero.
 
-### Why it is a verify step AND a CI job of its own
+### Why it is a CI job and NOT a `pnpm verify` step, which is the opposite of what this unit first did
 
-docs/14 §3 says the domain invariants *"run on every unit regardless of what changed"*, so it is a step
-of `pnpm verify`, immediately after `pnpm money-invariants` — both read the estate the integration suite
-just wrote. The acceptance line also asks for *"its own CI job"*, and that job runs the **walkthrough
-first and the census second**: the census refuses an empty estate, so a job that only migrated and
-seeded would fail on the floor, correctly and uselessly. Judged over the rows the milestone is actually
-about, it is the milestone's own reading.
+It was a verify step, immediately after `pnpm money-invariants`, on the argument that both read the
+estate the integration suite just wrote. Then it was measured, and the floor fired: four
+appointment-heavy suites run in order — `book-flow`, `appointment-reschedule`, `availability-query`,
+`till` — leave **zero appointment rows** behind, because each cleans up after itself, and a freshly
+migrated and seeded database has none either. So the step refused with
+`domain-invariant-census-examined-nothing` in the one place it ran, and would have done so for every
+unit agent on every commit.
+
+A gate that fails every commit for a reason nobody can fix in the commit is a gate somebody deletes —
+`go-live-payments.mjs`'s argument, arriving from an unexpected direction. So the census is the
+`domain-invariants` **job**, which drives the M1 walkthrough first and censuses what it wrote, and its
+CI-only status is DECLARED in `scripts/check-gate-registry.mjs` with that measurement as the reason
+rather than inferred from its absence.
+
+docs/14 §3's *"they run on every unit regardless of what changed"* is met by
+`packages/fixtures/src/domain-invariants.itest.ts` instead. That file IS in the integration suite and
+therefore in every verify, and it is the stronger of the two halves: it plants one breach per claim with
+the database's own guard dropped inside a rolled-back transaction and watches each refusal fire, which
+is the thing a census over a clean estate can never show.
 
 ## Decision 3 — what the chain cannot reach is REPORTED, with the assertion that says so
 
@@ -109,11 +122,11 @@ proves them at the handler level with a fixture issuer.
 
 ## Consequences
 
-- `pnpm domain-invariants` joins `pnpm verify` and CI and is registered in `scripts/test-gates.mjs` case
-  29. A future migration that adds a table with appointments in it adds nothing here: the census derives
-  its table list from the catalogue and its claims from the rows.
-- The census will FAIL on a database nobody has written appointments to, which is the correct answer and
-  will surprise somebody. The failure says so in as many words.
+- `pnpm domain-invariants` is registered in `scripts/test-gates.mjs` case 29 and declared CI-only, so
+  dropping its job from the workflow is a failing build rather than a silent loss.
+- The census FAILS on a database nobody has written appointments to, which is the correct answer and
+  did surprise its own author. The failure says so in as many words, and gate case 206i carries the
+  measurement that moved it out of `pnpm verify`.
 - `/tag-loader`, `/therapists` and `/therapists/[slug]` are removed from
   `lighthouse/budget.json`'s `matrixCoverage.alreadyUncovered` because this suite now audits them with
   axe in both themes and baselines each. The coverage is DERIVED from the suites, so the gate case that

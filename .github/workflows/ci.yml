@@ -339,14 +339,6 @@ jobs:
       - name: The seven money invariants are examined and hold
         run: pnpm money-invariants
 
-      # B-M1's domain invariant census. Immediately after the money census and for the same reason: both
-      # re-derive their claims over every row the database holds, so both have to run after the suites
-      # that wrote them. docs/14 §3 calls these four non-negotiable and says they run on every unit
-      # regardless of what changed, which is why they are a step here as well as a job of their own
-      # below — the job is what judges them over the estate the M1 walkthrough itself creates.
-      - name: The four domain invariants hold over the whole estate
-        run: pnpm domain-invariants
-
       - name: Migration dry run
         run: pnpm db:migrate:dry
 

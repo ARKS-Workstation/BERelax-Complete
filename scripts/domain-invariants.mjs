@@ -2,11 +2,16 @@
 /**
  * The four domain invariants of docs/14 §3, re-derived over every row the database holds.
  *
- * `pnpm domain-invariants`. B-M1, and docs/14 §3's own instruction: *"Domain invariants are the
- * non-negotiable subset, and they run on every unit regardless of what changed."* So it is a step of
- * `pnpm verify` — immediately after `pnpm money-invariants`, which is immediately after the
- * integration suite, because that is what writes the estate both censuses examine — and a CI job of
- * its own, which is what the acceptance line asks for.
+ * `pnpm domain-invariants`. B-M1. It is a CI JOB and deliberately NOT a `pnpm verify` step, and the
+ * reason is measured rather than stylistic: this census refuses an estate it examined nothing in (see
+ * the floors), and the integration suite cleans up after itself — four appointment-heavy suites run in
+ * order leave zero appointment rows behind, and a freshly migrated and seeded database has none either.
+ * As a verify step it therefore failed on the floor for every unit agent on every commit, which is the
+ * shape a gate gets deleted for. The `domain-invariants` job drives the M1 walkthrough first and
+ * censuses what it wrote; `scripts/check-gate-registry.mjs` carries that reason as a declared CI-only
+ * entry. docs/14 §3's *"they run on every unit regardless of what changed"* is met by
+ * `packages/fixtures/src/domain-invariants.itest.ts`, which is in the integration suite and plants one
+ * breach per claim rather than hoping to find one.
  *
  * ## It is THIN on purpose
  *

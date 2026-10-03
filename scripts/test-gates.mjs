@@ -66061,13 +66061,33 @@ export function chargebackNetEffectFils(`,
   {
     const workflow = readFileSync('.github/workflows/ci.yml', 'utf8')
     const chain = JSON.parse(readFileSync('package.json', 'utf8')).scripts.verify
+    // NOT a verify step, and this case is the record of why. It was one, and the floor fired: measured,
+    // four appointment-heavy suites run in order leave ZERO appointment rows behind, and a freshly
+    // seeded database has none either — so the step failed on "examined nothing" in the one place it
+    // ran. A gate that fails every commit for a reason nobody can fix in the commit is a gate somebody
+    // deletes, so the census moved to the job that gives it an estate and
+    // `scripts/check-gate-registry.mjs` carries the reason as a declared CI-only entry.
     check(
-      'the domain invariant census is a verify step',
-      chain.includes('pnpm domain-invariants'),
+      'the domain invariant census is NOT a verify step, because it would fail on the floor there',
+      !chain.includes('pnpm domain-invariants'),
       chain,
     )
     check(
-      'and has a CI job of its own',
+      'and its CI-only status is DECLARED with a reason rather than inferred from its absence',
+      readFileSync('scripts/check-gate-registry.mjs', 'utf8').includes("'pnpm domain-invariants',"),
+      'pnpm domain-invariants is registered in case 29 and declared nowhere as CI-only',
+    )
+    // The per-commit half: docs/14 §3 says these four run on EVERY unit, and what runs on every unit is
+    // the itest — in the integration suite, planting one breach per claim with the database's own guard
+    // dropped. Without this the move above would have quietly reduced the four claims to a CI job.
+    check(
+      'and the four claims are exercised on every verify by the planted-breach suite',
+      readFileSync('vitest.integration.config.ts', 'utf8').includes('packages/**/*.itest.ts') &&
+        existsSync('packages/fixtures/src/domain-invariants.itest.ts'),
+      'packages/fixtures/src/domain-invariants.itest.ts is not reachable from the integration glob',
+    )
+    check(
+      'and it has a CI job of its own',
       /^\s{2}domain-invariants:$/m.test(workflow),
       'no `domain-invariants:` job in .github/workflows/ci.yml',
     )
@@ -67016,12 +67036,13 @@ export function chargebackNetEffectFils(`,
     // the one check that re-adds every money identity over every row the database holds, rather than over
     // the rows one unit's own fixture wrote. Its POSITION is asserted separately, in the 152a-152z block.
     'pnpm money-invariants',
-    // B-M1's domain invariant census, in the position `pnpm verify` runs it: immediately after the money
-    // census, because both read the estate the integration suite just wrote. docs/14 §3 says the four
-    // domain invariants run on EVERY unit regardless of what changed, so it is a verify step as well as
-    // a CI job of its own — and registered here because that is what makes dropping it from CI a failing
-    // build rather than the silent loss of the one check that re-derives them over every row the
-    // database holds.
+    // B-M1's domain invariant census. Registered here and declared CI-ONLY in
+    // `scripts/check-gate-registry.mjs`, which carries the measured reason: the census refuses an estate
+    // it examined nothing in (ADR 0002), and the integration suite cleans up after itself, so in
+    // `pnpm verify` the step would fail on the floor for every unit agent on every commit. The only run
+    // that HAS an estate is the `domain-invariants` job, which drives the M1 walkthrough first.
+    // Registered because that is what makes dropping it from CI a failing build rather than the silent
+    // loss of the one check that re-derives those four claims over every row the database holds.
     'pnpm domain-invariants',
     'pnpm db:migrate:dry',
     'pnpm db:drift',

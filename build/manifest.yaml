@@ -3934,9 +3934,21 @@ units:
       statement of how many client places a room holds at an instant, and the function
       `assert_room_capacity` itself calls, so the gate and the trigger cannot come to disagree. Migration
       0172, SQLSTATE band ZY951-960 and migration 0171 and band ZY941-950 (H-MIG-11''s, also unused) are
-      RELEASED. `pnpm domain-invariants` is a new `pnpm verify` step and is registered in gate case 29 in
-      the same commit; `pnpm gates:test` is still the last step of the chain, which gate case 102
-      asserts.'
+      RELEASED. `pnpm domain-invariants` is registered in gate case 29 and is DECLARED CI-ONLY in
+      scripts/check-gate-registry.mjs, and that is a defect this unit found in its own work rather than a
+      design: it WAS a verify step, and the floor fired. Measured - four appointment-heavy suites (book-flow,
+      appointment-reschedule, availability-query, till) run in order leave ZERO appointment rows behind
+      because each cleans up after itself, and a freshly migrated and seeded database has none either - so the
+      step refused with `domain-invariant-census-examined-nothing` in the one place it ran, and would have
+      done so for every unit agent on every commit. A gate that fails every commit for a reason nobody can fix
+      in the commit is a gate somebody deletes, so the census moved to the `domain-invariants` JOB, which
+      drives the M1 walkthrough first and censuses what it wrote - which is what the acceptance line asked for
+      in the first place. docs/14 §3''s "they run on every unit" is met by
+      packages/fixtures/src/domain-invariants.itest.ts, which IS in the integration suite and therefore in
+      every verify: it plants one breach per claim with the database''s own guard dropped inside a rolled-back
+      transaction and watches each refusal fire. Gate case 206i asserts the arrangement in all three parts and
+      carries the measurement. `pnpm gates:test` is still the last step of the verify chain, which gate case
+      102 asserts.'
   - id: M-TILL-01
     order: 43
     title: Chart of accounts and the pure double-entry ledger kernel
