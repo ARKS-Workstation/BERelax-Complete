@@ -231,6 +231,15 @@ jobs:
       - name: Structured data (JSON-LD) validity
         run: pnpm structured-data
 
+      # W-SITE-09's 301 map, held to being a FUNCTION: every path in the crawl baseline has a row, no
+      # source is also a target, nothing loops, and every target is a route the registry declares. It
+      # reads no database, so it fails in the same second as a malformed cron rather than after the
+      # suites — and the failure it exists for is the quietest one a relaunch has: a URL that ranks, is
+      # not in the map, and 404s from the day of the cutover, which nothing inside the application can
+      # discover because nothing here knows the URL exists.
+      - name: Redirect map coverage and one-hop invariant
+        run: pnpm redirects
+
       # The editorial grid, the direction multiplier and the one shadow. Static rules, so they run with
       # the other cheap scans rather than after the browser work.
       - name: Layout, motion and elevation discipline

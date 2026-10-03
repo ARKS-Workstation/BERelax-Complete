@@ -4,7 +4,7 @@
 
 # ADR index
 
-102 records, generated from the front matter of each one. Every column below is read
+103 records, generated from the front matter of each one. Every column below is read
 out of the record it describes, so a row cannot be wrong without the record being wrong — which is
 the whole reason this file is not maintained by hand. For the argument behind any of them, read
 [README.md](README.md) and then the record.
@@ -113,3 +113,4 @@ the whole reason this file is not maintained by hand. For the argument behind an
 | [0110](0110-discreet-is-a-narrow-privacy-claim-and-the-mcc-gate-is-three-layers.md) | "discreet" is a NARROW privacy claim, and the MCC gate is three layers with no invented value | accepted | 2026-10-03 | Y-PAY-10 | docs/01 decisions — none; this is the go-live-shaped consequence of |
 | [0111](0111-a-therapist-page-is-a-refusal-and-a-departure-redirects.md) | A therapist page is a REFUSAL with three dispositions, and a departure redirects | accepted | 2026-10-03 | W-SITE-06 | docs/01 decisions 23 — the implementation side of |
 | [0112](0112-a-sitemap-is-refused-rather-than-served-lopsided-and-a-ping-is-never-reported-unsent.md) | A lopsided sitemap is REFUSED rather than served, and a ping is never reported that was not sent | accepted | 2026-10-03 | W-SITE-08 | docs/01 decisions — none; this is the propagation-shaped consequence of |
+| [0113](0113-a-301-map-is-a-function-and-the-proxy-resolves-it-from-a-committed-module.md) | A 301 map is a FUNCTION with no gaps and no loops, and the proxy resolves it from a committed module | accepted | 2026-10-03 | W-SITE-09 | docs/01 decisions — none; this is the relaunch-shaped consequence of migration 0029's |

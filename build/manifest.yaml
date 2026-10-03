@@ -18093,7 +18093,7 @@ units:
     summary: The redirect map table, the baseline importer, and the one-hop invariant that makes a relaunch
       safe for pages that already rank — including the retained {treatment} in {area} pages.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - W-SITE-08
@@ -18118,11 +18118,39 @@ units:
     - 'Retained area pages are differentiated, not template fill: a similarity test asserts pairwise body-text
       similarity below 0.8 across all retained area pages'
     files:
-    - packages/db/migrations/00XX_redirect_map.sql
+    - packages/core/src/seo/legacy-redirects.ts
     - packages/db/src/repositories/redirects.ts
-    - apps/web/middleware.ts
+    - apps/web/proxy.ts
     - scripts/import-crawl-baseline.mjs
-    - tests/seo/redirects.spec.ts
+    - scripts/check-redirect-coverage.mjs
+    - apps/web/src/legacy-redirects.test.ts
+    - packages/fixtures/src/redirects.itest.ts
+    - apps/web/src/public-site.itest.ts
+    notes:
+    - 'NOTE: there is NO migration. `redirect_map` already exists with every column this unit needs and
+      the one-hop invariant already enforced — migration 0029 created it under that name for exactly
+      this unit ("W-SITE-09 imports the legacy WooCommerce URLs into the same table and inherits the
+      one-hop invariant"), so 0159 was released unused. The allocated `00XX_redirect_map.sql` would have
+      been a second table and therefore a second answer to "where does this path go".'
+    - 'NOTE: the middleware is `apps/web/proxy.ts`, not `middleware.ts`: Next 16.3 renamed the
+      convention and W-SITE-01 moved the file. The planned `tests/seo/redirects.spec.ts` is split in
+      three — `apps/web/src/legacy-redirects.test.ts` (the decision, as a table),
+      `packages/fixtures/src/redirects.itest.ts` (the importer, against rows and no server) and the
+      W-SITE-09 block of `apps/web/src/public-site.itest.ts` (the served hop, the query string and the
+      locale prefix). The repository has no `tests/` tree, and the suite shares one port band with
+      W-SITE-06 and W-SITE-08.'
+    - 'NOTE: the retained `{treatment} in {area}` pages are NOT built and `RETAINED_AREA_PAGES` is
+      empty. Which legacy URLs have genuine demand is `Y1-woo-baseline`, which is open, and writing area
+      pages before that export would be the template fill docs/09 forbids in the same sentence that asks
+      for them. What IS built is the rule that will judge them — a Jaccard similarity with the
+      criterion''s 0.8 ceiling, proven on a fixture to catch a place-name swap — and the emptiness is
+      asserted beside it, so the day a page is added the rule is already there to hold.'
+    - 'NOTE: `apps/web/proxy.ts` resolves the map from the COMMITTED module rather than from
+      `redirect_map`, because a middleware that imported a database connection cannot run on the edge.
+      The importer writes the same rows into the table for everything that can read it, and
+      `public-site.itest.ts` holds the two equal. The slug-change and therapist-archival rows are
+      deliberately absent from the module: nothing commits them, and the pages that own those paths
+      resolve them against the table themselves.'
   - id: W-SITE-11
     order: 148
     title: 'Performance enforcement: Lighthouse CI budgets and field RUM'

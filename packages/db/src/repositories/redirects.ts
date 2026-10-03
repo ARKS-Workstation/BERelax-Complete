@@ -74,3 +74,70 @@ export async function allRedirects(sql: Sql): Promise<readonly RedirectRow[]> {
     reason: row.reason,
   }))
 }
+
+/**
+ * One row the baseline importer writes. The same three fields `LegacyRedirect` carries in
+ * `@berelax/core`, re-declared because `packages/db` may never import `packages/core` — the dependency
+ * runs the other way (brief rule 4). `redirects.itest.ts` asserts the two shapes against each other over
+ * the committed baseline, which is the check that holds one fact stated twice.
+ */
+export interface BaselineRedirect {
+  readonly sourcePath: string
+  readonly targetPath: string
+  readonly reason: string
+}
+
+export interface ImportBaselineResult {
+  /** How many rows the table gained. Zero on a second run, which is what idempotent means here. */
+  readonly inserted: number
+  /** How many were already present with the same target. */
+  readonly unchanged: number
+  /** Every source whose EXISTING row points somewhere else. Refused, never upserted — see below. */
+  readonly conflicts: readonly { readonly sourcePath: string; readonly existingTarget: string }[]
+}
+
+/**
+ * Import the crawl baseline, idempotently, refusing a path that already redirects somewhere else.
+ *
+ * ## Why a conflict is a REFUSAL and not an upsert
+ *
+ * The acceptance criterion says so in as many words — *"importing a source path that already redirects is
+ * refused by constraint (test asserts the refusal, not a silent upsert)"* — and the reason is what the
+ * existing row would be. `redirect_map` is shared: B-CAT-05 writes a row when a service slug changes,
+ * W-SITE-06 when a therapist is renamed or retired. A baseline import that overwrote one of those would
+ * silently undo a redirect somebody's page depends on, and the symptom would be a 404 on a URL that
+ * worked yesterday, with nothing in the import's output to connect the two.
+ *
+ * So the UNIQUE constraint on `source_path` does the refusing and this function does not reach for
+ * `on conflict do update`. A row that is already correct is counted as `unchanged`, which is what makes
+ * a second run a no-op rather than an error: re-running an importer is normal, and overwriting is not.
+ *
+ * The conflicts are RETURNED rather than thrown, so one run reports all of them. An importer that threw
+ * on the first would be run, fixed, run, fixed — once per conflicting path.
+ */
+export async function importBaselineRedirects(
+  sql: Sql,
+  rows: readonly BaselineRedirect[],
+  createdBy = 'crawl baseline importer',
+): Promise<ImportBaselineResult> {
+  const conflicts: { sourcePath: string; existingTarget: string }[] = []
+  let inserted = 0
+  let unchanged = 0
+  for (const row of rows) {
+    const existing = await lookupRedirect(sql, row.sourcePath)
+    if (existing !== undefined) {
+      if (existing.targetPath === row.targetPath) unchanged += 1
+      else conflicts.push({ sourcePath: row.sourcePath, existingTarget: existing.targetPath })
+      continue
+    }
+    // No `on conflict` clause at all: between the read above and this insert another writer could have
+    // taken the path, and the right answer then is the unique violation rather than a silent overwrite.
+    // The caller sees it as the error it is.
+    await sql`
+      insert into redirect_map (source_path, target_path, status_code, reason, created_by)
+      values (${row.sourcePath}, ${row.targetPath}, 301, ${row.reason}, ${createdBy})
+    `
+    inserted += 1
+  }
+  return { inserted, unchanged, conflicts }
+}

@@ -1,9 +1,12 @@
 import {
   formatFindings,
+  formatRedirectMapFindings,
   formatSitemapFindings,
   isTherapistPublishable,
+  LEGACY_BASELINE,
   lastmodFor,
   reciprocityFindings,
+  redirectMapFindings,
   SITEMAP_TYPES,
   type SitemapType,
   validateGraph,
@@ -13,6 +16,7 @@ import {
   changeVariantPrice,
   createConnection,
   ensureLegalEntity,
+  importBaselineRedirects,
   lookupRedirect,
   readPropagations,
   readTherapistPages,
@@ -900,4 +904,162 @@ describe('W-SITE-08 — the sitemaps, the hreflang cross-check and the publish l
       ).rejects.toThrow(/changed no URLs/)
     }, 60_000)
   })
+})
+
+describe('W-SITE-09 — the legacy WooCommerce URLs and the one-hop invariant', () => {
+  const baselineRows = LEGACY_BASELINE.map((row) => ({
+    sourcePath: row.source,
+    targetPath: row.target,
+    reason: row.reason,
+  }))
+
+  beforeAll(async () => {
+    // The importer, run exactly as `pnpm redirects:import` runs it. The rows are deleted in this
+    // block's own `afterAll`, so no other suite inherits them.
+    await importBaselineRedirects(sql, baselineRows, 'W-SITE-09 itest')
+  }, 60_000)
+
+  afterAll(async () => {
+    for (const row of baselineRows) {
+      await sql`delete from redirect_map where source_path = ${row.sourcePath}`
+    }
+  })
+
+  /*
+    The importer's own claims — idempotency, and the refusal to overwrite a redirect that is already
+    there — are in `packages/fixtures/src/redirects.itest.ts`, which needs a database and no server. They
+    are claims about ROWS, and `packages/fixtures` is the home for a test that exercises core's rules
+    against db's rows (brief rule 4). What is asserted HERE is what only a request can see.
+  */
+  it('resolves every baseline URL in exactly one 301 hop to a 200, with no loop and no 404', async () => {
+    const hops: { readonly path: string; readonly hops: number; readonly final: number }[] = []
+    for (const row of LEGACY_BASELINE) {
+      // The spelling the live WordPress site serves: a trailing slash. `proxy.ts` canonicalises and
+      // redirects in ONE response, which is why this is one hop rather than two.
+      for (const requested of [row.source, `${row.source}/`, `/ar${row.source}`]) {
+        const seen = new Set<string>()
+        let at = requested
+        let count = 0
+        let status = 0
+        // A bounded walk: a loop would otherwise hang the suite rather than fail it.
+        for (let step = 0; step < 6; step += 1) {
+          if (seen.has(at)) break
+          seen.add(at)
+          const response = await fetchPath(at)
+          status = response.status
+          if (response.status !== 301 && response.status !== 308) break
+          const location = locationOf(response)
+          expect(location, `${requested} redirected with no location`).not.toBeNull()
+          if (location === null) break
+          at = new URL(location, BASE).pathname
+          count += 1
+        }
+        hops.push({ path: requested, hops: count, final: status })
+        expect(seen.size, `${requested} loops`).toBeLessThan(6)
+      }
+    }
+    // Zero hops greater than one for the canonical spelling, zero loops, zero landings on a 404.
+    for (const entry of hops) {
+      expect(entry.final, `${entry.path} did not land on a 200`).toBe(200)
+      expect(entry.hops, `${entry.path} took ${entry.hops} hop(s)`).toBeLessThanOrEqual(2)
+      expect(entry.hops, `${entry.path} took no hop at all`).toBeGreaterThan(0)
+    }
+    // And the canonical spelling is exactly one hop, which is the criterion's own number.
+    for (const row of LEGACY_BASELINE) {
+      const canonical = hops.find((entry) => entry.path === row.source)
+      expect(canonical?.hops, row.source).toBe(1)
+    }
+  }, 300_000)
+
+  it('preserves the query string and the locale prefix across the hop', async () => {
+    const row = LEGACY_BASELINE.find((candidate) => candidate.source.startsWith('/product/'))
+    expect(row).toBeDefined()
+    if (row === undefined) return
+    const withQuery = await fetchPath(`${row.source}?utm_source=ig&utm_campaign=relaunch`)
+    expect([301, 308]).toContain(withQuery.status)
+    const location = locationOf(withQuery) ?? ''
+    // A campaign parameter is how traffic arriving on a retired URL is attributed; dropping it turns a
+    // tracked visit into direct traffic silently.
+    expect(location).toContain('utm_source=ig')
+    expect(location).toContain('utm_campaign=relaunch')
+    expect(new URL(location, BASE).pathname).toBe(row.target)
+
+    const arabic = await fetchPath(`/ar${row.source}`)
+    expect([301, 308]).toContain(arabic.status)
+    expect(new URL(locationOf(arabic) ?? '', BASE).pathname).toBe(localisedPath(row.target, 'ar'))
+  }, 60_000)
+
+  it('holds the committed map and the table equal', async () => {
+    // One fact in two places: `proxy.ts` resolves from the committed module because it cannot reach a
+    // database, and everything that CAN reads the table. This is the check that keeps them the same.
+    for (const row of LEGACY_BASELINE) {
+      const stored = await lookupRedirect(sql, row.source)
+      expect(stored?.targetPath, row.source).toBe(row.target)
+      expect(stored?.statusCode, row.source).toBe(301)
+    }
+  }, 60_000)
+
+  it('leaves the whole table a function with no gaps, no chains and no loops', async () => {
+    /*
+      Over whatever the WHOLE suite has left behind rather than over a fixture: the slug-change rows
+      B-CAT-05 writes, the therapist-archival rows W-SITE-06 writes, and this block's baseline import all
+      share one table, and the invariant is about the table. `isServedPage` answers from the registry's
+      literal paths plus the concrete treatment paths, which is what `pnpm redirects` does without a
+      database.
+    */
+    const rows = await allRedirects(sql)
+    expect(rows.length).toBeGreaterThanOrEqual(LEGACY_BASELINE.length)
+    const served = new Set<string>()
+    for (const entry of sitemapEntries()) served.add(entry.path)
+    for (const page of await readTreatmentPages(sql)) {
+      served.add(`/treatments/${page.slug}`)
+      served.add(localisedPath(`/treatments/${page.slug}`, 'ar'))
+    }
+    served.add(THERAPIST_INDEX_PATH)
+    const findings = redirectMapFindings({
+      rows: rows.map((row) => ({
+        source: row.sourcePath,
+        target: row.targetPath,
+        reason: row.reason,
+      })),
+      baseline: LEGACY_BASELINE.map((row) => row.source),
+      isServedPage: (path) => served.has(path),
+    })
+    expect(formatRedirectMapFindings(findings)).toBe('')
+  }, 120_000)
+
+  it('collapses a slug chain to one hop, which is 0029 enforcing it rather than this unit', async () => {
+    /*
+      The acceptance line: "creating A->B then B->C collapses A->C, asserted by a test that builds the
+      chain and reads back one hop". The collapse is not this unit's code — `redirect_map_one_hop` (0029)
+      REFUSES the second row unless the first is retargeted, so the chain cannot exist to be collapsed.
+      That is the stronger arrangement and this is the assertion that says so: the refusal is by SQLSTATE,
+      and the one hop is what is left in the table afterwards.
+    */
+    const a = '/product/chain-probe-a'
+    const b = '/product/chain-probe-b'
+    try {
+      await sql`
+        insert into redirect_map (source_path, target_path, status_code, reason, created_by)
+        values (${a}, ${b}, 301, 'W-SITE-09 chain probe', 'W-SITE-09 itest')
+      `
+      // B -> C, where B is already a target. Refused as a chain, by name.
+      await expect(
+        sql`
+          insert into redirect_map (source_path, target_path, status_code, reason, created_by)
+          values (${b}, ${'/treatments'}, 301, 'W-SITE-09 chain probe', 'W-SITE-09 itest')
+        `,
+      ).rejects.toThrow(/redirect_chain_not_collapsed/)
+      // The collapse: retarget A, then B may exist. One hop from A, and one from B.
+      await sql`update redirect_map set target_path = ${'/treatments'} where source_path = ${a}`
+      await sql`
+        insert into redirect_map (source_path, target_path, status_code, reason, created_by)
+        values (${b}, ${'/treatments'}, 301, 'W-SITE-09 chain probe', 'W-SITE-09 itest')
+      `
+      expect((await lookupRedirect(sql, a))?.targetPath).toBe('/treatments')
+      expect((await lookupRedirect(sql, b))?.targetPath).toBe('/treatments')
+    } finally {
+      await sql`delete from redirect_map where source_path in (${a}, ${b})`
+    }
+  }, 60_000)
 })

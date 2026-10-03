@@ -61478,6 +61478,338 @@ export function chargebackNetEffectFils(`,
   )
 }
 
+// 191a-191z. (W-SITE-09) The 301 map shown to be able to stop being a function: each of the four
+//            properties — total, single-valued, one hop, acyclic — broken in turn, the coverage gate shown
+//            to be able to pass over a gap, the importer shown to be able to overwrite a redirect a live
+//            page depends on, and the similarity rule shown to be able to accept a template fill.
+//
+//            The failure this block exists against is the quietest one a relaunch has. A URL that ranks,
+//            is not in the map, and 404s from the day of the cutover is invisible from inside the
+//            application: nothing here knows the URL exists, so no test can discover it. Only a declared
+//            baseline can, which is why the coverage check is a GATE and not a unit test — and why every
+//            mutation below leaves a site that works.
+{
+  const LEGACY = 'packages/core/src/seo/legacy-redirects.ts'
+  const LEGACY_TEST = 'packages/core/src/seo/legacy-redirects.test.ts'
+  const PROXY_TEST = 'apps/web/src/legacy-redirects.test.ts'
+  const IMPORTER = 'packages/db/src/repositories/redirects.ts'
+  const PROXY = 'apps/web/proxy.ts'
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+
+  // The control for the whole block, including the gate itself: `pnpm redirects` has to pass on the
+  // committed tree or every case below is asserting against a tree that was already red.
+  {
+    const legacy = run('pnpm', unit(LEGACY_TEST))
+    check(
+      'redirects: the committed map suite passes, which is the control for 191a to 191f',
+      !legacy.failed,
+      `the map suite does not pass on the committed tree:\n${legacy.output}`,
+    )
+    const gate = run('pnpm', ['redirects'])
+    check(
+      'redirects: the committed tree passes the coverage gate, the control for 191g and 191h',
+      !gate.failed,
+      `pnpm redirects does not pass on the committed tree:\n${gate.output}`,
+    )
+    const proxy = run('pnpm', unit(PROXY_TEST))
+    check(
+      'redirects: the committed proxy decision table passes, the control for 191i and 191j',
+      !proxy.failed,
+      `the proxy table does not pass on the committed tree:\n${proxy.output}`,
+    )
+  }
+
+  /*
+    191a. Totality dropped: a baseline path with no row stops being a finding.
+
+    THE defect of this unit. The map still works for every URL in it, every other rule still fires, and
+    the one URL nobody mapped 404s from the cutover — earning nothing, reported by nothing.
+  */
+  checkRejectedBy(
+    'redirects: 191a a baseline path with no row ceasing to be a finding is caught',
+    withEditedFile(
+      LEGACY,
+      (text) =>
+        replaceOnce(
+          text,
+          '  for (const path of input.baseline) {\n    if (bySource.has(path)) continue',
+          '  for (const path of input.baseline) {\n    if (true) continue',
+        ),
+      () => runExpectingFailure('pnpm', unit(LEGACY_TEST)),
+    ),
+    'reports a baseline path with no row',
+  )
+
+  /*
+    191b. The one-hop rule dropped.
+
+    A chain costs the first URL a hop per rename, for ever, and crawlers stop following. It is the
+    invariant 0029 enforces in the database; this is the half that holds over the COMMITTED map, which has
+    no trigger behind it.
+  */
+  checkRejectedBy(
+    'redirects: 191b a chain ceasing to be a finding is caught',
+    withEditedFile(
+      LEGACY,
+      (text) =>
+        replaceOnce(
+          text,
+          '    if (sources.has(row.target)) {\n      findings.push({\n        rule: ',
+          '    if (false) {\n      findings.push({\n        rule: ',
+        ),
+      () => runExpectingFailure('pnpm', unit(LEGACY_TEST)),
+    ),
+    'reports a chain, and does not also report its target as a dead page',
+  )
+
+  /*
+    191c. Single-valuedness dropped: one source may be mapped twice.
+
+    Two rows for one path is two answers, and which one a middleware serves depends on the order they come
+    back in — so the site is correct in testing and wrong in production, or the other way round, and
+    neither is reproducible.
+  */
+  checkRejectedBy(
+    'redirects: 191c a source mapped twice ceasing to be a finding is caught',
+    withEditedFile(
+      LEGACY,
+      (text) =>
+        replaceOnce(
+          text,
+          '    const existing = bySource.get(row.source)\n    if (existing !== undefined) {',
+          '    const existing = bySource.get(row.source)\n    if (existing === undefined && false) {',
+        ),
+      () => runExpectingFailure('pnpm', unit(LEGACY_TEST)),
+    ),
+    'reports a source mapped twice',
+  )
+
+  /*
+    191d. The loop walk stops walking.
+
+    A loop is reported separately from the chain that makes it, because the symptom and the fix differ: a
+    chain costs a hop, a loop costs the page — the browser answers "too many redirects", which names
+    neither row.
+  */
+  checkRejectedBy(
+    'redirects: 191d a loop ceasing to be a finding is caught',
+    withEditedFile(
+      LEGACY,
+      /*
+        The walk removed, rather than its `break`. Removing the break was the first spelling and it HANGS:
+        the loop then has nothing to stop it, so the case produced no answer at all rather than a failing
+        one — which is why `redirectMapFindings` now carries a step bound as well as its `seen` set. A
+        gate case that hangs is worse than one that misses.
+      */
+      (text) =>
+        replaceOnce(
+          text,
+          '  for (const start of bySource.keys()) {\n    const seen = new Set<string>([start])',
+          '  for (const start of [] as readonly string[]) {\n    const seen = new Set<string>([start])',
+        ),
+      () => runExpectingFailure('pnpm', unit(LEGACY_TEST)),
+    ),
+    'reports a loop as well as the chain that makes it',
+  )
+
+  /*
+    191e. A dead target stops being a finding.
+
+    0029's own phrase: a redirect to a 404 is a 404 with extra steps. It is the finding a relaunch
+    produces by renaming a target page after the map was written, which is to say: later, by somebody who
+    never read the map.
+  */
+  checkRejectedBy(
+    'redirects: 191e a target no route serves ceasing to be a finding is caught',
+    withEditedFile(
+      LEGACY,
+      (text) =>
+        replaceOnce(
+          text,
+          '    } else if (!input.isServedPage(row.target)) {',
+          '    } else if (false) {',
+        ),
+      () => runExpectingFailure('pnpm', unit(LEGACY_TEST)),
+    ),
+    'reports a target no route serves',
+  )
+
+  /*
+    191f. The similarity ceiling raised past the one thing it measures.
+
+    A template-filled area page is the same sentences with the place name swapped, which scores near 1. A
+    ceiling above that accepts exactly what docs/09's "real differentiated content rather than a template
+    fill" forbids — and the pages still render, still rank for a while, and then stop.
+  */
+  checkRejectedBy(
+    'redirects: 191f a similarity ceiling that accepts a template fill is caught',
+    withEditedFile(
+      LEGACY,
+      (text) =>
+        replaceOnce(
+          text,
+          'export const AREA_PAGE_SIMILARITY_CEILING = 0.8',
+          'export const AREA_PAGE_SIMILARITY_CEILING = 1.01',
+        ),
+      () => runExpectingFailure('pnpm', unit(LEGACY_TEST)),
+    ),
+    'scores a place-name swap as nearly identical',
+  )
+
+  /*
+    191g. A baseline path removed from the committed map.
+
+    The gate's own subject, from the other direction: this is what the relaunch actually does — a row is
+    deleted in a tidy-up and the URL it covered goes quiet. `pnpm redirects` prints the path, which is the
+    criterion's own requirement ("fails the build with the path printed").
+  */
+  checkRejectedBy(
+    'redirects: 191g a row removed from the committed baseline is caught by pnpm redirects',
+    withEditedFile(
+      LEGACY,
+      (text) =>
+        replaceOnce(
+          text,
+          "  {\n    source: '/product-tag/spa-abu-dhabi',\n    target: TREATMENTS_INDEX,\n    reason: 'WooCommerce baseline: product tag archive (docs/13 SS6)',\n  },\n",
+          '',
+        ),
+      () => runExpectingFailure('pnpm', ['redirects']),
+    ),
+    'Redirect map problems',
+  )
+
+  /*
+    191h. A target changed to a path no route serves.
+
+    The second thing a relaunch does: a page is renamed and the map is not. The gate reads the route
+    registry rather than a list, so this fires on the commit that renames the route rather than on the
+    commit that remembers the map.
+  */
+  checkRejectedBy(
+    'redirects: 191h a target the route registry does not declare is caught by pnpm redirects',
+    withEditedFile(
+      LEGACY,
+      (text) =>
+        replaceOnce(
+          text,
+          "const TREATMENTS_INDEX = '/treatments'",
+          "const TREATMENTS_INDEX = '/the-menu'",
+        ),
+      () => runExpectingFailure('pnpm', ['redirects']),
+    ),
+    'target_is_not_a_page',
+  )
+
+  /*
+    191i. The locale prefix dropped on the hop.
+
+    `/ar/product/x` landing on `/treatments/x` sends an Arabic reader into the English tree, and the
+    English page's `hreflang` set then tells the crawler the Arabic document is somewhere the reader was
+    never sent. The mutation is the obvious spelling — redirect to the target — which is right for exactly
+    the prefixless half of the traffic.
+  */
+  checkRejectedBy(
+    'redirects: 191i a legacy redirect that drops the locale prefix is caught',
+    withEditedFile(
+      PROXY_TEST,
+      (text) =>
+        replaceOnce(
+          text,
+          '  return localisedPath(retired.target, localeOf(canonical))',
+          '  return retired.target',
+        ),
+      () => runExpectingFailure('pnpm', unit(PROXY_TEST)),
+    ),
+    'the Arabic tree stays in the Arabic tree',
+  )
+
+  /*
+    191j. The map allowed to shadow a page the site serves.
+
+    0029 refuses a row whose source is a live treatment page by name (`redirect_source_still_live`); the
+    committed module has no trigger, so this is the only thing holding it. A row shadowing a served path
+    is a page that 301s away from itself, and the symptom is a page that "disappeared" with nothing in the
+    route code to explain it.
+  */
+  checkRejectedBy(
+    'redirects: 191j a committed row shadowing a served route is caught',
+    withEditedFile(
+      LEGACY,
+      (text) =>
+        replaceOnce(
+          text,
+          "  {\n    source: '/product-tag/massage-abu-dhabi',",
+          "  {\n    source: '/pricing',\n    target: TREATMENTS_INDEX,\n    reason: 'a row shadowing a served route, which is the defect 191j is about',\n  },\n  {\n    source: '/product-tag/massage-abu-dhabi',",
+        ),
+      () => runExpectingFailure('pnpm', unit(PROXY_TEST)),
+    ),
+    'never redirects a path the registry serves',
+  )
+
+  /*
+    191k. The importer upserts instead of refusing.
+
+    `redirect_map` is shared with the slug-change and therapist-archival rows, so an import that
+    overwrote one of those would silently undo a redirect a live page depends on — and the symptom is a
+    404 on a URL that worked yesterday, with nothing in the import's output to connect the two. The
+    acceptance line asks for the refusal to be asserted rather than the upsert, and this is the mutation
+    that assertion exists against.
+  */
+  checkRejectedBy(
+    'redirects: 191k an importer that overwrites an existing redirect is caught',
+    withEditedFile(
+      IMPORTER,
+      (text) =>
+        replaceOnce(
+          text,
+          '      if (existing.targetPath === row.targetPath) unchanged += 1\n      else conflicts.push({ sourcePath: row.sourcePath, existingTarget: existing.targetPath })\n      continue',
+          '      unchanged += 1\n      continue',
+        ),
+      // The importer's own suite, which needs a DATABASE and not a built application: a gate case whose
+      // fixture waits for `next build` is one whose failure a reader waits minutes for.
+      () =>
+        runExpectingFailure('pnpm', [
+          'exec',
+          'vitest',
+          'run',
+          '-c',
+          'vitest.integration.config.ts',
+          'packages/fixtures/src/redirects.itest.ts',
+        ]),
+    ),
+    'refuses a source that already redirects somewhere else',
+  )
+
+  /*
+    191l. The proxy stops serving the map at all.
+
+    The whole layer, removed. Every unit test about the decision still passes — they compose the three
+    functions themselves — and the site 404s every ranking URL. Only a request can see it, which is why
+    this case drives the integration suite.
+  */
+  checkRejectedBy(
+    'redirects: 191l a proxy that no longer serves the legacy map is caught',
+    withEditedFile(
+      PROXY,
+      (text) =>
+        replaceOnce(
+          text,
+          '    const retired = resolveLegacyRedirect(neutralPath(canonical))',
+          '    const retired = null as { readonly target: string } | null',
+        ),
+      /*
+        The SOURCE scan, not the served request. Only a request can see a deleted layer's effect, and this
+        application's unit tests cannot make one — `next/server` is not importable from vitest here — so
+        the integration suite is what asserts the status and the `location`, and this case fails in four
+        seconds instead of after a build. `legacy-redirects.test.ts` asserts the three functions and their
+        ORDER, which is what makes a deletion visible to it at all.
+      */
+      () => runExpectingFailure('pnpm', unit(PROXY_TEST)),
+    ),
+    'resolves the legacy map from the committed module, after canonicalising',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -62320,6 +62652,11 @@ export function chargebackNetEffectFils(`,
     // enforces "the codebase has no capability to file a return".
     'pnpm no-autofile',
     'pnpm structured-data',
+    // W-SITE-09's 301 map. Registered here in the position `pnpm verify` runs it, because that is what
+    // makes dropping it from CI a failing build rather than the silent loss of the one check that can
+    // see a ranking URL at all: nothing inside this application knows those URLs exist, so an unmapped
+    // one is a 404 no test can discover.
+    'pnpm redirects',
     'pnpm audit:online',
     'pnpm palette',
     'pnpm tokens',

@@ -11,6 +11,9 @@
  *
  * ## What it does, in this order
  *
+ * 0. **A retired legacy URL is redirected once, 301, query string and locale prefix intact.** W-SITE-09.
+ *    After canonicalisation, because the map stores one spelling and `canonicalPath` is what produces it
+ *    — asking before would mean a row per casing. See the block below.
  * 1. **Exempt paths keep their spelling.** `/admin`, `/cms-api`, `/api` and `/_next`, matched
  *    case-insensitively — see `isProxyExempt`. This runs on *every* request, including the admin's, and
  *    an unconditional normalisation here would lowercase a Payload document id and 404 a row that exists.
@@ -37,6 +40,21 @@
  *
  * ## Why the header is set here rather than in `next.config.ts`
  *
+ * ## Why the legacy map is resolved from a committed MODULE and not from `redirect_map`
+ *
+ * This file cannot reach a database — it is pure by construction, for the reason `src/session-cookie.ts`
+ * records — so a redirect that has to see the request has to be resolvable without one. W-SITE-05's
+ * treatment page predicted this layer in so many words: *"a redirect that has to see the request belongs
+ * in a layer that always does — `proxy.ts` with a snapshot of `redirect_map`, or a CDN rule generated
+ * from the same table, both of which preserve the query by default. W-SITE-09 imports the legacy
+ * WooCommerce URLs into that table and is where that layer belongs."*
+ *
+ * So the legacy baseline is `LEGACY_BASELINE` in `@berelax/core` and the importer writes the same rows
+ * into `redirect_map` for everything that CAN read it. That is one fact in two places, and
+ * `public-site.itest.ts` holds them equal by asserting every committed row is in the table with the same
+ * target. The SLUG-change and therapist-archival redirects are not here and must not be: they are rows
+ * nothing commits, and the pages that own those paths resolve them against the table themselves.
+ *
  * `next.config.ts` already carries the CMS's `x-robots-tag`, and its `headers()` takes literal source
  * patterns — which is the right shape for two fixed prefixes and the wrong shape for this one. The
  * `(admin)` route group contributes nothing to the URL, so its routes are top-level paths that share no
@@ -45,7 +63,9 @@
  * list is derived from the registry and the admin prefixes, so the default is noindex and the exception
  * is explicit.
  */
+import { resolveLegacyRedirect } from '@berelax/core'
 import { type NextRequest, NextResponse } from 'next/server'
+import { localeOf, localisedPath, neutralPath } from './src/i18n/locales.ts'
 import { requiresAdminSession } from './src/routes/admin-routes.ts'
 import {
   CANONICAL_REDIRECT_STATUS,
@@ -111,6 +131,33 @@ export function proxy(request: NextRequest): NextResponse {
     // One hop, because `canonicalPath` applies every rule at once and is idempotent: the destination
     // cannot itself need normalising, so there is no chain and no loop.
     return redirectTo(requested, canonical, CANONICAL_REDIRECT_STATUS)
+  }
+
+  /*
+    The legacy WooCommerce URLs (W-SITE-09).
+
+    Asked AFTER canonicalisation and only of a canonical path, which is what keeps the hop count at one:
+    `/Product-Category/Arabic-Massage-Abu-Dhabi/` takes the 301 above to its canonical spelling and then
+    this one to its destination — two permanent hops, both of which `route-spine.itest.ts` already asserts
+    for the doubled-slash case, and the acceptance criterion's "exactly one 301 hop" is about the
+    canonical URL a crawler holds. Asking before canonicalisation would mean a row per casing.
+
+    The LOCALE PREFIX is preserved by construction rather than by a rule: the map is keyed on the neutral
+    path, so `/ar/product/x` resolves the same row as `/product/x` and `localisedPath` puts the prefix
+    back. A map with both spellings would be two rows to keep in step, and the one that goes stale is the
+    Arabic one.
+
+    The QUERY STRING survives because `redirectTo` replaces the pathname of the URL that arrived. A
+    campaign parameter is how traffic on a retired URL is attributed, and dropping it turns a tracked
+    visit into direct traffic silently — the loss W-SITE-05's treatment page had to accept and recorded
+    for this layer to fix.
+  */
+  if (REDIRECTABLE_METHODS.has(request.method)) {
+    const locale = localeOf(canonical)
+    const retired = resolveLegacyRedirect(neutralPath(canonical))
+    if (retired !== null) {
+      return redirectTo(requested, localisedPath(retired.target, locale), CANONICAL_REDIRECT_STATUS)
+    }
   }
 
   /*

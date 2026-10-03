@@ -1612,6 +1612,9 @@ export {
 } from './repositories/reconciliation.ts'
 export {
   allRedirects,
+  type BaselineRedirect,
+  type ImportBaselineResult,
+  importBaselineRedirects,
   lookupRedirect,
   type RedirectRow,
 } from './repositories/redirects.ts'

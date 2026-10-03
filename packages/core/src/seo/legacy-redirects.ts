@@ -255,7 +255,12 @@ export function redirectMapFindings(input: RedirectMapInput): readonly RedirectM
   for (const start of bySource.keys()) {
     const seen = new Set<string>([start])
     let at = bySource.get(start)?.target
-    while (at !== undefined && sources.has(at)) {
+    // Bounded as well as `seen`-guarded, and the bound is not belt-and-braces: `seen` is what DETECTS
+    // the loop and the bound is what guarantees termination if a later edit breaks the detection. A
+    // judge that hangs is worse than one that misses — a hanging gate is a run nobody gets an answer
+    // from, and the shape of that edit (removing the `break` with the `push`) is exactly what a
+    // known-bad fixture for this rule does.
+    for (let step = 0; step <= bySource.size && at !== undefined && sources.has(at); step += 1) {
       if (seen.has(at)) {
         findings.push({
           rule: 'redirect_is_a_loop',
@@ -304,9 +309,40 @@ export function resolveLegacyRedirect(
   return rows.find((row) => row.source === normalised) ?? null
 }
 
-/** Every path the committed baseline claims ranks. The totality check's left-hand side. */
-export function baselinePaths(rows: readonly LegacyRedirect[] = LEGACY_BASELINE): readonly string[] {
-  return rows.map((row) => row.source)
+/**
+ * The paths the crawl baseline says RANK — the totality check's left-hand side.
+ *
+ * Declared separately from {@link LEGACY_BASELINE} and NOT derived from it, which is the whole mechanism.
+ * The two are different facts: this one says *these URLs have traffic*, the map says *this URL goes
+ * there*. Derived, the coverage check would be vacuous — removing a row would remove it from both sides
+ * and totality would hold over a map that had just lost a page — and that is not hypothetical: it is how
+ * the first version of this module was written, and gate case 191g is what found it.
+ *
+ * So a row deleted from the map fails `pnpm redirects` with the path printed, and removing a path from
+ * THIS list is a deliberate claim that it no longer ranks, visible as such in a diff.
+ *
+ * The content is docs/13 §6's four patterns, written as concrete paths because a pattern cannot be
+ * redirected. It is not the real crawl export — `Y1-woo-baseline` is open — and does not claim to be: the
+ * day the export lands, every path it holds that is not here is a gap this list makes visible.
+ */
+export const RANKING_PATHS: readonly string[] = Object.freeze([
+  '/product-category/arabic-massage-abu-dhabi',
+  '/product-category/thai-massage-abu-dhabi',
+  '/product-tag/massage-abu-dhabi',
+  '/product-tag/spa-abu-dhabi',
+  '/product/asian-normal-massage',
+  '/product/asian-hot-oil-balm-massage',
+  '/product/asian-morocco-bath-jacuzzi',
+  '/product/asian-massage-with-shaving',
+  '/product/arabic-normal-massage',
+  '/product/arabic-hot-oil-balm-massage',
+  '/product/arabic-morocco-bath-jacuzzi',
+  '/product/arabic-massage-with-shaving',
+])
+
+/** The ranking paths, as the totality check's left-hand side. */
+export function baselinePaths(): readonly string[] {
+  return RANKING_PATHS
 }
 
 // ------------------------------------------------------------------------------------------------
