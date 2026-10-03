@@ -148,6 +148,24 @@ export interface AdminChrome {
    */
   readonly sendBacklog: SendBacklogView | null
   readonly returnTo: string
+  /**
+   * H-HARD-01's per-response CSP nonce, for the six admin documents that carry an inline `<script>`.
+   *
+   * OPTIONAL, which is the opposite of the decision `sendBacklog` records one field up, and the reason is
+   * that the two fail in opposite directions. A missing banner is INVISIBLE — the page renders, the
+   * operator is not told the connection is dead — so it must be impossible to omit. A missing nonce is
+   * LOUD: `script-src 'nonce-…'` with no `'unsafe-inline'` refuses the script, the browser logs the
+   * violation and the control does not work the first time anybody uses it. Fail-closed and immediately
+   * visible is what makes an optional field safe here.
+   *
+   * It is also what keeps this unit from editing fifty-one `AdminChrome` literals across six other units'
+   * files and their tests. The rule is enforced by a SCAN instead — `apps/web/src/security-headers.test.ts`
+   * walks `app/(admin)` and requires every inline `<script>` to carry a `nonce=` attribute, in both
+   * directions, which is `google-reauth-banner.test.ts`'s arrangement for the banner.
+   *
+   * `adminChromeFor` reads it off the request header the proxy sets, so no document has to remember to.
+   */
+  readonly cspNonce?: string
 }
 
 /**

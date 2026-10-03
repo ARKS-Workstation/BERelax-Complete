@@ -1528,6 +1528,21 @@ export {
   recordLintPass,
   revertSurfaceTo,
 } from './repositories/publication.ts'
+/*
+  H-HARD-01's rate limit windows (0165). `recordRateLimitHit` is ONE statement — an upsert returning the
+  new count — because a read then a write is how two workers both see `hits = limit - 1` and both allow.
+  It takes an `Sql` and not a `UnitOfWork` on purpose: a counter is not an audited fact, and an audit row
+  per request on the four busiest unauthenticated endpoints would make `audit_event` a traffic log.
+*/
+export {
+  deleteRateLimitWindowsBefore,
+  type RateLimitHit,
+  type RateLimitWindowRow,
+  readRateLimitWindow,
+  readRateLimitWindows,
+  recordRateLimitHit,
+  recordRateLimitRefusal,
+} from './repositories/rate-limit.ts'
 export {
   type ClearedReassignmentFlag,
   clearReassignmentFlags,
@@ -5993,4 +6008,38 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // `pnpm sqlstate` refuses an entry for a code no migration raises. A trigger carrying a code a CHECK
 // already enforces would be a second statement of one rule.
 //
-export const SCHEMA_VERSION = 163 as const
+// 165 is 0165_rate_limit_window.sql (H-HARD-01) — one table, one function, one trigger. Mirrored in
+// `packages/db/src/schema/security.ts`.
+//
+// THE STATE IS THE OBSERVATION, and that is why there is one table rather than a counter and a log. The
+// acceptance line is that rate-limit state is server-side and survives a worker restart; the dispatch's
+// rule beside it is that an unmeasured limit is a guess. One row per (scope, key, window) holding the
+// hits, the refusals and the first and last instant answers both: it is durable, it is shared between
+// workers, and "is this ceiling right" is a `select` rather than an opinion.
+//
+// REDIS WOULD HAVE BEEN THE USUAL ANSWER AND THIS BUILD HAS NONE. docs/05 contracts no cache, and adding
+// one for a counter would be a second datastore to operate, back up and reason about consistency with. A
+// row in the database the application already has is enough for a salon's traffic, because the hot path
+// is ONE statement.
+//
+// ONE STATEMENT, NOT A READ THEN A WRITE. `recordRateLimitHit` is an upsert returning `hits`. Two
+// statements is how two workers both read `hits = limit - 1` and both allow — the defect a rate limit
+// exists to prevent, reproduced inside the rate limiter. The comparison against the ceiling stays in
+// `@berelax/shared`'s `decideRateLimit`, because folding it into SQL would be a second statement of every
+// limit in a place no test of the arithmetic can reach.
+//
+// THE WINDOW IS A COLUMN AND NOT DERIVED. `windowStartFor` floors the instant by the policy's length and
+// the result is stored, because deriving it here would be a second reading of a length this table does
+// not hold — and the two would disagree the first time somebody changed a window. It is part of the
+// primary key, so a new window is a new row and the old one survives as the measurement.
+//
+// UPDATE IS KEPT FOR THE APPLICATION ROLE, which is the one place in this estate it is: the counters ARE
+// the state. DELETE is revoked, because a caller who could delete their own window could reset their own
+// ceiling. ZY861 holds the row's IDENTITY immutable — the scope, the key and the window start may not
+// move, and the counters may only increase — so the only thing an UPDATE can do is count.
+//
+// ZY862 through ZY870 are released UNUSED and deliberately unregistered: everything else this table has
+// to say is a CHECK (the scope vocabulary, the non-negative counters, `refusals <= hits`), and
+// `pnpm sqlstate` refuses an entry for a code no migration raises.
+//
+export const SCHEMA_VERSION = 165 as const

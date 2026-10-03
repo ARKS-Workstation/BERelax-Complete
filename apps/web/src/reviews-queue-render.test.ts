@@ -111,7 +111,10 @@ const detailView = (
  * reason in one direction and failed for the wrong reason in the other.
  */
 function controlsOf(html: string): readonly string[] {
-  const body = html.split('<script>')[0] ?? ''
+  // `<script nonce=` since H-HARD-01: the admin CSP is `script-src 'nonce-…'`, so the copy script opens
+  // with the attribute and a split on `<script>` would return the WHOLE document as the body — which is
+  // the direction this helper's own header warns about.
+  const body = html.split('<script nonce=')[0] ?? ''
   return [...body.matchAll(/data-testid="([^"]+)"/g)].map((match) => match[1] ?? '').sort()
 }
 
@@ -326,7 +329,7 @@ describe('Copy reply copies the approved bytes and nothing else', () => {
     expect(html).toContain('Thank you for telling us. Please contact the salon directly.')
     // The script's source element is the APPROVED textarea. Asserted on the script, because that one
     // string is what decides which bytes reach a clipboard.
-    const script = html.split('<script>')[1] ?? ''
+    const script = html.split('<script nonce=')[1] ?? ''
     // Labelled, because gate 158d breaks exactly this line and a gate's known-bad fixture has to fail
     // by the NAME of the rule rather than by a diff of two selectors (ADR 0003).
     expect(script, 'copy-reads-the-approved-text').toContain('[data-testid="reply-approved"]')

@@ -6,6 +6,7 @@ import {
   type AdminChrome,
   renderAdminBanner,
 } from '../../../../src/components/admin/google-reauth-banner.ts'
+import { inlineScriptTag } from '../../../../src/security/inline-script.ts'
 
 /**
  * The pipeline board, as HTML (C-AUTO-08).
@@ -541,7 +542,7 @@ export function renderPipelineHtml(view: PipelineView): string {
     `<div class="board" data-testid="pipeline-board">${view.board.columns.map(columnElement).join('')}</div>`,
     moveForm(view),
     '</main>',
-    `<script>${PIPELINE_SCRIPT}</script>`,
+    inlineScriptTag(view.chrome.cspNonce, PIPELINE_SCRIPT),
     '</body>',
     '</html>',
   ].join('\n')

@@ -1,6 +1,7 @@
 import { loadConfig } from '@berelax/config'
 import type { Instant } from '@berelax/core'
 import { createConnection } from '@berelax/db'
+import { takeRateLimit, withRateLimitHeaders } from '../../../../src/security/rate-limit.ts'
 import { type BookingEndpointDeps, handleBookingRequest } from './handler.ts'
 
 /**
@@ -47,5 +48,12 @@ function bookingRuntime(): BookingEndpointDeps {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  return await handleBookingRequest(bookingRuntime(), request)
+  // H-HARD-01: the ceiling, before the work. The `booking` scope, which is the SAME scope `/api/v1/book`
+  // takes and deliberately not one of its own: this endpoint and that one are the same operation under two
+  // spellings, and two ceilings over one operation is two ways to be wrong about it. A caller who hit the
+  // flow endpoint twenty times does not get twenty more here.
+  const limit = await takeRateLimit({ scope: 'booking', request, nowIso: new Date().toISOString() })
+  if (limit.kind === 'refused') return limit.response
+  const response = await handleBookingRequest(bookingRuntime(), request)
+  return withRateLimitHeaders(response, limit.headers)
 }

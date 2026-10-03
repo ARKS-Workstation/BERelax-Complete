@@ -33,6 +33,7 @@ import {
   type AdminChrome,
   renderAdminBanner,
 } from '../../../../../src/components/admin/google-reauth-banner.ts'
+import { inlineScriptTag } from '../../../../../src/security/inline-script.ts'
 
 /**
  * The body the editor opens with: docs/04 §5's worked example, 150 Arabic characters.
@@ -316,7 +317,7 @@ export function renderEditorHtml(body: string, chrome: AdminChrome): string {
     '<h2>How it splits</h2>',
     `<pre class="split" data-figure="split">${safeText(figures.split)}</pre>`,
     '</main>',
-    `<script>${EDITOR_SCRIPT}</script>`,
+    inlineScriptTag(chrome.cspNonce, EDITOR_SCRIPT),
     '</body>',
     '</html>',
   ].join('')

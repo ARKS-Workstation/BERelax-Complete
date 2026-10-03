@@ -1,4 +1,5 @@
 import { safeText } from '@berelax/core'
+import { inlineScriptTag } from '../../../../src/security/inline-script.ts'
 import { FALLBACK_MODE_NOTE, reviewsBanner, reviewsDocumentHead } from '../document.ts'
 import { escalationHtml, withDirection } from '../render.ts'
 import {
@@ -267,7 +268,7 @@ export function renderReviewDetailHtml(view: ReviewDetailView): string {
           approvedPanel(view),
         ].join(''),
     '</main>',
-    `<script>${COPY_SCRIPT}</script>`,
+    inlineScriptTag(view.chrome.cspNonce, COPY_SCRIPT),
     '</body>',
     '</html>',
   ].join('')

@@ -61549,6 +61549,328 @@ export function chargebackNetEffectFils(`,
   )
 }
 
+// 197a-197z. (H-HARD-01) The header policy, the nonce and the ceilings, each shown to be able to go
+//            blind. The unit's claim is that EVERY response carries the header set, that a CSP violation
+//            is REFUSED rather than reported, and that every unauthenticated endpoint takes a ceiling
+//            whose state is a row. Five things defend it — `scripts/check-headers.mjs`, the policy
+//            builder, the proxy's single `secured(` wrapper, the cookie declaration table, and the one
+//            upsert that counts — and each case here removes one and requires the check to say so.
+//
+//            Every mutation leaves a system that WORKS, and four of them look like improvements: a
+//            report-only policy "so we can see violations before enforcing", a bare inline script that
+//            runs fine on the public estate, a ceiling moved one off so the limit is "exactly N", a
+//            cookie builder written beside the thing that needs the cookie.
+//
+//            197a to 197h are the scan and the unit suite and are fast. 197i to 197k drive the browser
+//            and the database.
+{
+  const HEADERS_TS = 'apps/web/src/security/headers.ts'
+  const HEADERS_TEST = 'apps/web/src/security-headers.test.ts'
+  const HEADERS_ITEST = 'apps/web/src/security-headers.itest.ts'
+  const COOKIES_TS = 'apps/web/src/security/cookies.ts'
+  const BOOK_ROUTE = 'apps/web/app/api/v1/book/route.ts'
+  const OTP_REPOSITORY = 'packages/db/src/repositories/otp.ts'
+  const PROXY_TS = 'apps/web/proxy.ts'
+  const RATE_LIMIT_SHARED = 'packages/shared/src/rate-limit.ts'
+  const RATE_LIMIT_REPOSITORY = 'packages/db/src/repositories/rate-limit.ts'
+  const RATE_LIMIT_ITEST = 'apps/web/src/rate-limit.itest.ts'
+
+  const headerUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const headerIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // The control for the whole block. Every case asserts that a BROKEN tree is caught, and that says
+  // nothing unless the committed tree passes.
+  {
+    const clean = run('pnpm', ['headers'])
+    check(
+      'headers: the header scan passes on the committed tree, which is the control for 197a to 197h',
+      !clean.failed,
+      `pnpm headers does not pass on the committed tree:\n${clean.output}`,
+    )
+    const unit = run('pnpm', headerUnit(HEADERS_TEST))
+    check(
+      'headers: the committed header suite passes, which is the control for 197i',
+      !unit.failed,
+      `the security-headers suite does not pass on the committed tree:\n${unit.output}`,
+    )
+  }
+
+  /*
+    197a. An unauthenticated endpoint added and nobody looked.
+
+    The shape the hole really arrives in. Nothing is removed and nothing is broken: a route is added, it
+    works, it is unauthenticated, and it writes. The scan's job is to refuse an endpoint it has never been
+    told about rather than to notice a missing call — which is the direction that makes every other rule
+    in the file mean something.
+  */
+  checkRejectedBy(
+    'headers: 197a an api route in neither classification is caught',
+    withFixture(
+      // `apps/web/app/api/v1/route.ts`, which is a real route path with no file today — `withFixture`
+      // writes a file and does not create directories, and a fixture directory left behind would be read
+      // by the next `tsc` in a package nobody touched.
+      'apps/web/app/api/v1/route.ts',
+      [
+        "export const dynamic = 'force-dynamic'",
+        '',
+        'export async function POST(request: Request): Promise<Response> {',
+        '  const body = await request.text()',
+        '  return new Response(body, { status: 201 })',
+        '}',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', ['headers']),
+    ),
+    'api-route-without-a-classification',
+  )
+
+  /*
+    197b. The ceiling taken off an endpoint that is declared to have one.
+
+    A refactor removes the two lines; the endpoint still answers 200 and every test of what it DOES still
+    passes. The only symptom is a bill, or a slot enumeration nobody noticed.
+  */
+  checkRejectedBy(
+    'headers: 197b a declared endpoint that stopped taking its ceiling is caught',
+    withEditedFile(
+      BOOK_ROUTE,
+      (source) =>
+        replaceOnce(
+          source,
+          "  const limit = await takeRateLimit({ scope: 'booking', request, nowIso: new Date().toISOString() })\n  if (limit.kind === 'refused') return limit.response\n",
+          '',
+        ),
+      () => runExpectingFailure('pnpm', ['headers']),
+    ),
+    'unauthenticated-endpoint-without-a-ceiling',
+  )
+
+  /*
+    197c. A report-only policy.
+
+    The one that arrives with the best intentions: ship it report-only, watch the violations, enforce it
+    later. The header name is the whole difference between a control and a mailing list, and "later" is
+    the part nobody schedules.
+  */
+  checkRejectedBy(
+    'headers: 197c a report-only content-security-policy is caught',
+    withFixture(
+      'apps/web/src/__gate_fixture__report-only.ts',
+      [
+        'export function headersFor(policy: string): Record<string, string> {',
+        "  return { 'content-security-policy-report-only': policy }",
+        '}',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', ['headers']),
+    ),
+    'csp-is-report-only',
+  )
+
+  /*
+    197d. A bare inline script in an admin document.
+
+    Under the nonce policy this script does not run, so the mutation produces a DEAD FEATURE rather than a
+    hole — which is why it needs a scan: nothing throws, nothing 500s, and the button simply does nothing
+    for the one operator who presses it.
+  */
+  checkRejectedBy(
+    'headers: 197d an un-nonced inline script in an admin document is caught',
+    withFixture(
+      'apps/web/app/(admin)/__gate_fixture__bare-script.ts',
+      [
+        'export function panel(): string {',
+        '  return [',
+        "    '<section>',",
+        '    \'<script>document.title = "ready"</script>\',',
+        "    '</section>',",
+        "  ].join('')",
+        '}',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', ['headers']),
+    ),
+    'inline-script-without-a-nonce',
+  )
+
+  /*
+    197e. A cookie builder written beside the thing that needs the cookie.
+
+    Which is where a sixth cookie would really be written, by a unit that never opens
+    `security/cookies.ts`. The acceptance line's claim is about the SET — *no cookie in the app escapes
+    those flags* — so an undeclared cookie is the one the claim is about.
+  */
+  checkRejectedBy(
+    'headers: 197e a Set-Cookie builder with no declaration is caught',
+    withFixture(
+      'apps/web/src/__gate_fixture__cookie.ts',
+      [
+        'export function rememberLocale(locale: string): string {',
+        "  return [`berelax_locale=${locale}`, 'Path=/', 'SameSite=Lax'].join('; ')",
+        '}',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', ['headers']),
+    ),
+    'set-cookie-builder-without-a-declaration',
+  )
+
+  /*
+    197f. A proxy return that skips the header set.
+
+    The 308 for an exempt path with a trailing slash — the least interesting response in the file, and
+    therefore the one a refactor would drop the wrapper from. A redirect is a response a browser acts on.
+  */
+  checkRejectedBy(
+    'headers: 197f a proxy return that skips the header set is caught',
+    withEditedFile(
+      PROXY_TS,
+      (source) =>
+        replaceOnce(
+          source,
+          ': secured(redirectTo(requested, trimmed, METHOD_PRESERVING_REDIRECT_STATUS))',
+          ': redirectTo(requested, trimmed, METHOD_PRESERVING_REDIRECT_STATUS)',
+        ),
+      () => runExpectingFailure('pnpm', ['headers']),
+    ),
+    'proxy-return-without-the-header-set',
+  )
+
+  /*
+    197g. The ceiling the OTP exemption points at, renamed.
+
+    H-HARD-01 removed its own OTP counter because A-FIRST-02 already had one, and the exemption that
+    records that decision names the constant. This is the mutation that would make the exemption a lie:
+    the constant moves, the endpoint is unlimited, and the scan still says seven routes are classified.
+  */
+  checkRejectedBy(
+    'headers: 197g an own_rate_limit exemption whose constant has moved is caught',
+    withEditedFile(
+      OTP_REPOSITORY,
+      // Both occurrences — the declaration and its one use. Renaming only the declaration left the
+      // name in the file, and the scan greps the file: the first draft of this case passed because the
+      // constant it had "moved" was still mentioned two hundred lines below.
+      (source) => source.replaceAll('OTP_MAX_REQUESTS_PER_IP', 'OTP_IP_CAP'),
+      () => runExpectingFailure('pnpm', ['headers']),
+    ),
+    'unauthenticated-endpoint-without-a-ceiling',
+  )
+
+  /*
+    197h. A cookie that quietly stopped claiming a flag.
+
+    The table's whole value is that a missing flag is either carried or ARGUED, so the mutation is a
+    declaration that drops one and says nothing — which is how an exception table becomes a list of
+    everything: not by somebody arguing badly, but by somebody deleting a line. The visitor cookie and not
+    the admin one, because the admin one has its own refusal (`cookieTableProblems` excuses no session
+    cookie for missing `HttpOnly`) and this case is about the general rule.
+  */
+  checkRejectedBy(
+    'headers: 197h a cookie declaration that drops a flag with no reason is caught',
+    withEditedFile(
+      COOKIES_TS,
+      (source) =>
+        replaceOnce(
+          source,
+          "    builder: 'apps/web/app/api/collect/ingest.ts',\n    flags: ['httpOnly', 'secure', 'sameSiteLax', 'pathRoot'],",
+          "    builder: 'apps/web/app/api/collect/ingest.ts',\n    flags: ['secure', 'sameSiteLax', 'pathRoot'],",
+        ),
+      () => runExpectingFailure('pnpm', ['headers']),
+    ),
+    'header-scan-is-stale',
+  )
+
+  /*
+    197i. The nonce replaced by `'unsafe-inline'`.
+
+    The policy still has a `script-src`, the header is still enforced, and every structural check passes —
+    `check-headers.mjs` reads the proxy and the documents, not the directive's contents. What is gone is
+    the only thing the directive was for. The unit suite is what notices, which is why the mutation is
+    required to fail it BY CASE NAME rather than merely to fail something.
+  */
+  checkRejectedBy(
+    'headers: 197i a script-src that permits any inline script is caught by the unit suite',
+    withEditedFile(
+      HEADERS_TS,
+      (source) =>
+        replaceOnce(
+          source,
+          "  const scriptSrc = group === 'admin' ? `'nonce-${nonce}'` : PUBLIC_SCRIPT_SRC",
+          '  const scriptSrc = PUBLIC_SCRIPT_SRC',
+        ),
+      () => runExpectingFailure('pnpm', headerUnit(HEADERS_TEST)),
+    ),
+    'refuses an un-nonced inline script and permits a nonced one, on the admin group',
+  )
+
+  /*
+    197j. The same mutation, against a real browser.
+
+    197i proves this repository's own reading of its policy noticed. This proves a BROWSER did — which is
+    the claim the unit actually makes, and the one a header-string assertion cannot make at all. If this
+    case ever passes while 197i fails, the browser suite has stopped loading the real policy.
+  */
+  checkRejectedBy(
+    'headers: 197j a script-src that permits any inline script is caught by the browser suite',
+    withEditedFile(
+      HEADERS_TS,
+      (source) =>
+        replaceOnce(
+          source,
+          "  const scriptSrc = group === 'admin' ? `'nonce-${nonce}'` : PUBLIC_SCRIPT_SRC",
+          '  const scriptSrc = PUBLIC_SCRIPT_SRC',
+        ),
+      () => runExpectingFailure('pnpm', headerIntegration(HEADERS_ITEST)),
+    ),
+    'refuses the un-nonced inline script and runs the nonced one',
+  )
+
+  /*
+    197k. The boundary moved one off.
+
+    `hits <= limit` becomes `hits < limit`, which reads like a correction — "a limit of twenty should
+    permit twenty" is precisely what the mutation breaks, and the arithmetic looks more careful afterwards.
+    A limit one lower than the figure it documents is the quietest possible version of this bug: nothing
+    fails, and the first symptom is a customer who cannot book.
+  */
+  checkRejectedBy(
+    'headers: 197k a rate-limit boundary moved one off is caught',
+    withEditedFile(
+      RATE_LIMIT_SHARED,
+      (source) =>
+        replaceOnce(source, '  if (hits <= policy.limit) {', '  if (hits < policy.limit) {'),
+      () => runExpectingFailure('pnpm', headerIntegration(RATE_LIMIT_ITEST)),
+    ),
+    'permits exactly the policy limit and refuses the next one',
+  )
+
+  /*
+    197l. The refusal stops recording itself.
+
+    The limit still works perfectly: requests are counted, the ceiling fires, the 429 goes out. What is
+    gone is the MEASUREMENT — `refusals` stays zero, so the table says this ceiling never fired and the
+    question "is this figure right" is unanswerable. An unmeasured limit is a guess (brief rule 15), and
+    this is the mutation that turns a measured one back into one.
+  */
+  checkRejectedBy(
+    'headers: 197l a refusal that no longer records itself is caught',
+    withEditedFile(
+      RATE_LIMIT_REPOSITORY,
+      (source) =>
+        replaceOnce(
+          source,
+          '  await sql`\n    update rate_limit_window\n       set refusals = refusals + 1',
+          '  if (args.scope !== undefined) return\n  await sql`\n    update rate_limit_window\n       set refusals = refusals + 1',
+        ),
+      () => runExpectingFailure('pnpm', headerIntegration(RATE_LIMIT_ITEST)),
+    ),
+    'records the traffic and the refusals separately',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -62402,6 +62724,7 @@ export function chargebackNetEffectFils(`,
     // what makes dropping it from CI a failing build rather than the silent loss of the one check that
     // says no payment is held in a browser to be tried later.
     'pnpm offline-money',
+    'pnpm headers',
     'pnpm private-documents',
     // A-MEAS-01's egress guard, in the position `pnpm verify` runs it. Registered here because that is what
     // makes dropping it from CI a failing build rather than the silent loss of the one check that says

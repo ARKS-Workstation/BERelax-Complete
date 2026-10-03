@@ -227,6 +227,24 @@ export {
   rightsSlaDaysSchema,
   rightsSupervisoryAuthoritySchema,
 } from './privacy.ts'
+/*
+  H-HARD-01's public-endpoint rate limits. The policy, the decision and the headers are here because
+  `@berelax/db` holds the counter and `apps/web` holds the endpoints, and this is the package both may see.
+*/
+export {
+  decideRateLimit,
+  RATE_LIMIT_OPEN_QUESTION,
+  RATE_LIMIT_POLICIES,
+  RATE_LIMIT_RETENTION_DAYS,
+  RATE_LIMIT_SCOPES,
+  type RateLimitDecision,
+  type RateLimitPolicy,
+  type RateLimitScope,
+  type RateLimitWindow,
+  rateLimitHeaders,
+  rateLimitKey,
+  windowStartFor,
+} from './rate-limit.ts'
 export {
   DEFAULT_REMINDER_OFFSETS_HOURS,
   MAX_REMINDER_OFFSET_HOURS,

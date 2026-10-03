@@ -129,7 +129,10 @@ describe('the document', () => {
     // The claim that keeps the browser from becoming a second implementation of the rule. `segmentSms`
     // and the two capacities must not appear in the inline script at all — if they ever do, the author's
     // preview and the vendor's bill can differ.
-    const script = html.slice(html.lastIndexOf('<script>'))
+    // `<script nonce=` since H-HARD-01's nonce CSP. A slice from `<script>` would find nothing and the
+    // assertions below would all pass about the empty string, which is the vacuous direction.
+    const script = html.slice(html.lastIndexOf('<script nonce='))
+    expect(script.length).toBeGreaterThan(100)
     expect(script).toContain('data-figure=')
     expect(script).not.toContain('160')
     expect(script).not.toContain('153')

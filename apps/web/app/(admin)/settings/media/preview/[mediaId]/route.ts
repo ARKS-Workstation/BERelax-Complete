@@ -18,6 +18,7 @@ import {
 } from '../../../../../../src/media/publish-gate.ts'
 import { appMediaStorage } from '../../../../../../src/media/storage.ts'
 import { appPayload, principalForRequest } from '../../../../../../src/payload/request-principal.ts'
+import { CSP_NONCE_HEADER } from '../../../../../../src/security/headers.ts'
 import { guardAdminRoute } from '../../../../../../src/session.ts'
 
 /**
@@ -143,9 +144,14 @@ export async function GET(
       }
     })
 
+    const nonce = request.headers.get(CSP_NONCE_HEADER)
     const assessment = await assessMediaForPublication(payload, mediaId, { ...principal })
     const publishPermitted = mayOperateOnCollection(principal.role, 'publish')
     const view: BreakpointPreviewView = {
+      // H-HARD-01: the nonce the proxy minted for this response, so this document's inline script can
+      // carry it. Spread because `exactOptionalPropertyTypes` makes an explicit `undefined` a different
+      // thing from an absent key, and absent is the honest state when no proxy ran.
+      ...(nonce === null ? {} : { cspNonce: nonce }),
       media: { mediaId, contentHash: set.contentHash, slot: set.slot },
       slotLabel: slot.label,
       alt: subject.alt,

@@ -26,7 +26,11 @@ import type { DaySheetAppointmentView, DaySheetPageView } from './render.ts'
  * Times in the business zone, 24-hour.
  *
  * `hour12: false` is not a style choice on a sheet whose whole subject is that the session crosses
- * midnight: `1:30 am` and `01:30` are read differently at 02:00 by somebody counting rooms.
+ * midnight: `1:30 am` and `01:30` are read differently at two in the morning by somebody counting rooms.
+ *
+ * The close hour is deliberately not written anywhere in this file as a literal. It lives in
+ * `premises_hours`, `packages/db/src/seed/premises.test.ts` refuses it in any rendered surface, and that
+ * scan reads the file's text rather than its code — so prose about the hour trips it too, which it did.
  */
 const DUBAI_TIME = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'Asia/Dubai',
@@ -80,8 +84,9 @@ export function daySheetViewFor(args: {
           After midnight means the treatment's own wall-clock DATE is not the trading date.
 
           Compared as dates rather than against a clock hour, because "after midnight" is not "before
-          02:00": a session's close is `business_day.closes_at` and an override can move it, so a rule
-          keyed on 02:00 would mark the wrong rows the first time somebody shortens a Ramadan evening.
+          closing": a session's close is `business_day.closes_at` and an override can move it, so a rule
+          keyed on a fixed close hour would mark the wrong rows the first time somebody shortens a
+          Ramadan evening.
         */
         afterMidnight: DUBAI_DATE.format(new Date(appointment.treatment.startsAt)) !== tradingDate,
       }),

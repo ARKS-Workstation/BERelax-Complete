@@ -4,6 +4,7 @@ import {
   ADMIN_BANNER_CSS,
   renderAdminBanner,
 } from '../../../src/components/admin/google-reauth-banner.ts'
+import { inlineScriptTag } from '../../../src/security/inline-script.ts'
 import {
   QUICK_BOOK_FIELDS,
   type QuickBookView,
@@ -593,7 +594,7 @@ export function renderQuickBookHtml(view: QuickBookView): string {
     ratePanel(view),
     assumptionsPanel(view),
     '</main>',
-    `<script>${QUICK_BOOK_SCRIPT}</script>`,
+    inlineScriptTag(view.chrome.cspNonce, QUICK_BOOK_SCRIPT),
     '</body>',
     '</html>',
   ].join('\n')

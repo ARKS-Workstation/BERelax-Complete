@@ -13,6 +13,7 @@ import {
   isGooglePublishingStatus,
 } from '@berelax/google'
 import { alertDefinition, RECONNECT_SCREEN_PATH } from '@berelax/shared'
+import { CSP_NONCE_HEADER } from '../../security/headers.ts'
 import type { AdminChrome } from './google-reauth-banner.ts'
 import type { SendBacklogView } from './messages-delayed-banner.ts'
 
@@ -123,6 +124,7 @@ export async function adminChromeFor(args: {
   readonly request: Request
 }): Promise<AdminChrome> {
   const url = new URL(args.request.url)
+  const nonce = args.request.headers.get(CSP_NONCE_HEADER)
   return {
     googleReauth: await googleReauthBannerFor({ sql: args.sql, now: args.now }),
     // The trading date is not needed by this observer and is still supplied rather than faked, because
@@ -135,5 +137,18 @@ export async function adminChromeFor(args: {
       tradingDate: new Date(args.now).toISOString().slice(0, 10),
     }),
     returnTo: parseReturnPath(`${url.pathname}${url.search}`) ?? RECONNECT_SCREEN_PATH,
+    /*
+      H-HARD-01's CSP nonce, read off the request header the proxy set.
+
+      Read HERE and in no document, which is the whole reason it is on `AdminChrome`: the six admin
+      documents that carry an inline `<script>` take their nonce from the chrome they already build, so
+      none of them has to know where it came from.
+
+      Spread rather than assigned, because `exactOptionalPropertyTypes` makes an explicit `undefined`
+      different from an absent key — and the absence is the honest state for a handler driven directly by
+      a test, where no proxy ran. The script then carries `nonce=""`, which the policy refuses: fail
+      closed, and visibly, which is the argument the field's own comment makes.
+    */
+    ...(nonce === null ? {} : { cspNonce: nonce }),
   }
 }

@@ -2,6 +2,7 @@ import { loadConfig } from '@berelax/config'
 import type { Clock, Instant } from '@berelax/core'
 import { createConnection } from '@berelax/db'
 import { webhookSigningSecretFrom } from '@berelax/payments'
+import { takeRateLimit, withRateLimitHeaders } from '../../../../src/security/rate-limit.ts'
 import { handlePaymentWebhookRequest, type WebhookRouteDeps } from './ingest.ts'
 
 /**
@@ -57,5 +58,20 @@ function webhookRuntime(): WebhookRouteDeps {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  return await handlePaymentWebhookRequest(webhookRuntime(), request)
+  /*
+    H-HARD-01, and the ceiling here is a flood guard rather than a throttle.
+
+    A gateway retries, sometimes hard, and refusing its delivery is how an event is LOST — the quietest
+    failure in the payments estate (ADR 0101). So the limit is ten a second, far above any real
+    settlement burst, and the signature check inside the handler is the gate that matters. It fails
+    towards permitting, deliberately.
+  */
+  const limit = await takeRateLimit({
+    scope: 'payment_webhook',
+    request,
+    nowIso: new Date().toISOString(),
+  })
+  if (limit.kind === 'refused') return limit.response
+  const response = await handlePaymentWebhookRequest(webhookRuntime(), request)
+  return withRateLimitHeaders(response, limit.headers)
 }

@@ -21162,7 +21162,7 @@ units:
       plus server-side rate limits and enumeration resistance on every unauthenticated endpoint: booking,
       OTP, /api/collect and the payment webhook.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - A-FIRST-01
@@ -21202,12 +21202,141 @@ units:
       per-phone and per-IP limits return 429 after the configured attempts on /api booking, OTP, /api/collect
       and the payment webhook
     - rate-limit state is server-side and survives a worker restart, proven by an integration test
+    - 'NOTE: `apps/web/middleware.ts` in the planned file list does not exist. Next 16.3 renamed the convention and
+      the repository uses `apps/web/proxy.ts`, whose export must be named `proxy`; `withSecurityHeaders` is
+      applied on every one of its five return paths, and `scripts/check-headers.mjs` rule 6 refuses a response
+      constructed on a line that does not also call `secured(`.'
+    - 'NOTE: acceptance 1 is asserted route by route against the REAL `proxy()` over the REAL registry - 94
+      registry paths, each checked for all six headers and for the policy its group calls for - in a unit test
+      rather than against a server, because `proxy` is a pure function of a `NextRequest` and 200-odd requests to
+      `next start` for a claim about six header values would be an unreasonable use of a build. The route-by-route
+      claim is therefore total rather than a sample, and the redirect and the login refusal are included because a
+      301 is a response a browser acts on.'
+    - 'NOTE: acceptance 2''s fixture is gate block 197, split in two from one mutation (`script-src` loses its
+      nonce): 197i requires the UNIT suite to refuse it and 197j requires the BROWSER suite to. 197i proves this
+      repository''s reading of its own policy noticed; 197j proves a browser did. The report-only spelling is
+      served as a CONTROL in `security-headers.itest.ts` and asserts the un-nonced script DOES run, without which
+      the enforced case is consistent with a browser refusing inline scripts for some other reason entirely.'
+    - 'NOTE: acceptance 3''s `host-prefixed` was APPLIED, driven at a real Chromium, refused and reverted. Chromium
+      stores neither a `Secure` cookie nor a `__Host-` one from a `Set-Cookie` at `http://127.0.0.1`, and stores
+      BOTH at `http://localhost`: the exception permitting a `Secure` cookie over plain HTTP is written against
+      the hostname and not the loopback address, and `startWebServer` hands twelve admin suites the address. The
+      three properties the prefix ENFORCES - `Secure`, `Path=/`, no `Domain` - are asserted instead, off the
+      cookie a browser actually stored, and both halves of the finding are integration cases so they fail the day
+      the harness serves HTTPS. See ADR 0119 decision 5.'
+    - 'NOTE: this also corrects a sentence in three files. `adminSessionCookie`, `visitorCookie` and
+      `analyticsConsentCookie` each set `Secure` unconditionally and justify it by saying browsers treat
+      `127.0.0.1` as a secure context so the suites need nothing dropped; for cookies in Chromium that is false.
+      The DECISION survives and its argument is now the measured one: no suite relies on a browser storing these
+      cookies from a response - `installAdminCookie` adds a request header, which no cookie rule governs, and
+      `installAdminBrowserCookie` reaches the jar over CDP, which is not held to the scheme rule.'
+    - 'NOTE: acceptance 3''s `no cookie in the app escapes those flags` is `COOKIE_DECLARATIONS` plus a filesystem
+      scan, because the claim is about a SET that grows: five assertions beside five builders cannot catch the
+      sixth cookie, written by a unit that never opens the table. Three of the five miss a flag deliberately and
+      each carries a length-checked argument; `HttpOnly` on a session cookie is the one flag no reason excuses.
+      Checked in BOTH directions - a cookie that silently GAINED `HttpOnly` would break the consent gate in the
+      browser, and the only symptom would be a tag that stopped loading.'
+    - 'NOTE: acceptance 4''s OTP halves are A-FIRST-02''s and were already proved: `otp-route.itest.ts` asserts the
+      identical status, body and timing for a known and an unknown number, the 429 for
+      `OTP_MAX_REQUESTS_PER_PHONE` and the 429 for `OTP_MAX_REQUESTS_PER_IP`, each with an `otp.rate_limited`
+      audit row, over `otp_challenge` rows in PostgreSQL. This unit added a second per-IP counter of the same
+      figure, 10, in `rate_limit_window` and REMOVED it: two counters over one operation disagree the first time
+      one is tuned, after which the documented constant keeps a passing test and decides nothing. `/api/v1/otp` is
+      classified `own_rate_limit` by the scan, which NAMES the constant and fails if it moves (gate 197g).'
+    - 'NOTE: acceptance 4''s four named endpoints became SEVEN, by CLASS rather than by URL. `/api/v1/bookings`
+      shares the `booking` scope with `/api/v1/book` (one operation under two spellings), and
+      `/api/v1/consent/analytics`, `/api/v1/payments/intent` and `/api/whatsapp` are unauthenticated writes the
+      line does not name but is plainly about - each at a high ceiling that fails towards PERMITTING, with its
+      reason and its direction written beside it. The scan''s second rule refuses any `app/api` route in neither
+      list, so an endpoint added later is a failed gate rather than a bill.'
+    - 'NOTE: `/api/collect` keeps A-FIRST-03''s existing in-process per-VISITOR burst limiter (50 per second, keyed
+      on the cookie and deliberately not on an address, for a stated PDPL reason) and gains a server-side per-IP
+      window beside it. They are different claims: acceptance 5 asks for state that survives a worker restart and
+      an in-process `Map` does not. DEFECT recorded: that limiter''s `ANONYMOUS_BUCKET` is shared by every
+      cookieless caller, so one caller can exhaust the ceiling for all of them.'
+    - 'NOTE: the public group''s `script-src` is UNCHANGED at `''self'' ''unsafe-inline''` and labelled
+      `Y13-public-csp`, a new row in docs/OPEN-QUESTIONS.md. Next''s App Router emits an un-nonced inline RSC
+      bootstrap into every rendered page and a nonce makes `''unsafe-inline''` IGNORED, so tightening it needs
+      Next''s own nonce integration plus `next build` and a browser. Both alternatives were refused in writing: an
+      unverified strict policy takes the public site down, and a report-only one looks complete and refuses
+      nothing. An integration case asserts the CURRENT state, so the day somebody tightens it the case fails and
+      points at the row.'
+    - 'NOTE: `AdminChrome.cspNonce` is OPTIONAL with a written reason rather than required. Making it required
+      meant editing 51 `AdminChrome` literals in other units'' files to add a field; a missing nonce fails closed
+      and loudly, because the script simply does not run. Presence is enforced structurally instead:
+      `scripts/check-headers.mjs` rule 4 refuses a bare executable `<script>` anywhere in `app/(admin)`, and
+      counts the `inlineScriptTag(` call sites as its vacuity guard. Non-executable data blocks
+      (`application/json`, `application/ld+json`) are exempt, because `script-src` does not govern them and a
+      nonce on one would mean nothing.'
+    - 'NOTE: retention. `rate_limit_window`''s key is a caller''s IP address, which is personal data under the
+      PDPL, and the proportionality argument for holding one covers the length of a window rather than for ever.
+      `RATE_LIMIT_RETENTION_DAYS = 14` holds the bound and the reasoning, `deleteRateLimitWindowsBefore` is the
+      sweep, and both are proved by integration cases - including the control that `berelax_app` holds no DELETE
+      at all, so a caller cannot reset their own ceiling. NOTHING SCHEDULES THE SWEEP YET and the module says so
+      rather than implying a cron: C-CRM-10''s retention pass is driven by a retention profile and legal holds,
+      which is a different machine. Recorded as the second half of `Y13-rate-limits`.'
+    - 'NOTE: DEFECT in another estate''s cookie, reported rather than edited. `bookSessionCookie`''s `Secure` is a
+      parameter dropped outside production, justified by the same false premise about `127.0.0.1` - and unlike the
+      admin cookie''s, that parameter may genuinely be load-bearing, because the booking suites drive that origin
+      through a browser and would receive the cookie from a real response. Fixing it is a change to the public
+      booking flow''s session cookie and its six suites, which belongs to the unit that owns the flow. Declared as
+      an exception in `COOKIE_DECLARATIONS` with the whole reasoning.'
+    - 'NOTE: allocations. Migration 0165 USED; 0163 was used by P-HR-14 and 0164 is RELEASED UNUSED. ADR 0119 USED.
+      Gate block `// 197a-197z` USED - 197a to 197l, twelve cases plus two controls - inserted before `// 79a-79k`
+      in category order. SQLSTATE ZY861 USED; ZY862 to ZY870 RELEASED UNUSED and deliberately unregistered,
+      because `pnpm sqlstate` refuses an entry for a code no migration raises. Port band `security-headers` `{
+      start: 23_900, width: 300 }` USED by `security-headers.itest.ts`. `SCHEMA_VERSION` is 165, the highest on
+      disk in this tree; the next-free sentence is the integrator''s. The new `pnpm headers` step entered gate
+      case 29''s list, `pnpm verify` and the CI workflow in the same commit.'
     files:
-    - apps/web/middleware.ts
+    - apps/web/proxy.ts
     - apps/web/src/security/headers.ts
+    - apps/web/src/security/cookies.ts
+    - apps/web/src/security/inline-script.ts
+    - apps/web/src/security/rate-limit.ts
+    - apps/web/src/security-headers.test.ts
+    - apps/web/src/security-headers.itest.ts
+    - apps/web/src/rate-limit.itest.ts
+    - apps/web/src/session-cookie.ts
+    - apps/web/src/components/admin/google-reauth-banner.ts
+    - apps/web/src/components/admin/google-reauth-source.ts
+    - apps/web/src/components/admin/breakpoint-preview.ts
+    - apps/web/app/(admin)/calendar/render.ts
+    - apps/web/app/(admin)/crm/pipeline/render.ts
+    - apps/web/app/(admin)/messaging/templates/editor/render.ts
+    - apps/web/app/(admin)/quick-book/render.ts
+    - apps/web/app/(admin)/reviews/[id]/render.ts
+    - apps/web/app/(admin)/till/render.ts
+    - apps/web/app/(admin)/settings/media/preview/[mediaId]/route.ts
+    - apps/web/app/api/collect/route.ts
+    - apps/web/app/api/v1/book/route.ts
+    - apps/web/app/api/v1/bookings/route.ts
+    - apps/web/app/api/v1/consent/analytics/route.ts
+    - apps/web/app/api/v1/otp/route.ts
+    - apps/web/app/api/v1/payments/intent/route.ts
+    - apps/web/app/api/webhooks/payments/route.ts
+    - apps/web/app/api/whatsapp/route.ts
     - packages/shared/src/rate-limit.ts
+    - packages/shared/src/index.ts
+    - packages/db/migrations/0165_rate_limit_window.sql
+    - packages/db/src/repositories/rate-limit.ts
+    - packages/db/src/schema/security.ts
+    - packages/db/src/schema/index.ts
+    - packages/db/src/sqlstate-registry.ts
+    - packages/db/src/index.ts
+    - packages/harness/src/ports.ts
     - scripts/check-headers.mjs
     - scripts/test-gates.mjs
+    - package.json
+    - .github/workflows/ci.yml
+    - docs/adr/0119-the-csp-is-only-real-if-a-browser-refuses-it-and-a-second-ceiling-on-one-endpoint-is-the-defect.md
+    - docs/adr/README.md
+    - docs/adr/INDEX.md
+    - docs/OPEN-QUESTIONS.md
+    - apps/web/src/calendar-render.test.ts
+    - apps/web/src/pipeline-render.test.ts
+    - apps/web/src/reviews-queue-render.test.ts
+    - apps/web/src/template-editor-render.test.ts
   - id: H-HARD-02
     order: 176
     title: Dependency, secret, licence and container scanning in CI

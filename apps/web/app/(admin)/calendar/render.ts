@@ -15,6 +15,7 @@ import {
   type AdminChrome,
   renderAdminBanner,
 } from '../../../src/components/admin/google-reauth-banner.ts'
+import { inlineScriptTag } from '../../../src/security/inline-script.ts'
 
 /**
  * The front-desk diary, as HTML. Room × time first, therapist × time second, one read behind both.
@@ -744,7 +745,7 @@ export function renderCalendarHtml(view: CalendarView): string {
     '</div>',
     moveForm(view),
     '</main>',
-    `<script>${CALENDAR_SCRIPT}</script>`,
+    inlineScriptTag(view.chrome.cspNonce, CALENDAR_SCRIPT),
     '</body>',
     '</html>',
   ].join('')

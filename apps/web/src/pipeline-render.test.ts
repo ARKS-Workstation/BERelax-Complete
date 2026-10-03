@@ -303,7 +303,9 @@ describe('the page states what a stage IS, and cites the open question', () => {
  * satisfied or broken by a line of behaviour nobody changed.
  */
 const markupOf = (html: string): string =>
-  html.slice(html.indexOf('<body>'), html.indexOf('<script>'))
+  // `<script nonce=` since H-HARD-01: the admin CSP is nonce-based, so the page's own script opens with
+  // the attribute and a slice ending at `<script>` would run to the end of the document.
+  html.slice(html.indexOf('<body>'), html.indexOf('<script nonce='))
 
 /** The first selector of the page's own stylesheet, which is where the token layer stops. */
 const PIPELINE_CSS_MARKER = '*, *::before, *::after { box-sizing: border-box; }'
