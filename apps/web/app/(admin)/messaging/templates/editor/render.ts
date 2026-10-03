@@ -29,8 +29,8 @@
 import { type SmsCostPreview, safeText, smsCost, smsUnitsOf } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
 import {
+  ADMIN_BANNER_CSS,
   type AdminChrome,
-  GOOGLE_REAUTH_BANNER_CSS,
   renderAdminBanner,
 } from '../../../../../src/components/admin/google-reauth-banner.ts'
 
@@ -272,7 +272,7 @@ export function renderEditorHtml(body: string, chrome: AdminChrome): string {
     // this unit's first verify. The full trading name on an internal authoring tool would say something it
     // does not mean, and no mention at all is not a violation: the rule is about how the brand is written.
     '<title>Template editor — admin</title>',
-    `<style>${tokensCss()}${EDITOR_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${EDITOR_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',

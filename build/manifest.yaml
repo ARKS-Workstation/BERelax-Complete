@@ -22401,6 +22401,14 @@ units:
       by table checksum
     - an intent the gateway does not recognise at all is quarantined and alerted, never silently deleted,
       asserted by test
+    - 'NOTE: H-HARD-05 defers the UNRECONCILED SETTLEMENT BATCH alert here, because this unit creates the
+      first rows that can be observed. Add one entry to ALERT_REGISTRY in packages/shared/src/alerts/registry.ts
+      and one observer to ALERT_OBSERVERS in packages/db/src/alerts.ts: the Record<AlertId, AlertObserver>
+      makes a row with no reader a type error and a reader with no row likewise, and pnpm alerts then
+      requires a severity, an audience of real F07 roles, a runbook heading that resolves in docs/runbooks/,
+      an SLO shape with no target, and a threshold that is either a pointer at the figure a migration owns
+      or a BOUNDED provisional F09 setting. The "quarantined and alerted" acceptance line above is the same
+      obligation from the other side, so one entry discharges both.'
     files:
     - apps/worker/src/jobs/payment-reconciliation.ts
     - packages/payments/src/reconcile.ts
@@ -22412,7 +22420,7 @@ units:
       modes this business actually has: client-list export, outbox lag, send backlog, job failures, unreconciled
       settlement, repeated auth failures, overdue blocking obligations.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F06
@@ -22437,10 +22445,36 @@ units:
       on one account, and an overdue blocking obligation
     - every registry entry declares severity, threshold and a runbook id, and an entry naming an unknown
       runbook id fails a gate
+    - 'NOTE: the UNRECONCILED SETTLEMENT BATCH alert is deferred to Y-PAY-05 and is deliberately ABSENT
+      from ALERT_REGISTRY rather than present and unobservable. Nothing in this schema records a settlement
+      batch or its reconciliation state — Y-PAY-05 owns reconciliation_exception and is todo — so an entry
+      for it would have an observer that could only ever answer "nothing to see", which is exactly the
+      green dashboard ADR 0097 refuses. Y-PAY-05 discharges it with one row in ALERT_REGISTRY plus one
+      observer in packages/db/src/alerts.ts; pnpm alerts then requires the severity, the bounded threshold,
+      the audience, the runbook heading and the SLO shape, and the Record<AlertId, AlertObserver> makes a
+      row without a reader a type error. The other six alerts fire and clear in packages/fixtures/src/alerts.itest.ts.'
+    - 'NOTE: no SLO TARGET is set, for brief rule 15. AlertSlo.target is typed null rather than number |
+      null, so an invented figure is not expressible; what every entry carries is the measurement SHAPE —
+      the sentence, the table.column inputs and the window. The figures are Y13-alert-slos in docs/OPEN-QUESTIONS.md,
+      the four threshold judgements are Y13-alert-thresholds, and who is woken and how is Y13-oncall. Answering
+      Y13-alert-slos is filling in one field per entry and a deliberate widening of the type in that commit.'
+    - 'NOTE: the "messages delayed" banner is apps/web/src/components/admin/messages-delayed-banner.ts and
+      not the declared .tsx under app/(admin)/_components/. apps/web/src/routes/registry.ts is in exact
+      bijection with the filesystem and requires every document to be served in both locales, so an admin
+      page.tsx would need an Arabic admin document and a root layout to render it. route.ts plus render.ts
+      with shared markup in apps/web/src/components/admin/ is the shape four earlier units reached, and the
+      Google re-auth banner is the precedent one file along. The Playwright assertion is
+      apps/web/src/messages-delayed-banner.itest.ts, which needs no server and therefore declares no port
+      band: the renderers are pure, so page.setContent renders the exact bytes the route serves.'
     files:
     - packages/shared/src/alerts/registry.ts
+    - packages/core/src/alerts/evaluate.ts
+    - packages/db/src/alerts.ts
     - apps/worker/src/jobs/alert-evaluator.ts
-    - apps/web/app/(admin)/_components/messages-delayed-banner.tsx
+    - apps/web/src/components/admin/messages-delayed-banner.ts
+    - apps/web/src/messages-delayed-banner.itest.ts
+    - packages/fixtures/src/alerts.itest.ts
+    - docs/runbooks/alerting.md
     - scripts/check-alert-registry.mjs
   - id: H-HARD-06
     order: 199

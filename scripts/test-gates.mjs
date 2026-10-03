@@ -52269,6 +52269,389 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 175a-175z. (H-HARD-05) The alert registry: every field shown to be a claim something outside the
+//            table can be held to, and the two things the type forbids shown to be refused by the gate
+//            as well.
+//
+//            The unit's whole argument is that an alert registry which nothing compares to the alerting
+//            path is the defect `pnpm jobs` exists to remove, one floor up: a cron nobody watches and an
+//            alert nobody watches are the same shape, and the second is invisible for exactly as long as
+//            nothing holds the table to the tree. So `ALERT_REGISTRY` is read BY the alerting path — the
+//            observer map is a `Record<AlertId, …>` and the worker's pass enumerates the table — and
+//            `pnpm alerts` proves the rest. These cases are what make `pnpm alerts` a gate rather than a
+//            script that has never been seen to fail (ADR 0003).
+//
+//            Two of them are about a TYPE and are here anyway. `AlertSlo.target` is `null` rather than
+//            `number | null`, so an invented service-level objective does not compile — and a type is
+//            enforcement for a tree that typechecks and says nothing about one where somebody widened
+//            it, which is precisely how `pnpm boundaries` once reported success over zero modules. Same
+//            for the observer map. The gate is the backstop, and 175g and 175i are what prove the
+//            backstop is reachable.
+{
+  const ALERTS = 'packages/shared/src/alerts/registry.ts'
+  const OBSERVERS = 'packages/db/src/alerts.ts'
+  const SETTINGS_REGISTRY = 'packages/config/src/settings/registry.ts'
+  const BANNER = 'apps/web/src/components/admin/google-reauth-banner.ts'
+  const EVALUATOR = 'packages/core/src/alerts/evaluate.ts'
+  const alerts = () => runExpectingFailure('pnpm', ['alerts'])
+
+  // The control. Every case below asserts that a MUTATED tree is rejected, and that claim is worth
+  // nothing unless the unmutated tree is accepted — a gate that fails on everything is not a gate.
+  {
+    const clean = run('pnpm', ['alerts'])
+    check(
+      'alert registry: the committed tree passes, which is the control for every case below',
+      !clean.failed && `${clean.output}`.includes('each with a severity'),
+      `pnpm alerts does not pass on the committed tree, so every rejection below is uninformative:\n${clean.output}`,
+    )
+  }
+
+  // 175a. A severity outside the closed set. Three values and deliberately no `info`: a severity meaning
+  //       "do nothing" is what lets the other two fill up with things nobody reads.
+  checkRejectedBy(
+    'alert registry: 175a an unknown severity is refused',
+    withEditedFile(
+      ALERTS,
+      (text) =>
+        replaceOnce(
+          text,
+          "    severity: 'same_day',\n    threshold: {\n      kind: 'setting',",
+          "    severity: 'info',\n    threshold: {\n      kind: 'setting',",
+        ),
+      alerts,
+    ),
+    'unknown-alert-severity',
+  )
+
+  // 175b. An audience naming a role the F07 matrix does not have. This is the failure that looks most
+  //       like working code: the entry reads correctly, the alert is declared, and it is addressed to
+  //       nobody. The role set is `ROLES` in `packages/core`, so a renamed role fails here too.
+  checkRejectedBy(
+    'alert registry: 175b an audience naming a role the F07 matrix does not have is refused',
+    withEditedFile(
+      ALERTS,
+      (text) =>
+        replaceOnce(
+          text,
+          "    route: { audience: ['owner', 'manager', 'receptionist'], surface: 'admin_banner' },",
+          "    route: { audience: ['owner', 'front_desk'], surface: 'admin_banner' },",
+        ),
+      alerts,
+    ),
+    'unknown-alert-audience-role',
+  )
+
+  // 175c. The acceptance line, verbatim: "an entry naming an unknown runbook id fails a gate". The id is
+  //       `<file stem>#<heading slug>` and the gate resolves it against the headings actually in
+  //       `docs/runbooks/`, so a renamed heading fails as loudly as an invented one — which is the point.
+  //       An alert with no procedure is a notification somebody invents a response to at 02:00.
+  checkRejectedBy(
+    'alert registry: 175c a runbook id that resolves to no heading is refused',
+    withEditedFile(
+      ALERTS,
+      (text) =>
+        replaceOnce(
+          text,
+          "    runbook: 'alerting#messages-are-delayed',",
+          "    runbook: 'alerting#the-send-queue-is-backed-up',",
+        ),
+      alerts,
+    ),
+    'alert-runbook-missing',
+  )
+
+  // 175d. A structural threshold POINTS at the file that owns its figure rather than repeating it, and a
+  //       pointer nothing follows is a repetition with extra steps. Breaking the path is the cheaper of
+  //       the two directions to write and the same rule catches the other: a migration that changed 0085
+  //       so it no longer contains the figure fails this too, which is the drift this design exists to
+  //       make loud.
+  checkRejectedBy(
+    'alert registry: 175d a structural threshold whose stated authority does not exist is refused',
+    withEditedFile(
+      ALERTS,
+      (text) =>
+        replaceOnce(
+          text,
+          "      statedIn: 'packages/db/migrations/0085_data_subject_rights.sql',",
+          "      statedIn: 'packages/db/migrations/0085_rights_that_moved.sql',",
+        ),
+      alerts,
+    ),
+    'structural-threshold-not-stated-there',
+  )
+
+  /*
+    175e. A threshold that is a judgement must be an F09 setting, or there is nothing an owner can change
+    and the correction is a deploy.
+
+    The fixture replaces the imported constant with a LITERAL, and that is the only mutation that can
+    prove this rule. Renaming `OUTBOX_LAG_THRESHOLD_SETTING_KEY` was tried first and passed: the F09
+    registry imports the same constant, so both sides move together and the key still resolves — which is
+    exactly the property the shared constant exists to give (`compliance-notices.ts`'s argument, that a
+    mismatch should not be expressible). So the rule's real subject is a call site that spelled the key
+    itself, and the fixture has to be one.
+  */
+  checkRejectedBy(
+    'alert registry: 175e a threshold key that is not an F09 setting is refused',
+    withEditedFile(
+      ALERTS,
+      (text) =>
+        replaceOnce(
+          text,
+          "    threshold: { kind: 'setting', settingKey: OUTBOX_LAG_THRESHOLD_SETTING_KEY, unit: 'seconds' },",
+          "    threshold: { kind: 'setting', settingKey: 'alerts.outbox_lag_sec', unit: 'seconds' },",
+        ),
+      alerts,
+    ),
+    'threshold-setting-undeclared',
+  )
+
+  // 175f. The load-bearing one. An alert whose threshold can be set to a million is an alert that can be
+  //       silenced from a settings screen with nothing recording that anything was silenced — so every
+  //       threshold schema carries a ceiling, and the gate proves it by ASKING THE SCHEMA to parse a
+  //       figure no threshold may legitimately hold rather than by looking for `.max(` in the source.
+  //       That distinction is why this case exists: the text scan was written first, located the
+  //       definition by its key literal, found none because the registry imports the key as a constant,
+  //       and passed for every key including an unbounded one.
+  checkRejectedBy(
+    'alert registry: 175f a threshold schema with no upper bound is refused',
+    withEditedFile(
+      SETTINGS_REGISTRY,
+      (text) =>
+        replaceOnce(
+          text,
+          'schema: z.number().int().min(600).max(21_600),',
+          'schema: z.number().int().min(600),',
+        ),
+      alerts,
+    ),
+    'threshold-setting-unbounded',
+  )
+
+  // 175g. The SLO target, which the TYPE already forbids — `target: null`, not `number | null`. This case
+  //       is about the tree where somebody widened the type, and it is the one the dispatch's rule is
+  //       about: there is no production traffic here and no measured baseline, so a figure would be
+  //       invented, and a dashboard green against an invented target answers "are we inside the
+  //       objective" with a number nobody committed to.
+  checkRejectedBy(
+    'alert registry: 175g an SLO carrying a target at all is refused',
+    withEditedFile(
+      ALERTS,
+      (text) =>
+        replaceOnce(
+          text,
+          '      windowDays: 365,\n      target: null,',
+          '      windowDays: 365,\n      target: 0.99 as unknown as null,',
+        ),
+      alerts,
+    ),
+    'alert-slo-has-a-target',
+  )
+
+  // 175h. An absent figure is only honest if the absence is recorded where absences are recorded. An
+  //       `openQuestionId` nothing in `docs/OPEN-QUESTIONS.md` answers is a missing figure with nowhere
+  //       for the conversation to happen.
+  checkRejectedBy(
+    'alert registry: 175h an open-question id that OPEN-QUESTIONS.md does not list is refused',
+    withEditedFile(
+      ALERTS,
+      (text) =>
+        replaceOnce(
+          text,
+          "export const ALERT_SLO_OPEN_QUESTION_ID = 'Y13-alert-slos'",
+          "export const ALERT_SLO_OPEN_QUESTION_ID = 'Y13-alert-service-levels'",
+        ),
+      alerts,
+    ),
+    'alert-open-question-missing',
+  )
+
+  // 175i. The property the whole unit rests on, from the side that matters: a registered alert with no
+  //       reader. `ALERT_OBSERVERS` is a `Record<AlertId, AlertObserver>` so this does not compile, and
+  //       the gate is what sees it in a tree where the annotation was loosened. An alert nothing measures
+  //       reports the same thing as a quiet day, which is the sentence this block is about.
+  checkRejectedBy(
+    'alert registry: 175i a registered alert with no observer is refused',
+    withEditedFile(
+      OBSERVERS,
+      (text) => replaceOnce(text, '  send_backlog: observeSendBacklog,\n', ''),
+      alerts,
+    ),
+    'alert-without-an-observer',
+  )
+
+  // 175j. And the other direction: a reader for something the table does not declare. It has no severity,
+  //       no threshold, no runbook and no audience, so whatever it measures reaches nobody — which is the
+  //       shape an alerting path drifts into one commit at a time.
+  checkRejectedBy(
+    'alert registry: 175j an observer for an alert the registry does not declare is refused',
+    withEditedFile(
+      OBSERVERS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  send_backlog: observeSendBacklog,\n',
+          '  send_backlog: observeSendBacklog,\n  settlement_unreconciled: observeSendBacklog,\n',
+        ),
+      alerts,
+    ),
+    'observer-without-an-alert',
+  )
+
+  /*
+    175k and 175l. The insider-threat exception, in both directions.
+
+    `UNDEFENDED_BY_DESIGN` records what this build does NOT defend against — the owner can read
+    everything, `psql` writes no audit row, refused sign-ins are unmetered, and no pass can report its own
+    absence — and `doesNotCover` attaches each one to the alert a reader would otherwise believe covers
+    it. The equality is held in both directions because an exception no alert names is a page nobody
+    opens, and an id no exception defines is a limitation stated as a word.
+
+    Both cases delete the module-load assertion as well as breaking the data, and that is deliberate
+    rather than lazy: `assertRegistry()` runs at import and throws first, so without the second edit the
+    gate's own rules would be unreachable and these two cases would be proving the import guard twice
+    instead of the gate once. Two guards, both reachable, each with its own fixture.
+  */
+  checkRejectedBy(
+    'alert registry: 175k an undefended case no alert names is refused',
+    withEditedFile(
+      ALERTS,
+      (text) =>
+        replaceOnce(
+          replaceOnce(text, '\nassertRegistry()', '\n// assertRegistry()'),
+          "    doesNotCover: ['owner-reads-everything', 'refused-sign-ins-are-unmetered'],",
+          "    doesNotCover: ['owner-reads-everything'],",
+        ),
+      alerts,
+    ),
+    'undefended-case-unreferenced',
+  )
+
+  checkRejectedBy(
+    'alert registry: 175l an alert naming an exception nothing defines is refused',
+    withEditedFile(
+      ALERTS,
+      (text) =>
+        replaceOnce(
+          replaceOnce(text, '\nassertRegistry()', '\n// assertRegistry()'),
+          "    doesNotCover: ['the-pass-cannot-report-its-own-absence'],\n  },\n  {\n    id: 'send_backlog',",
+          "    doesNotCover: ['the-worker-is-on-fire'],\n  },\n  {\n    id: 'send_backlog',",
+        ),
+      alerts,
+    ),
+    'alert-names-an-undefined-exception',
+  )
+
+  // 175m. The module-load guard itself, which is the one that fires in development rather than in CI. A
+  //       module that loads with a `doesNotCover` naming nothing real has already shipped the limitation
+  //       as a word, so the registry refuses to load rather than waiting for a gate.
+  checkRejectedBy(
+    'alert registry: 175m the registry refuses to LOAD with a doesNotCover naming nothing real',
+    withEditedFile(
+      ALERTS,
+      (text) =>
+        replaceOnce(
+          text,
+          "    doesNotCover: ['owner-reads-everything', 'refused-sign-ins-are-unmetered'],",
+          "    doesNotCover: ['owner-reads-everything', 'somebody-elses-problem'],",
+        ),
+      alerts,
+    ),
+    'which UNDEFENDED_BY_DESIGN does not',
+  )
+
+  /*
+    175n. The vacuity floor on this gate's own reading (ADR 0002).
+
+    `pnpm alerts` derives from three places — the registry, the runbook headings and the F09 settings —
+    and it iterates over them. An empty registry makes every loop run zero times and the gate prints
+    "0 alerts, each with a severity, a threshold, a runbook heading…" and exits zero, which is the green
+    tick over zero modules that ADR 0002 is about, said about alerting. The floor is what refuses that,
+    and this case is what proves the floor is not itself dead.
+  */
+  checkRejectedBy(
+    'alert registry: 175n a registry the gate reads as nearly empty is refused rather than reported clean',
+    withEditedFile(
+      ALERTS,
+      (text) =>
+        replaceOnce(
+          replaceOnce(text, '\nassertRegistry()', '\n// assertRegistry()'),
+          'export const ALERT_IDS: readonly AlertId[] = ALERT_REGISTRY.map((entry) => entry.id)',
+          'export const ALERT_IDS: readonly AlertId[] = ALERT_REGISTRY.map((entry) => entry.id)\n// @ts-expect-error the fixture for 175n: a gate that iterates must refuse an empty table\nALERT_REGISTRY.length = 0',
+        ),
+      alerts,
+    ),
+    'too little to mean anything',
+  )
+
+  /*
+    175o. A corrupt threshold must never read as all-clear.
+
+    There are three answers and not two, and the third is the one nothing would notice: an `app_setting`
+    row holding a word, or holding nothing, is a threshold the pass cannot read — and a comparison against
+    `NaN` answers `false`, which reads as "clear". `resolveAlertThreshold` returns a NAMED verdict for it
+    and the worker publishes a configuration fault rather than silence. This case makes the resolver fall
+    back to a figure instead, which is the plausible wrong design, and requires the unit suite to notice.
+  */
+  checkRejectedBy(
+    'alert registry: 175o a resolver that falls back instead of reporting an unreadable threshold is caught',
+    withEditedFile(
+      EVALUATOR,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (!settings.has(key)) {\n    return { settingKey: key, unreadable: `no value for "${key}" was read` }\n  }',
+          '  if (!settings.has(key)) {\n    return { value: 0 }\n  }',
+        ),
+      () =>
+        runExpectingFailure('pnpm', [
+          'exec',
+          'vitest',
+          'run',
+          '-c',
+          'vitest.config.ts',
+          'packages/core/src/alerts/evaluate.test.ts',
+        ]),
+    ),
+    // The failing case's NAME, not the verdict's tag: vitest prints the test title and the assertion, and
+    // `threshold_unreadable` appears in neither. A rule name that is not in the output is the vacuous
+    // match `checkRejectedBy` exists to refuse, and this one was caught by running the block.
+    'reports an absent setting as unreadable',
+  )
+
+  /*
+    175p. The banner and the alert are one fact, and the chrome is where that can stop being true.
+
+    `renderAdminBanner` is the single call every admin document makes, which is what stops the send-backlog
+    banner being present on the one document somebody tested and quietly absent from the other nine. Drop
+    it from the composition and nothing in the application fails — the documents still render, the alert
+    still fires in the worker, and a receptionist is never told. So the suite has to be the thing that
+    fails.
+  */
+  checkRejectedBy(
+    'alert registry: 175p an admin chrome that stops emitting the delay banner is caught',
+    withEditedFile(
+      BANNER,
+      (text) =>
+        replaceOnce(
+          text,
+          '    renderMessagesDelayedBanner(chrome.sendBacklog) +\n    renderGoogleReauthBanner(chrome.googleReauth, chrome.returnTo)',
+          '    renderGoogleReauthBanner(chrome.googleReauth, chrome.returnTo)',
+        ),
+      () =>
+        runExpectingFailure('pnpm', [
+          'exec',
+          'vitest',
+          'run',
+          '-c',
+          'vitest.config.ts',
+          'apps/web/src/messages-delayed-banner.test.ts',
+        ]),
+    ),
+    'above the Google banner',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -53130,6 +53513,12 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'pnpm saq-a',
     'pnpm layout',
     'pnpm jobs',
+    // H-HARD-05's alert registry, in the position `pnpm verify` runs it — immediately after the job
+    // registry, because it is the same argument one floor up: a cron nobody watches and an alert nobody
+    // watches are the same defect, and the second is invisible for exactly as long as nothing compares
+    // the registry to the alerting path. Registered here because the completeness property in block 175
+    // reads THIS array, so a CI step nobody registered fails the build.
+    'pnpm alerts',
     'pnpm adr',
     'pnpm progress:check',
     'pnpm media',

@@ -2,7 +2,7 @@ import { safeText } from '@berelax/core'
 import { CHECKOUT_FIELDS } from '@berelax/payments'
 import { tokensCss } from '@berelax/ui'
 import {
-  GOOGLE_REAUTH_BANNER_CSS,
+  ADMIN_BANNER_CSS,
   renderAdminBanner,
 } from '../../../src/components/admin/google-reauth-banner.ts'
 import { CHECKOUT_PATH, type CheckoutView } from './view.ts'
@@ -198,7 +198,7 @@ export function renderCheckout(view: CheckoutView): string {
     // No brand in the title: docs/09's brand-collision rule forbids the bare brand in any title, and
     // `apps/web/src/seo/brand.test.ts` scans every title-bearing line in `apps/web` for it.
     '<title>Take a card payment — payments admin</title>',
-    `<style>${tokensCss()}${CHECKOUT_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${CHECKOUT_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',

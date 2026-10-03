@@ -2,8 +2,8 @@ import type { DuplicateQueue, DuplicateQueueRow } from '@berelax/core'
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
 import {
+  ADMIN_BANNER_CSS,
   type AdminChrome,
-  GOOGLE_REAUTH_BANNER_CSS,
   renderAdminBanner,
 } from '../../../../src/components/admin/google-reauth-banner.ts'
 
@@ -246,7 +246,7 @@ export function renderDuplicateQueueHtml(view: DuplicateQueueView): string {
     // brand appears, and an internal review queue naming it would be citing the wrong entity. The rule is
     // about how the brand is written, so not writing it is compliant.
     '<title>Duplicate review queue — admin</title>',
-    `<style>${tokensCss()}${QUEUE_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${QUEUE_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',

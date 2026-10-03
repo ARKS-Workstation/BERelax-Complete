@@ -1,8 +1,8 @@
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
 import {
+  ADMIN_BANNER_CSS,
   type AdminChrome,
-  GOOGLE_REAUTH_BANNER_CSS,
   renderAdminBanner,
 } from '../../../../src/components/admin/google-reauth-banner.ts'
 
@@ -185,7 +185,7 @@ export function renderReassignmentQueueHtml(view: ReassignmentQueueView): string
     // `apps/web/src/seo/brand.test.ts` scans every title-bearing line in `apps/web` for it. An internal
     // back-office screen has no reason to name the business at all.
     '<title>Reassignment queue — HR admin</title>',
-    `<style>${tokensCss()}${QUEUE_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${QUEUE_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',

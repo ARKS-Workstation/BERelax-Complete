@@ -1,18 +1,20 @@
 import {
+  evaluateAlert,
   type Instant,
   pageReauthBanner,
   parseReturnPath,
   type ReauthBannerView,
 } from '@berelax/core'
-import { readSetting, type Sql } from '@berelax/db'
+import { ALERT_OBSERVERS, readAlertThresholdSettings, readSetting, type Sql } from '@berelax/db'
 import {
   connectionHealthCards,
   createPostgresConnectionStore,
   type GooglePublishingStatus,
   isGooglePublishingStatus,
 } from '@berelax/google'
-import { RECONNECT_SCREEN_PATH } from '@berelax/shared'
+import { alertDefinition, RECONNECT_SCREEN_PATH } from '@berelax/shared'
 import type { AdminChrome } from './google-reauth-banner.ts'
+import type { SendBacklogView } from './messages-delayed-banner.ts'
 
 /**
  * The one read every admin document makes to find out whether it must carry the re-auth banner.
@@ -76,7 +78,38 @@ export async function googleReauthBannerFor(args: {
 }
 
 /**
- * Everything an admin document needs for its chrome: the banner, and where a reconnect comes back to.
+ * The send-backlog banner, decided by the alert registry rather than by this file.
+ *
+ * `evaluateAlert` over the `send_backlog` entry, the same observer the worker's pass uses and the same
+ * threshold setting — so the banner is up exactly when the alert is firing. The alternative, a
+ * `queued > 20` here, is two statements of one fact: the banner would still be showing after somebody
+ * raised the threshold and absent after they lowered it, and nothing would say which of the two screens
+ * was right.
+ *
+ * A `threshold_unreadable` verdict renders NO banner, and that is a deliberate difference from the
+ * worker's pass. The worker raises a configuration fault, because answering "is this condition true" is
+ * its whole job; a page cannot — this is chrome on ten documents about something else, and a corrupt
+ * setting row must not turn the diary into a 503. The fault is still reported, by the pass, which is the
+ * thing whose job it is.
+ */
+export async function sendBacklogBannerFor(args: {
+  readonly sql: Sql
+  readonly now: Instant
+  readonly tradingDate: string
+}): Promise<SendBacklogView | null> {
+  const entry = alertDefinition('send_backlog')
+  const settings = await readAlertThresholdSettings(args.sql)
+  const observation = await ALERT_OBSERVERS.send_backlog(args.sql, {
+    nowIso: new Date(args.now).toISOString(),
+    tradingDate: args.tradingDate,
+  })
+  const verdict = evaluateAlert(entry, observation, settings)
+  if (verdict.kind !== 'firing') return null
+  return { queued: verdict.observed, threshold: verdict.threshold }
+}
+
+/**
+ * Everything an admin document needs for its chrome: the banners, and where a reconnect comes back to.
  *
  * `request` rather than a path string, so the return path is the URL the operator is actually on — the
  * diary's state is its query string, and a reconnect that came back to a bare `/calendar` would have
@@ -92,6 +125,15 @@ export async function adminChromeFor(args: {
   const url = new URL(args.request.url)
   return {
     googleReauth: await googleReauthBannerFor({ sql: args.sql, now: args.now }),
+    // The trading date is not needed by this observer and is still supplied rather than faked, because
+    // `AlertObservationContext` is one shape for six observers and a call site that invented a value for
+    // the field it does not use is the call site that gets copied to one that does. The calendar date of
+    // `now` is the honest answer here: the send backlog is a count of rows with no date in it at all.
+    sendBacklog: await sendBacklogBannerFor({
+      sql: args.sql,
+      now: args.now,
+      tradingDate: new Date(args.now).toISOString().slice(0, 10),
+    }),
     returnTo: parseReturnPath(`${url.pathname}${url.search}`) ?? RECONNECT_SCREEN_PATH,
   }
 }

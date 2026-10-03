@@ -30,6 +30,7 @@ const OTHER = 'e2222222-2222-7222-8222-222222222222'
 
 const CHROME: AdminChrome = {
   googleReauth: null,
+  sendBacklog: null,
   returnTo: `/clients/${CUSTOMER}/flags`,
 }
 

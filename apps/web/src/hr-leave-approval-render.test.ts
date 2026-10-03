@@ -34,7 +34,7 @@ const CONFLICT: LeaveConflictView = {
 }
 
 const view = (overrides: Partial<LeaveApprovalPageView> = {}): LeaveApprovalPageView => ({
-  chrome: { googleReauth: null, returnTo: '/settings/integrations' },
+  chrome: { googleReauth: null, sendBacklog: null, returnTo: '/settings/integrations' },
   leaveRequestId: '01a0e795-0000-7000-8000-000000000003',
   therapistReference: 'Therapist 07',
   kind: 'annual',

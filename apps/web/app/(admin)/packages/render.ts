@@ -2,7 +2,7 @@ import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
 import type { AdminChrome } from '../../../src/components/admin/google-reauth-banner.ts'
 import {
-  GOOGLE_REAUTH_BANNER_CSS,
+  ADMIN_BANNER_CSS,
   renderAdminBanner,
 } from '../../../src/components/admin/google-reauth-banner.ts'
 import { TILL_CSS } from '../till/render.ts'
@@ -365,7 +365,7 @@ export function renderPackagesHtml(view: PackageView): string {
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     '<meta name="robots" content="noindex, nofollow, noarchive">',
     '<title>Packages — admin</title>',
-    `<style>${tokensCss()}${TILL_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${TILL_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',

@@ -280,7 +280,9 @@ describe('the degraded banner may be collapsed and cannot stay collapsed', () =>
 describe('the banner is absent where it must be', () => {
   it('renders the empty string for a healthy connection', () => {
     expect(renderGoogleReauthBanner(bannerFor({}), '/calendar')).toBe('')
-    expect(renderAdminBanner({ googleReauth: null, returnTo: '/calendar' })).toBe('')
+    expect(
+      renderAdminBanner({ googleReauth: null, sendBacklog: null, returnTo: '/calendar' }),
+    ).toBe('')
   })
 
   it('renders nothing for the expiring and the pending-approval states', () => {

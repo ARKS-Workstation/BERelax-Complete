@@ -8,8 +8,8 @@ import {
 import { CONTRAINDICATION_FLAG_KEYS, type ContraindicationFlagSet } from '@berelax/shared'
 import { tokensCss } from '@berelax/ui'
 import {
+  ADMIN_BANNER_CSS,
   type AdminChrome,
-  GOOGLE_REAUTH_BANNER_CSS,
   renderAdminBanner,
 } from '../../../../../src/components/admin/google-reauth-banner.ts'
 
@@ -247,7 +247,7 @@ export function renderFlagsPageHtml(view: FlagsPageView): string {
     '<meta name="viewport" content="width=device-width, initial-scale=1">' +
     '<meta name="robots" content="noindex, nofollow">' +
     '<title>Client markers</title>' +
-    `<style>${tokensCss()}${GOOGLE_REAUTH_BANNER_CSS}${FLAGS_CSS}</style>` +
+    `<style>${tokensCss()}${ADMIN_BANNER_CSS}${FLAGS_CSS}</style>` +
     '</head><body>' +
     // `'<main>'` as a literal of its own, because `google-reauth-banner.test.ts` walks every admin
     // document's SOURCE for exactly this string to prove the banner is emitted INSIDE the landmark.

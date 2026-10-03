@@ -1,8 +1,8 @@
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
 import {
+  ADMIN_BANNER_CSS,
   type AdminChrome,
-  GOOGLE_REAUTH_BANNER_CSS,
   renderAdminBanner,
 } from '../../../src/components/admin/google-reauth-banner.ts'
 
@@ -317,7 +317,7 @@ export function renderComplianceCalendarHtml(view: ComplianceCalendarView): stri
     // No brand in the title: docs/09's "brand collision" forbids the bare brand in any title, and an
     // internal back-office screen has no reason to name the business at all.
     '<title>Compliance calendar — admin</title>',
-    `<style>${tokensCss()}${CALENDAR_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${CALENDAR_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',

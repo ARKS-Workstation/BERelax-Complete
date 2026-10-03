@@ -73,7 +73,7 @@ const AS = (role: CmsPrincipal['role']): CmsPrincipal => ({
 })
 
 /** No banner and a return path. The chrome is the route's concern; this file is about the decision. */
-const CHROME: AdminChrome = { googleReauth: null, returnTo: REVIEWS_PASTE_PATH }
+const CHROME: AdminChrome = { googleReauth: null, sendBacklog: null, returnTo: REVIEWS_PASTE_PATH }
 
 let sql: Sql
 let connectionId = ''

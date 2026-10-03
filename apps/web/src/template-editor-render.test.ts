@@ -14,7 +14,11 @@ import {
  */
 
 /** No banner: this file's subject is the pricing, and the banner is asserted by its own suite. */
-const CHROME = { googleReauth: null, returnTo: '/messaging/templates/editor' } as const
+const CHROME = {
+  googleReauth: null,
+  sendBacklog: null,
+  returnTo: '/messaging/templates/editor',
+} as const
 
 describe('the worked example', () => {
   it('is docs/04 section 5s 150-character Arabic body', () => {

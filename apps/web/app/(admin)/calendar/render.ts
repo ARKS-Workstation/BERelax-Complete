@@ -11,8 +11,8 @@ import {
 } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
 import {
+  ADMIN_BANNER_CSS,
   type AdminChrome,
-  GOOGLE_REAUTH_BANNER_CSS,
   renderAdminBanner,
 } from '../../../src/components/admin/google-reauth-banner.ts'
 
@@ -727,7 +727,7 @@ export function renderCalendarHtml(view: CalendarView): string {
     // No brand in the title: docs/09's "brand collision" forbids the bare brand in any title, and an
     // internal screen has no reason to name the business at all.
     '<title>Diary — admin</title>',
-    `<style>${tokensCss()}${CALENDAR_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${CALENDAR_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',
@@ -765,7 +765,7 @@ export function renderClosedDayHtml(args: {
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     '<meta name="robots" content="noindex, nofollow, noarchive">',
     '<title>Diary — admin</title>',
-    `<style>${tokensCss()}${CALENDAR_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${CALENDAR_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',

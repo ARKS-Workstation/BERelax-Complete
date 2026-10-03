@@ -50,6 +50,15 @@ export {
   type WebhookReconciliation,
 } from './adapters/manual-payment.ts'
 export {
+  ALERT_OBSERVERS,
+  type AlertObservationContext,
+  type ObservedAlert,
+  observeAlerts,
+  raiseAlertNotification,
+  raiseAlertThresholdFault,
+  readAlertThresholdSettings,
+} from './alerts.ts'
+export {
   type Actor,
   type ActorKind,
   type AuditOperation,

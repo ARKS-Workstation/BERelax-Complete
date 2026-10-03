@@ -13,8 +13,8 @@ import {
 import { escapeHtml, renderTestingExpiry, type TestingExpiryView } from '@berelax/google'
 import { tokensCss } from '@berelax/ui'
 import {
+  ADMIN_BANNER_CSS,
   type AdminChrome,
-  GOOGLE_REAUTH_BANNER_CSS,
   renderAdminBanner,
 } from '../../../../src/components/admin/google-reauth-banner.ts'
 
@@ -442,7 +442,7 @@ export function renderIntegrationsPage(view: IntegrationsView): string {
     // something it does not mean. The compliance calendar and the template editor title themselves the
     // same way; the Messages inbox is exempt instead, which is the arrangement this avoids extending.
     '<title>Integrations — admin</title>',
-    `<style>${tokensCss()}${CARD_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${CARD_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',

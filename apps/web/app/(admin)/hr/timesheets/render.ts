@@ -1,8 +1,8 @@
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
 import {
+  ADMIN_BANNER_CSS,
   type AdminChrome,
-  GOOGLE_REAUTH_BANNER_CSS,
   renderAdminBanner,
 } from '../../../../src/components/admin/google-reauth-banner.ts'
 
@@ -265,7 +265,7 @@ export function renderTimesheetsHtml(view: TimesheetPageView): string {
     // No brand in the title: docs/09's "brand collision" forbids the bare brand in any title, and
     // `apps/web/src/seo/brand.test.ts` scans every title-bearing line in `apps/web` for it.
     '<title>Timesheets — HR admin</title>',
-    `<style>${tokensCss()}${TIMESHEET_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${TIMESHEET_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',
