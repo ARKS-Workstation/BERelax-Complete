@@ -54989,6 +54989,346 @@ export function chargebackNetEffectFils(`,
   }
 }
 
+// 172a-172z. (G-SEO-07) The weekly report: the cap shown to be a cap and not a floor, every prose rule
+// shown to be able to stop firing, and the send shown to be on the one choke point.
+//
+// The subject of this block is a COUNT that must be able to come up short. "Five prioritised actions" is
+// satisfied perfectly by a renderer that pads, and padding is invisible to every test that only asks
+// whether five rows appeared — which is why 172a breaks the cap in the direction nobody would notice
+// (three findings rendering five) rather than in the direction a reader would.
+//
+// The prose rules are the other half, and they share one failure mode: each of them is a scan over a body
+// that is clean today, so none of them has ever been seen to fire against the real tree. Cases 172c
+// through 172g are the only evidence they are alive (ADR 0003), and 172h is the one that matters most —
+// the readability check measures the RENDERED BODY, and a check over the template would pass for ever
+// while the sentences the data produced grew.
+{
+  const REPORT = 'packages/core/src/seo/weekly-report.ts'
+  const REPORT_SUITE = 'packages/core/src/seo/weekly-report.test.ts'
+  const JOB = 'apps/worker/src/jobs/seo-weekly-report.ts'
+  const JOB_ITEST = 'apps/worker/src/jobs/seo-weekly-report.itest.ts'
+  const runUnit = (...files) =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const runItest = (...files) =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', ...files])
+  const chokepoint = () => run('pnpm', ['send-chokepoint'])
+
+  // 172a. THE case the acceptance criterion names. A renderer that pads to the cap satisfies "exactly
+  // five prioritised actions" and makes the report a floor rather than a finding — and the padding would
+  // be the fifth-best action in a quiet week, which is noise a reader learns to skip.
+  withEditedFile(
+    REPORT,
+    (source) =>
+      replaceOnce(
+        source,
+        '  const actions = ordered.slice(0, cap)',
+        '  const actions = ordered.slice(0, cap)\n' +
+          '  while (actions.length < cap && ordered.length > 0) actions.push(ordered[0])',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: a renderer that pads three findings up to the cap is caught',
+        runUnit(REPORT_SUITE),
+        'renders three from three and states the honest count',
+      ),
+  )
+
+  // 172b. And the count sentence, made a constant. "We found five things" is what a reader believes, so a
+  // report whose sentence does not come from the data is worse than one that shows four rows.
+  withEditedFile(
+    REPORT,
+    (source) =>
+      replaceOnce(
+        source,
+        "        : `We found ${actions.found} ${actions.found === 1 ? 'thing' : 'things'} worth doing. ` +",
+        '        : `We found ${SEO_WEEKLY_ACTION_CAP} things worth doing. ` +',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: a count sentence that does not come from the findings is caught',
+        runUnit(REPORT_SUITE),
+        'renders three from three and states the honest count',
+      ),
+  )
+
+  // 172c. The sentence-length rule, disabled. A long sentence in a weekly email is not a style complaint:
+  // it is where the action goes missing, and the configured maximum is the only thing standing between
+  // the report and a paragraph.
+  withEditedFile(
+    REPORT,
+    (source) =>
+      replaceOnce(
+        source,
+        '    if (words > options.maxSentenceWords) {',
+        '    if (words > options.maxSentenceWords && false) {',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: a readability check that no longer measures sentence length is caught',
+        runUnit(REPORT_SUITE),
+        'reports a sentence over the maximum',
+      ),
+  )
+
+  // 172d. The metric-explanation rule, disabled. A number with no explanation is a number the reader
+  // cannot act on, and the commonest kind in this subject reads as self-explanatory to whoever wrote it.
+  withEditedFile(
+    REPORT,
+    (source) =>
+      replaceOnce(
+        source,
+        '    if (!report.body.includes(metric.explanation)) {',
+        '    if (!report.body.includes(metric.explanation) && false) {',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: a metric printed with no explanation that is no longer reported is caught',
+        runUnit(REPORT_SUITE),
+        'reports a metric printed with no explanation',
+      ),
+  )
+
+  // 172e. The forbidden-content rule, emptied. Scope URLs, SQL and raw resource identifiers get into a
+  // report by somebody pasting a diagnostic into a template, and the first person to receive one is the
+  // owner.
+  withEditedFile(
+    REPORT,
+    (source) =>
+      replaceOnce(
+        source,
+        '  for (const forbidden of SEO_REPORT_FORBIDDEN) {',
+        '  for (const forbidden of []) {',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: a scope URL or SQL in the body that is no longer reported is caught',
+        runUnit(REPORT_SUITE),
+        'reports a scope URL, SQL and a raw identifier',
+      ),
+  )
+
+  // 172f. The jargon rule, disabled. The glossary is a MAP rather than a blocklist, so the failure this
+  // guards is not a banned word — it is a term used with no line defining it, which is how a report about
+  // CTR becomes a report only the person who wrote it can read.
+  withEditedFile(
+    REPORT,
+    (source) =>
+      replaceOnce(
+        source,
+        '    if (!report.body.includes(gloss)) {',
+        '    if (!report.body.includes(gloss) && false) {',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: a jargon term used with no gloss that is no longer reported is caught',
+        runUnit(REPORT_SUITE),
+        'reports a jargon term used with no line defining it',
+      ),
+  )
+
+  // 172g. And the other direction, which a refusal cannot state: the glossary must not print a definition
+  // for a term the report did not use. Six glosses in a report that uses one is four lines pushing the
+  // five actions below the fold, which is the same attention failure in the opposite direction.
+  withEditedFile(
+    REPORT,
+    (source) =>
+      replaceOnce(
+        source,
+        '    .filter(([term]) => new RegExp(`\\\\b${term.toLowerCase()}\\\\b`).test(lower))',
+        '    .filter(() => true)',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: a glossary that defines terms the report never used is caught',
+        runUnit(REPORT_SUITE),
+        'glosses only what is said',
+      ),
+  )
+
+  // 172h. The discrepancy explanation, rendered unconditionally. Both branches are the acceptance line,
+  // and the zero branch is the one that is wrong by default: `rareQueryGapExplanation` has a confident
+  // sentence for a window with nothing withheld, and it belongs on the dashboard beside the query report
+  // rather than in an email that is five actions long.
+  withEditedFile(
+    REPORT,
+    (source) =>
+      replaceOnce(
+        source,
+        '    if (gap.withheldClicks > 0 || gap.withheldImpressions > 0) {',
+        '    if (true) {',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: the click discrepancy explained when there is no discrepancy is caught',
+        runUnit(REPORT_SUITE),
+        'omits it when it is zero',
+      ),
+  )
+
+  // 172i. The degraded sentence, removed. A report built from the stored copy that did not say so is the
+  // worst outcome available here: the figures look live, and the decision a reader takes from them differs.
+  withEditedFile(
+    REPORT,
+    (source) =>
+      replaceOnce(
+        source,
+        '  if (input.degradedBecause !== null) {',
+        '  if (input.degradedBecause !== null && false) {',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: a degraded run that does not say so is caught',
+        runUnit(REPORT_SUITE),
+        'states a degraded run in one plain sentence',
+      ),
+  )
+
+  // 172j. The never-succeeded heartbeat, rendered as an instant. `null` and an instant are different
+  // facts, and a report that printed "last finished on null" — or worse, today — would say the agent is
+  // fine on the exact week it stopped.
+  withEditedFile(
+    REPORT,
+    (source) =>
+      replaceOnce(
+        source,
+        '    input.heartbeat.lastSuccessAtIso === null',
+        '    input.heartbeat.lastSuccessAtIso === undefined',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: a never-succeeded heartbeat rendered as an instant is caught',
+        runUnit(REPORT_SUITE),
+        'distinguishes never-succeeded from an instant',
+      ),
+  )
+
+  // 172k. The readability gate on the send path, removed. Plain English is ENFORCED and not hoped for:
+  // a body that broke its own rules would be sent once and read as the house style from then on.
+  withEditedFile(
+    JOB,
+    (source) =>
+      replaceOnce(
+        source,
+        '      if (prose.length > 0) {',
+        '      if (prose.length > 0 && false) {',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: a job that sends a body breaking its own prose rules is caught',
+        runItest(JOB_ITEST),
+        'refuses to send a body that breaks its own prose rules',
+      ),
+  )
+
+  // 172l. The recipient, invented. `NO_OWNER_REPORT_ADDRESS` returns null because no table in this build
+  // holds an owner address, and a plausible one is worse than a blank one (brief rule 15) — this is also
+  // the fixture that proves the itest would notice a default appearing.
+  withEditedFile(
+    JOB,
+    (source) =>
+      replaceOnce(
+        source,
+        'export const NO_OWNER_REPORT_ADDRESS: ReportRecipientResolver = () => null',
+        "export const NO_OWNER_REPORT_ADDRESS: ReportRecipientResolver = () =>\n  'owner@berelax.example.invalid'",
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: an invented owner address is caught',
+        runItest(JOB_ITEST),
+        'sends nothing when there is no owner address on file',
+      ),
+  )
+
+  // 172m. The heartbeat facts, taken from a constant rather than from the row. The acceptance line asks
+  // for the rendered values to be compared TO THE ROW, and this is what proves the itest does that rather
+  // than comparing a literal to the literal that produced it.
+  withEditedFile(
+    JOB,
+    (source) =>
+      replaceOnce(
+        source,
+        '        costToDateFils: facts.costToDateFils,',
+        '        costToDateFils: 0,',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: a cost figure that does not come from the agent rows is caught',
+        runItest(JOB_ITEST),
+        'carries the heartbeat facts the agent_heartbeat row holds',
+      ),
+  )
+
+  // 172n. The marketing kill switch, with its reason removed from the permitted list. This runtime is the
+  // seventh transactional-only one to declare a literal, and the scanner's whole point is that each one is
+  // a DECLARED exception with a reason rather than a `false` somebody wrote in passing (C-AUTO-07).
+  withEditedFile(
+    'scripts/check-send-chokepoint.mjs',
+    (source) =>
+      // The whole ENTRY is deleted rather than re-pointed. The scanner also self-checks that every
+      // DECLARED permission was seen, so renaming the path fails it with "6 of 7 declared literal kill
+      // switches found" — a self-check failure rather than the rule, which proves nothing about the rule.
+      replaceOnce(
+        source,
+        "    'apps/worker/src/jobs/seo-weekly-report.ts',",
+        "    'apps/worker/src/jobs/__gate_fixture_not_a_real_path__.ts',",
+      ).replace(
+        /\n {2}\[\n {4}'apps\/worker\/src\/jobs\/__gate_fixture_not_a_real_path__\.ts',[\s\S]*?\n {2}\],/,
+        '',
+      ),
+    () =>
+      checkRejectedBy(
+        'send choke point: the weekly report runtime declaring an undeclared kill-switch literal is caught',
+        chokepoint(),
+        'marketing-kill-switch-state-has-one-home',
+      ),
+  )
+
+  // 172o. The body, no longer handed to the template's `{{report}}` placeholder. This is what proves the
+  // report really travels through the seeded row rather than being assembled some other way — and the
+  // single-variable shape is the decision behind it: a template with a field per action has to declare a
+  // fixed five, so a three-finding week renders two blanks in the sentence, which is the padding the
+  // acceptance line forbids arriving through the template instead of the renderer.
+  //
+  // The first version of this case edited `DEFAULT_TEMPLATES` instead, and passed: the pass reads
+  // `message_template`, which is seeded from that array ONCE, so editing the array changes nothing until
+  // somebody re-seeds. A gate case that edits a seed source and asserts on a database is a case about
+  // nothing, and this is the note that stops the next person writing it again.
+  withEditedFile(
+    JOB,
+    (source) =>
+      replaceOnce(source, '        values: { report: report.body },', '        values: {},'),
+    () =>
+      checkRejectedBy(
+        'weekly report: a pass that does not hand its body to the template is caught',
+        runItest(JOB_ITEST),
+        'lands in the fake Resend outbox',
+      ),
+  )
+
+  // 172y. Every case above is satisfied by something failing, so this one is satisfied by the real tree:
+  // the renderer's suite and the messaging corpus pass as committed.
+  {
+    const real = runUnit(REPORT_SUITE, 'packages/messaging/src/template-corpus.test.ts')
+    check(
+      'the committed weekly report renderer and the template corpus both pass',
+      !real.failed,
+      real.output,
+    )
+  }
+
+  // 172z. And the database suite, which is where the four claims a pure test cannot reach are made: the
+  // heartbeat facts come from the rows, the template comes from the seed, the HTML part is the bytes the
+  // transport was handed, and F03's divert and ADR 0005's refusal are decided by the real configuration.
+  {
+    const pair = runItest(JOB_ITEST)
+    check(
+      'weekly report: the heartbeat read, the seeded template, the stored HTML part and both F03 halves pass against the real database',
+      !pair.failed,
+      pair.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

@@ -416,10 +416,12 @@ export {
 } from './reporting/statement-queries.ts'
 export {
   type AgentDefinitionRow,
+  type AgentHeartbeatFactsRow,
   type AgentHeartbeatRow,
   type AgentOutcome,
   type AgentRunResult,
   type AlertToRaise,
+  agentHeartbeatFacts,
   agentsWithHeartbeat,
   findAgent,
   openAlerts,

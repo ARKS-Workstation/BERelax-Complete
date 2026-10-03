@@ -108,6 +108,63 @@ function instantOf(value: unknown): number | undefined {
   return value instanceof Date ? value.getTime() : undefined
 }
 
+/**
+ * The three facts a report prints about the agent that produced it.
+ *
+ * G-SEO-07's acceptance line asks for *last success, next run, cost to date in fils* in the weekly email,
+ * *"so a stopped agent is visible in the report as well as the console"*. Two of the three are columns and
+ * the third is a sum, which is why this is one function rather than a caller joining three reads:
+ *
+ *   - `lastSuccessAtIso` is `agent_heartbeat.last_success_at`, which is what the watchdog measures.
+ *   - `nextRunDueAtIso` is DERIVED — `last_run_at + expected_interval_seconds`. Nothing in this schema
+ *     stores a schedule, so this is the honest answer from the rows that exist rather than a cron
+ *     expression copied out of a worker and left to drift. A heartbeat with no `last_run_at` has no next
+ *     run on the books, and that is reported as `null` rather than as "now".
+ *   - `costToDateFils` is `sum(agent_run.cost_fils)`, summed in SQL. A caller paging rows and adding them
+ *     up in TypeScript is the defect `settings-store.itest.ts` recorded one subject along: a capped reader
+ *     makes a growing total pin silently at the cap.
+ *
+ * Returns `undefined` for an agent with no definition row, which is a deployment that never registered it
+ * — distinguishable from an agent that has never run.
+ */
+export interface AgentHeartbeatFactsRow {
+  readonly agentKey: string
+  readonly lastSuccessAtIso: string | null
+  readonly nextRunDueAtIso: string | null
+  readonly costToDateFils: number
+}
+
+export async function agentHeartbeatFacts(
+  sql: Sql,
+  agentKey: string,
+): Promise<AgentHeartbeatFactsRow | undefined> {
+  const [row] = await sql<
+    {
+      lastSuccessAt: Date | null
+      nextRunDueAt: Date | null
+      costToDateFils: string
+    }[]
+  >`
+    select h.last_success_at as "lastSuccessAt",
+           case when h.last_run_at is null then null
+                else h.last_run_at + make_interval(secs => d.expected_interval_seconds)
+           end as "nextRunDueAt",
+           coalesce(
+             (select sum(r.cost_fils) from agent_run r where r.agent_key = d.agent_key), 0
+           )::text as "costToDateFils"
+    from agent_definition d
+    join agent_heartbeat h on h.agent_key = d.agent_key
+    where d.agent_key = ${agentKey}
+  `
+  if (row === undefined) return undefined
+  return {
+    agentKey,
+    lastSuccessAtIso: row.lastSuccessAt === null ? null : row.lastSuccessAt.toISOString(),
+    nextRunDueAtIso: row.nextRunDueAt === null ? null : row.nextRunDueAt.toISOString(),
+    costToDateFils: Number(row.costToDateFils),
+  }
+}
+
 export async function findAgent(
   sql: Sql,
   agentKey: string,

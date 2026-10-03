@@ -20673,7 +20673,7 @@ units:
       effect and the human action required. It carries its own heartbeat facts, so a silent stop is visible
       in the email too.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-MSG-01
@@ -20701,10 +20701,39 @@ units:
       guard re-asserted at this seam)'
     - Playwright captures the rendered HTML preview at 3 viewports x 2 themes with zero pixel diff on an
       unchanged rerun; axe reports zero violations on the preview pane
+    - 'NOTE (G-SEO-07, this unit): the Playwright acceptance line - "captures the rendered HTML preview at
+      3 viewports x 2 themes with zero pixel diff on an unchanged rerun; axe reports zero violations on the
+      preview pane" - is NOT BUILT, and it is deferred to whichever unit owns the admin message inbox
+      (W-SYS, the surface whose preview pane renders message.body_html). The reason: there is no preview
+      PANE in this unit. It adds no route, the HTML part is stored on the message row, and a screenshot
+      matrix needs a registry route of its own plus an entry in the breakpoint harness - so building one
+      here would mean this unit owning a screen whose subject is every message in the system rather than
+      this report. What IS asserted is the thing the matrix would be about: seo-weekly-report.itest.ts
+      compares the stored body_html byte for byte against the HTML the transport was handed, so the preview
+      is the bytes that were sent and not a second rendering of them. ADR 0094 records it. The file list
+      names apps/web/e2e/seo-weekly-report.spec.ts for this reason and it does not exist.'
+    - 'NOTE (G-SEO-07, this unit): the files list names
+      packages/messaging/src/templates/seo-weekly-report.tsx. There is no .tsx. renderEmailHtml is this
+      build''s ONE derivation of an email HTML part from a template body, and a React email renderer would
+      be a second one - the row the admin inbox previews would then hold bytes no other template produces.
+      The frame is a message_template row (seo.weekly_report, en and ar) with a single {{report}} variable,
+      and the body is composed by renderSeoWeeklyReport in packages/core/src/seo/weekly-report.ts, where
+      the readability rules can be measured over the text a reader receives.'
+    - 'NOTE (G-SEO-07, this unit): no migration and no SQLSTATE. The 0144 migration number and the
+      ZY651-ZY660 band are RELEASED. The report reads existing rows - agent_heartbeat, agent_run,
+      seo_gsc_snapshot, message_template - and the one addition to packages/db is a reader,
+      agentHeartbeatFacts, which sums agent_run.cost_fils in SQL and derives the next run from
+      last_run_at + expected_interval_seconds because nothing in this schema stores a schedule.'
+    - 'NOTE (G-SEO-07, this unit): the recipient is nobody, as the fallback review notices already are.
+      NO_OWNER_REPORT_ADDRESS returns null: no table in this build holds a contact address for the owner
+      (Y7-owner-notification-address), and google_connections.google_email is deliberately not used because
+      docs/10 §5 answers "which Google account owns the listing" with "possibly a former agency". The
+      report is composed, its prose is judged, and the pass records that it had nowhere to send it.'
     files:
     - apps/worker/src/jobs/seo-weekly-report.ts
     - packages/messaging/src/templates/seo-weekly-report.tsx
     - apps/web/e2e/seo-weekly-report.spec.ts
+
   - id: H-HARD-01
     order: 175
     title: Security headers, CSP and public-endpoint rate limiting
