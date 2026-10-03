@@ -10,6 +10,8 @@
  */
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, globSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 let failures = 0
 
@@ -65249,6 +65251,886 @@ export function chargebackNetEffectFils(`,
   }
 }
 
+// 205a-205z. (H-MIG-11) The go/no-go shown to be able to say NO about ONE named item, the freeze shown
+//            to be a claim nobody can make by accident, and the cutover rehearsal's "nothing changed"
+//            shown to be a comparison that can fail. Every one of the five things this unit builds is
+//            easy to build in a form that cannot fail — a checklist whose items are all TODO reads as
+//            thorough, a freeze nothing enforces reads as declared, a rehearsal that ran four read-only
+//            steps reads like a rehearsal of a cutover — so ADR 0003 is the acceptance line here rather
+//            than a convention behind it.
+{
+  const FREEZE_REGISTER = 'artifacts/release/freeze.json'
+  const FREEZE_FIXTURE = 'artifacts/release/__gate_fixture__freeze.json'
+  const FINDINGS_FIXTURE = 'artifacts/release/__gate_fixture__findings.json'
+  const CUTOVER_FIXTURE = 'artifacts/cutover/__gate_fixture__run.json'
+  const ROLLBACK_RUNBOOK = 'docs/runbooks/cutover-rollback.md'
+  const FREEZE_WORKFLOW = '.github/workflows/freeze.yml'
+
+  /** The six requirement ids, read out of the module rather than restated. */
+  const REQUIREMENTS = [
+    'external-items-cleared',
+    'milestones-demonstrated',
+    'restore-drill-current',
+    'security-findings-clear',
+    'three-clean-dry-runs',
+    'provisional-settings-confirmed',
+  ]
+
+  // The control for every `--findings` case below: the list this block names has to be the list the
+  // module declares, or each fixture would be judged against requirements it does not mention and every
+  // refusal would arrive for the wrong reason.
+  {
+    const declared = readFileSync('packages/core/src/release/go-no-go.ts', 'utf8')
+    const missing = REQUIREMENTS.filter((id) => !declared.includes(`id: '${id}'`))
+    check(
+      "this block's requirement ids are the ones GO_NO_GO_REQUIREMENTS declares",
+      missing.length === 0,
+      `not declared in packages/core/src/release/go-no-go.ts: ${missing.join(', ')}`,
+    )
+  }
+
+  const findingsFile = (overrides = {}, omit = []) =>
+    `${JSON.stringify(
+      REQUIREMENTS.filter((id) => !omit.includes(id)).map((id) => ({
+        id,
+        state: overrides[id]?.state ?? 'met',
+        detail: overrides[id]?.detail ?? `${id} cleared by a gate fixture`,
+      })),
+      null,
+      2,
+    )}\n`
+
+  const goNoGo = (args) => ['scripts/go-no-go.mjs', ...args]
+
+  // 205a. The real repository, with nothing stubbed. The whole unit turns on this exiting non-zero and
+  //       naming WHAT is unmet, and it is the one case no fixture can make: five of the six requirements
+  //       cannot be cleared here at all.
+  {
+    const refused = runExpectingFailure('node', goNoGo([]))
+    checkRejectedBy(
+      'the go/no-go check refuses this repository and names the rule',
+      refused,
+      'go-live-requirement-not-met',
+    )
+    check(
+      'and names the security engagement and the external items by id, not as a count',
+      refused.output.includes('security-findings-clear') &&
+        refused.output.includes('external-items-cleared'),
+      refused.output,
+    )
+    check(
+      'and prints a row for every one of the six requirements, met ones included',
+      REQUIREMENTS.every((id) => refused.output.includes(id)),
+      refused.output,
+    )
+  }
+
+  // 205b. The control that makes a NO informative: with every requirement met it says GO and exits
+  //       zero. Without this the script is indistinguishable from one that refuses everything, which is
+  //       the kind of gate that gets switched off rather than satisfied.
+  {
+    const cleared = withFixture(FINDINGS_FIXTURE, findingsFile(), () =>
+      run('node', goNoGo(['--findings', FINDINGS_FIXTURE])),
+    )
+    check(
+      'with every requirement met the check says go and exits zero',
+      !cleared.failed && String(cleared.output).includes('VERDICT: go'),
+      String(cleared.output),
+    )
+  }
+
+  // 205c. The acceptance line, exactly: one unmet item names THAT item and no other.
+  {
+    const one = withFixture(
+      FINDINGS_FIXTURE,
+      findingsFile({
+        'three-clean-dry-runs': { state: 'unmet', detail: 'only two runs are recorded' },
+      }),
+      () => runExpectingFailure('node', goNoGo(['--findings', FINDINGS_FIXTURE])),
+    )
+    checkRejectedBy('one unmet requirement is refused by name', one, 'go-live-requirement-not-met')
+    const problems = one.output.split('\n').filter((line) => line.includes('[go-live-requirement-'))
+    check(
+      'and it is the ONLY problem reported, naming that requirement',
+      problems.length === 1 && problems[0].includes('three-clean-dry-runs'),
+      `${problems.length} problem line(s):\n${problems.join('\n')}`,
+    )
+    check(
+      'and no other requirement id appears in any problem line',
+      REQUIREMENTS.filter((id) => id !== 'three-clean-dry-runs').every(
+        (id) => !problems[0].includes(id),
+      ),
+      problems.join('\n'),
+    )
+  }
+
+  // 205d. An UNKNOWN blocks, and says it was an absence rather than a refusal. The live instance is the
+  //       restore drill's maximum age, which is deliberately unconfigured (ADR 0123) — so without this
+  //       rule a release would clear on a comparison against nothing.
+  checkRejectedBy(
+    'a requirement no fact answers blocks, by its own rule',
+    withFixture(
+      FINDINGS_FIXTURE,
+      findingsFile({
+        'restore-drill-current': { state: 'unknown', detail: 'no maximum age is configured' },
+      }),
+      () => runExpectingFailure('node', goNoGo(['--findings', FINDINGS_FIXTURE])),
+    ),
+    'go-live-requirement-unanswered',
+  )
+
+  // 205e. A declared requirement the gatherer stopped producing. The regression nothing else can see: a
+  //       shorter examined set reads as a cleaner build.
+  checkRejectedBy(
+    'a declared requirement with no finding at all is refused by name',
+    withFixture(FINDINGS_FIXTURE, findingsFile({}, ['milestones-demonstrated']), () =>
+      runExpectingFailure('node', goNoGo(['--findings', FINDINGS_FIXTURE])),
+    ),
+    'go-no-go-requirement-not-examined',
+  )
+
+  // 205f. The floor (ADR 0002). Every verdict is a walk over two lists, and a walk over an empty one
+  //       objects to nothing — which for a release gate is a GO.
+  checkRejectedBy(
+    'a verdict over no findings at all is refused rather than reported as a go',
+    withFixture(FINDINGS_FIXTURE, '[]\n', () =>
+      runExpectingFailure('node', goNoGo(['--findings', FINDINGS_FIXTURE])),
+    ),
+    'go-no-go-examined-nothing',
+  )
+
+  // 205g. A finding for a requirement the list does not declare, which is how a renamed requirement
+  //       would come to be answered and unexamined at the same time.
+  checkRejectedBy(
+    'a finding for an undeclared requirement is refused by name',
+    withFixture(
+      FINDINGS_FIXTURE,
+      `${JSON.stringify([
+        ...JSON.parse(findingsFile()),
+        { id: 'invented-requirement', state: 'met', detail: 'cleared' },
+      ])}\n`,
+      () => runExpectingFailure('node', goNoGo(['--findings', FINDINGS_FIXTURE])),
+    ),
+    'go-no-go-finding-not-declared',
+  )
+
+  // --- the freeze ---------------------------------------------------------------------------------
+
+  const freeze = (over) =>
+    `${JSON.stringify(
+      {
+        registerVersion: 1,
+        state: 'frozen',
+        claim: {
+          declaredBy: 'owner',
+          declaredAtIso: '2097-04-18T06:00:00.000Z',
+          rationale: 'a gate fixture freeze, removed in a finally',
+        },
+        openQuestionId: null,
+        ...over,
+      },
+      null,
+      2,
+    )}\n`
+
+  const freezeArgs = (path, ...rest) => ['scripts/freeze.mjs', '--register', path, ...rest]
+
+  // 205h. The shipped register passes. The control for every refusal below, and the thing that makes
+  //       `pnpm freeze` safe to put in `pnpm verify`.
+  check(
+    'the shipped freeze register is a well-formed record of the absence of a freeze',
+    !run('pnpm', ['freeze']).failed,
+    run('pnpm', ['freeze']).output,
+  )
+
+  // 205i. The whole point of the register: a frozen tree nobody is behind. Without this the state is a
+  //       value that arrived from nowhere and anybody can lift.
+  checkRejectedBy(
+    'a frozen register with no claim behind it is refused by name',
+    withFixture(FREEZE_FIXTURE, freeze({ claim: null }), () =>
+      runExpectingFailure('node', freezeArgs(FREEZE_FIXTURE, '--register-only')),
+    ),
+    'freeze-declared-without-a-claimant',
+  )
+
+  // 205j. A claimant that is not an F07 role. A name typed into a JSON file is a string this build
+  //       invented (brief rule 10), and it is exactly what somebody declaring a freeze would type.
+  checkRejectedBy(
+    'a freeze declared by something that is not a role is refused by name',
+    withFixture(
+      FREEZE_FIXTURE,
+      freeze({
+        claim: {
+          declaredBy: 'the release manager',
+          declaredAtIso: '2097-04-18T06:00:00.000Z',
+          rationale: 'a gate fixture',
+        },
+      }),
+      () => runExpectingFailure('node', freezeArgs(FREEZE_FIXTURE, '--register-only')),
+    ),
+    'freeze-claimant-is-not-a-role',
+  )
+
+  // 205k. An open register that names no open question: the state that reads as "the freeze is over"
+  //       rather than as "nobody has declared one and here is what is missing" (brief rule 15).
+  checkRejectedBy(
+    'an open register naming no open question is refused by name',
+    withFixture(FREEZE_FIXTURE, freeze({ state: 'open', claim: null, openQuestionId: null }), () =>
+      runExpectingFailure('node', freezeArgs(FREEZE_FIXTURE, '--register-only')),
+    ),
+    'freeze-open-without-an-open-question',
+  )
+
+  // 205l. The merge rule, refusing. The acceptance line's "proven by a fixture the gate refuses".
+  {
+    const refused = withFixture(FREEZE_FIXTURE, freeze({}), () =>
+      runExpectingFailure('node', freezeArgs(FREEZE_FIXTURE, '--labels', 'bug,documentation')),
+    )
+    checkRejectedBy(
+      'a change not labelled launch-blocking is refused while the tree is frozen',
+      refused,
+      'merge-refused-while-the-tree-is-frozen',
+    )
+    check(
+      'and the refusal names the role and the instant somebody froze it at',
+      refused.output.includes('owner') && refused.output.includes('2097-04-18T06:00:00.000Z'),
+      refused.output,
+    )
+  }
+
+  // 205m. And permitting, which is what keeps it a rule rather than a stop. A gate that refuses every
+  //       merge during a freeze is a gate somebody deletes on the first launch-blocking fix.
+  {
+    const permitted = withFixture(FREEZE_FIXTURE, freeze({}), () =>
+      run('node', freezeArgs(FREEZE_FIXTURE, '--labels', 'bug,launch-blocking')),
+    )
+    check(
+      'a change labelled launch-blocking is permitted during a freeze',
+      !permitted.failed && String(permitted.output).includes('MERGE: permitted'),
+      String(permitted.output),
+    )
+  }
+
+  // 205n. ABSENT label information is a different refusal from a change with no labels, and this is the
+  //       case that keeps them apart: a workflow whose label expression broke would otherwise report
+  //       the strictest possible answer for a reason that has nothing to do with the change.
+  checkRejectedBy(
+    'a merge judged with no label information at all is refused by its own rule',
+    withFixture(FREEZE_FIXTURE, freeze({}), () =>
+      runExpectingFailure('node', freezeArgs(FREEZE_FIXTURE)),
+    ),
+    'freeze-merge-labels-not-supplied',
+  )
+
+  // 205o. The workflow has to pass the labels, or the rule above never runs with any. Asserted on the
+  //       expression because that is the part nothing else reads.
+  {
+    const workflow = readFileSync(FREEZE_WORKFLOW, 'utf8')
+    check(
+      'the freeze workflow runs the merge rule with the pull request’s own labels',
+      workflow.includes('scripts/freeze.mjs --labels') &&
+        workflow.includes("join(github.event.pull_request.labels.*.name, ',')"),
+      workflow,
+    )
+    check(
+      'and re-runs when a label is added or removed, so its answer is current',
+      /types:\s*\[[^\]]*labeled[^\]]*\]/.test(workflow) &&
+        /types:\s*\[[^\]]*unlabeled[^\]]*\]/.test(workflow),
+      workflow,
+    )
+  }
+
+  // --- the cutover rehearsal ----------------------------------------------------------------------
+
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  check(
+    'the cutover cases have a database to checksum, so they are run rather than skipped',
+    typeof dbUrl === 'string' && dbUrl.length > 0,
+    'neither TEST_DATABASE_URL nor DATABASE_URL is set; a checksum comparison nobody ran is not evidence',
+  )
+
+  if (typeof dbUrl === 'string' && dbUrl.length > 0) {
+    // 205p. The rehearsal's one claim, against the real database: it changed no table, and it examined
+    //       a non-zero number of them. The second half is the floor — "nothing changed" over an empty
+    //       table list is what a wrong schema filter looks like from the inside.
+    const rehearsal = runExpectingFailure('node', [
+      'scripts/cutover.mjs',
+      '--dry-run',
+      '--out',
+      CUTOVER_FIXTURE,
+    ])
+    try {
+      const examined = /tables checksummed: (\d+)/.exec(rehearsal.output)
+      check(
+        'the cutover dry run checksums a non-zero number of tables',
+        examined !== null && Number(examined[1]) > 50,
+        rehearsal.output.slice(-4000),
+      )
+      check(
+        'and changes none of them',
+        !rehearsal.output.includes('cutover-dry-run-changed-a-table'),
+        rehearsal.output.slice(-4000),
+      )
+      check(
+        'and records the window as a floor rather than as the cutover’s duration',
+        /window: \d+ ms over \d+ of 11 declared step\(s\)/.test(rehearsal.output) &&
+          rehearsal.output.includes('this is a FLOOR'),
+        rehearsal.output.slice(-4000),
+      )
+      // It exits non-zero because the go/no-go step refuses, which is today's correct answer and is
+      // asserted rather than tolerated: a rehearsal that reported success while the preflight said no
+      // would be the decoration this whole block is about.
+      checkRejectedBy(
+        'and refuses the run because its first preflight step refuses',
+        rehearsal,
+        'cutover-step-failed',
+      )
+
+      // 205q. A recorded run is RE-JUDGED by the same functions, so the gate and the run cannot come to
+      //       disagree about what a clean rehearsal means. Re-reading the artefact must reach the same
+      //       verdict it was written with.
+      const rejudged = runExpectingFailure('node', [
+        'scripts/cutover.mjs',
+        '--verify',
+        CUTOVER_FIXTURE,
+      ])
+      check(
+        'the recorded run re-judges to the same verdict it was written with',
+        rejudged.output.includes('cutover-step-failed') &&
+          !rejudged.output.includes('cutover-run-digest-mismatch'),
+        rejudged.output.slice(-3000),
+      )
+
+      // 205r. A figure edited by hand. BOTH rules must fire: the digest, and the rule the edit breaks —
+      //       the script reports the digest problem and goes on judging, because a hand edit has to be
+      //       visible as the thing it broke and not only as a broken hash.
+      {
+        const record = JSON.parse(readFileSync(CUTOVER_FIXTURE, 'utf8'))
+        const edited = structuredClone(record)
+        edited.tableChecksums[0].after = 'edited-by-hand'
+        const refused = withEditedFile(
+          CUTOVER_FIXTURE,
+          () => `${JSON.stringify(edited, null, 2)}\n`,
+          () => runExpectingFailure('node', ['scripts/cutover.mjs', '--verify', CUTOVER_FIXTURE]),
+        )
+        checkRejectedBy(
+          'a checksum edited by hand is refused as a changed table',
+          refused,
+          'cutover-dry-run-changed-a-table',
+        )
+        check(
+          'and as a broken digest, because recomputing it means running the sequence again',
+          refused.output.includes('cutover-run-digest-mismatch'),
+          refused.output.slice(-3000),
+        )
+        check(
+          'and names the table that moved rather than reporting that something changed',
+          refused.output.includes(record.tableChecksums[0].table),
+          refused.output.slice(-3000),
+        )
+      }
+
+      // 205s. A writing step recorded as performed in a dry run. The claim the checksums are evidence
+      //       for, asserted from the other side: a rehearsal that ran the import is not a rehearsal.
+      {
+        const record = JSON.parse(readFileSync(CUTOVER_FIXTURE, 'utf8'))
+        const edited = structuredClone(record)
+        const step = edited.steps.find((entry) => entry.id === 'final-import')
+        step.performed = true
+        step.durationMs = 1234
+        step.skippedReason = null
+        checkRejectedBy(
+          'a writing step performed during a dry run is refused by name',
+          withEditedFile(
+            CUTOVER_FIXTURE,
+            () => `${JSON.stringify(edited, null, 2)}\n`,
+            () => runExpectingFailure('node', ['scripts/cutover.mjs', '--verify', CUTOVER_FIXTURE]),
+          ),
+          'cutover-dry-run-performed-a-writing-step',
+        )
+      }
+
+      // 205t. The floor again, from the artefact side: a recorded run that checksummed nothing.
+      {
+        const record = JSON.parse(readFileSync(CUTOVER_FIXTURE, 'utf8'))
+        const edited = { ...record, tableChecksums: [] }
+        checkRejectedBy(
+          'a recorded run that checksummed no table is refused rather than read as clean',
+          withEditedFile(
+            CUTOVER_FIXTURE,
+            () => `${JSON.stringify(edited, null, 2)}\n`,
+            () => runExpectingFailure('node', ['scripts/cutover.mjs', '--verify', CUTOVER_FIXTURE]),
+          ),
+          'cutover-examined-no-tables',
+        )
+      }
+
+      // 205u. A declared step missing from the record. A sequence that stopped early produces a shorter
+      //       record, which reads exactly like a shorter sequence.
+      {
+        const record = JSON.parse(readFileSync(CUTOVER_FIXTURE, 'utf8'))
+        const edited = {
+          ...record,
+          steps: record.steps.filter((entry) => entry.id !== 'preflight-freeze'),
+        }
+        checkRejectedBy(
+          'a declared step absent from the record is refused by name',
+          withEditedFile(
+            CUTOVER_FIXTURE,
+            () => `${JSON.stringify(edited, null, 2)}\n`,
+            () => runExpectingFailure('node', ['scripts/cutover.mjs', '--verify', CUTOVER_FIXTURE]),
+          ),
+          'cutover-step-not-recorded',
+        )
+      }
+    } finally {
+      rmSync(CUTOVER_FIXTURE, { force: true })
+    }
+
+    // --- the rollback -----------------------------------------------------------------------------
+
+    // 205v. The rollback export's own claim, against the real database: it issues nothing but SELECTs,
+    //       and that is proved by checksums rather than asserted. "Without touching the ledger" is the
+    //       acceptance line and this is strictly stronger.
+    {
+      const out = join(tmpdir(), `berelax-gate-rollback-${process.pid}`)
+      try {
+        const clean = run('node', ['scripts/rollback.mjs', '--out', out])
+        check(
+          'the rollback export changes no table at all',
+          !clean.failed &&
+            /tables checksummed before and after: \d+; changed: 0/.test(String(clean.output)),
+          String(clean.output).slice(-3000),
+        )
+        check(
+          'and prints the four things a rollback cannot undo, from the runbook',
+          ['Issued tax documents', 'Messages that were sent', 'Audit rows', 'Erasures'].every(
+            (subject) => String(clean.output).includes(subject),
+          ),
+          String(clean.output).slice(-3000),
+        )
+      } finally {
+        rmSync(out, { recursive: true, force: true })
+      }
+    }
+
+    // 205w. An export destination inside this repository. A committed phone number cannot be rotated,
+    //       which is the whole reason `pnpm pii` exists, and a default path would eventually be one.
+    checkRejectedBy(
+      'an export destination inside this repository is refused',
+      runExpectingFailure('node', ['scripts/rollback.mjs', '--out', './logs']),
+      'is inside',
+    )
+  }
+
+  // 205x. The irreversible set is read from the runbook rather than restated in the script, so a runbook
+  //       that stops declaring one refuses the export. This is the pair to
+  //       `packages/fixtures/src/cutover-runbook.test.ts`, which asserts the document from the other side.
+  //
+  //       The anchor is the no-recall sentence rather than the credit-note one, and that is not a
+  //       preference: `credit note` appears TWICE in that document, so `replaceOnce` would refuse the
+  //       anchor — and a bare `String.replace` would have edited the first of the two and left the
+  //       phrase the rule looks for still in the file, which is brief rule 20's failure exactly.
+  checkRejectedBy(
+    'a rollback runbook that stops declaring an irreversible subject refuses the export',
+    withEditedFile(
+      ROLLBACK_RUNBOOK,
+      (text) => replaceOnce(text, 'There is no recall.', 'A recall can be requested.'),
+      () =>
+        runExpectingFailure('node', [
+          'scripts/rollback.mjs',
+          '--out',
+          join(tmpdir(), `berelax-gate-rollback-refused-${process.pid}`),
+        ]),
+    ),
+    'rollback-runbook-does-not-declare-an-irreversible-subject',
+  )
+
+  // 205y. And with no irreversible section at all, which is the floor: every subject check is a
+  //       substring search, and a search over a document whose section has gone finds the phrases
+  //       scattered in prose about something else.
+  checkRejectedBy(
+    'a rollback runbook with no irreversible section at all is refused by its own rule',
+    withEditedFile(
+      ROLLBACK_RUNBOOK,
+      (text) =>
+        replaceOnce(text, '## 3. What a rollback cannot undo', '## 3. Other considerations'),
+      () =>
+        runExpectingFailure('node', [
+          'scripts/rollback.mjs',
+          '--out',
+          join(tmpdir(), `berelax-gate-rollback-floor-${process.pid}`),
+        ]),
+    ),
+    'rollback-runbook-has-no-irreversible-section',
+  )
+
+  // 205z. The register ships OPEN and the gate that reads it is in `pnpm verify`; the two go-live checks
+  //       are not. Asserted because the arrangement is the decision: a check that exits non-zero on a
+  //       business fact nobody can fix in code is a check somebody deletes, and a check on the
+  //       repository's own integrity belongs on every commit.
+  {
+    const chain = JSON.parse(readFileSync('package.json', 'utf8')).scripts.verify
+    check(
+      'pnpm freeze is a verify step and pnpm go-no-go is deliberately not',
+      chain.includes('pnpm freeze') && !chain.includes('pnpm go-no-go'),
+      chain,
+    )
+    const register = JSON.parse(readFileSync(FREEZE_REGISTER, 'utf8'))
+    check(
+      'and the shipped register is open, with no claim and an open question naming what is missing',
+      register.state === 'open' &&
+        register.claim === null &&
+        typeof register.openQuestionId === 'string' &&
+        register.openQuestionId.length > 0,
+      JSON.stringify(register),
+    )
+  }
+}
+
+// 206a-206z. (B-M1) The milestone gate shown to be able to FAIL. Four claims docs/14 §3 calls
+//            non-negotiable, a census that re-derives them over every row the database holds, and the
+//            one thing that makes any of it worth having: a row planted past close makes the job exit
+//            non-zero NAMING the rule. The two guards the database already enforces — the therapist
+//            exclusion constraint and the capacity trigger — cannot be broken from here without
+//            dropping them and committing, so they are watched failing inside a rolled-back transaction
+//            by `packages/fixtures/src/domain-invariants.itest.ts` instead, and what is proved here is
+//            the half that needs a COMMITTED row and a separate connection.
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const CENSUS = 'packages/core/src/ops/domain-invariants.ts'
+  const WALKTHROUGH = 'apps/web/src/m1-walkthrough.itest.ts'
+  const MARKER = 'gate-206-fixture'
+
+  check(
+    'the domain invariant cases have a database to census, so they are run rather than skipped',
+    typeof dbUrl === 'string' && dbUrl.length > 0,
+    'neither TEST_DATABASE_URL nor DATABASE_URL is set; a census nobody ran is not evidence',
+  )
+
+  // 206a. The four claims are declared, with docs/14 §3's own words. Read from source rather than
+  //       restated: the ids below are what every case in this block asserts against, and a block whose
+  //       list had drifted from the module's would be testing four claims nobody makes.
+  {
+    const source = readFileSync(CENSUS, 'utf8')
+    const ids = [
+      'NO_DOUBLE_BOOKED_THERAPIST',
+      'NO_ROOM_OVER_CAPACITY',
+      'NOTHING_PAST_CLOSE_WITH_TURNAROUND',
+      'AFTER_MIDNIGHT_BUSINESS_DAY',
+    ]
+    const missing = ids.filter((id) => !source.includes(`id: '${id}',`))
+    check(
+      "the census declares docs/14 §3's four claims by id",
+      missing.length === 0,
+      `not declared in ${CENSUS}: ${missing.join(', ')}`,
+    )
+    for (const claim of [
+      'no double-booked therapist',
+      'no room over capacity',
+      'nothing scheduled past close once turnaround is counted',
+      'an after-midnight slot resolves to the correct business day',
+    ]) {
+      check(
+        `and carries docs/14 §3's own wording: "${claim}"`,
+        source.includes(claim),
+        `${CENSUS} does not contain that clause verbatim`,
+      )
+    }
+  }
+
+  if (typeof dbUrl === 'string' && dbUrl.length > 0) {
+    /** One statement set, committed, so the census's own connection can see it. */
+    const psqlCommit = (statement) =>
+      run('psql', ['--no-psqlrc', '-v', 'ON_ERROR_STOP=1', '-q', dbUrl, '-c', statement])
+
+    /**
+     * Plants one appointment and removes it afterwards, whatever happens.
+     *
+     * COMMITTED, deliberately: the census runs in its own process over its own connection, so a row
+     * inside an open transaction is invisible to it — and the rows this gate is about are exactly the
+     * ones that were committed while a guard was absent. The `finally` is the whole reason this is a
+     * helper: a planted breach left behind fails every later gate in this file with a violation that has
+     * nothing to do with the case under test.
+     */
+    const withPlantedAppointment = (periodSql, tradingDateSql, turnaround, body) => {
+      const planted = psqlCommit(
+        `insert into customer (phone_e164, created_via) values ('+971590744900', 'front_desk') ` +
+          `on conflict (phone_e164) do nothing; ` +
+          `insert into booking (customer_id, source, notes) ` +
+          `select id, 'front_desk', '${MARKER}' from customer where phone_e164 = '+971590744900'; ` +
+          `insert into appointment (booking_id, trading_date, service_variant_id, shape, therapist_id, ` +
+          `room_id, period, status, delivery_id, room_places, turnaround_minutes, ` +
+          `therapist_buffer_minutes, gross_price_fils, net_fils, vat_fils) ` +
+          `select b.id, ${tradingDateSql}, sv.id, 'solo', e.id, r.id, ${periodSql}, 'confirmed', ` +
+          `uuid_generate_v7(), 1, ${turnaround}, 10, 21000, 20000, 1000 ` +
+          `from booking b, service_variant sv, employee e, rooms r ` +
+          `where b.notes = '${MARKER}' and r.code = 'room-3' ` +
+          `and sv.id = (select id from service_variant order by id limit 1) ` +
+          `and e.id = (select id from employee order by staff_reference desc limit 1) limit 1`,
+      )
+      try {
+        if (planted.failed) {
+          return { planted, result: { failed: false, output: '' } }
+        }
+        return { planted, result: body() }
+      } finally {
+        psqlCommit(
+          `delete from appointment where booking_id in ` +
+            `(select id from booking where notes = '${MARKER}'); ` +
+            `delete from booking where notes = '${MARKER}'; ` +
+            `delete from customer where phone_e164 = '+971590744900'`,
+        )
+      }
+    }
+
+    // The trading date every case below plants on: one `business_day` holds, far enough ahead that no
+    // suite books on it. Read from the table rather than chosen, because three of the four claims are
+    // measured against that row's own opening and closing instants.
+    // Derived from the table's own horizon rather than from `current_date + n`: the seeded calendar ends
+    // a fixed number of days after the date the seed ran, so an offset from today falls off the end as
+    // soon as the database is a fortnight old — and a NULL trading date then fails the fixture INSERT
+    // with a not-null violation that says nothing about this gate. The second-to-last day, so there is
+    // always a NEXT one for the business-day case.
+    const HORIZON = `(select max(trading_date) - 1 from business_day)`
+    const DAY = `(select trading_date from business_day where trading_date = ${HORIZON})`
+    const OPENS = `(select opens_at from business_day where trading_date = ${HORIZON})`
+    const CLOSES = `(select closes_at from business_day where trading_date = ${HORIZON})`
+
+    // 206b. The CONTROL, and it comes first: a correct appointment makes the census exit zero. Without
+    //       it every refusal below would be satisfied by a census that refuses everything, which is the
+    //       shape a gate gets switched off for.
+    {
+      const { planted, result } = withPlantedAppointment(
+        `tstzrange(${OPENS} + interval '2 hours', ${OPENS} + interval '3 hours', '[)')`,
+        DAY,
+        20,
+        () => run('pnpm', ['domain-invariants']),
+      )
+      check(
+        'the census can plant a correct appointment at all',
+        !planted.failed,
+        `the fixture INSERT failed, so every case in this block would be about nothing:\n${planted.output}`,
+      )
+      check(
+        'a correct appointment passes all four claims and the census exits zero',
+        !result.failed && String(result.output).includes('VERDICT: all four hold'),
+        String(result.output).slice(-4000),
+      )
+      check(
+        'and the census says how many appointments, rooms and trading dates it examined',
+        /examined: [1-9]\d* appointment\(s\), [1-9]\d* room\(s\), [1-9]\d* trading date\(s\)/.test(
+          String(result.output),
+        ),
+        String(result.output).slice(-4000),
+      )
+    }
+
+    // 206c. The acceptance line's own fixture: *"a deliberately broken fixture (an appointment inserted
+    //       past close) is proven to fail the invariant job"*. Nothing in the database refuses this row
+    //       — the close is the availability solver's rule and not a constraint — so it is exactly the
+    //       kind of row that satisfies every test in the repository and breaks the claim.
+    {
+      const { result } = withPlantedAppointment(
+        `tstzrange(${CLOSES} - interval '30 minutes', ${CLOSES} + interval '30 minutes', '[)')`,
+        DAY,
+        0,
+        () => runExpectingFailure('pnpm', ['domain-invariants']),
+      )
+      checkRejectedBy(
+        'an appointment inserted past close makes the invariant job fail, by name',
+        result,
+        'domain-invariant-scheduled-past-close',
+      )
+      check(
+        'and the breach is reported against the claim rather than as a bare non-zero exit',
+        result.output.includes('BREACH  NOTHING_PAST_CLOSE_WITH_TURNAROUND'),
+        result.output.slice(-4000),
+      )
+    }
+
+    // 206d. The half of the close rule that only exists because turnaround is counted: a treatment that
+    //       ends EXACTLY at close is correct, and the same treatment with twenty minutes of turnaround
+    //       after it is not. A check comparing the treatment's end alone would pass this row, which is
+    //       what docs/14 §3's "once turnaround is counted" is there to prevent.
+    {
+      const { result } = withPlantedAppointment(
+        `tstzrange(${CLOSES} - interval '1 hour', ${CLOSES}, '[)')`,
+        DAY,
+        20,
+        () => runExpectingFailure('pnpm', ['domain-invariants']),
+      )
+      checkRejectedBy(
+        'an appointment whose TURNAROUND runs past close is refused by the same rule',
+        result,
+        'domain-invariant-scheduled-past-close',
+      )
+      check(
+        'and the message names the turnaround rather than only the end of the treatment',
+        /holds its room for 20 more minute\(s\)/.test(result.output),
+        result.output.slice(-4000),
+      )
+    }
+
+    // 206e. And the control for 206d, which is the one that would be missing if this gate had been
+    //       written by somebody in a hurry: the same period with NO turnaround ends exactly at close and
+    //       is CORRECT. The close is inclusive on the closing side (hours-override.ts), so an exclusive
+    //       comparison would strand the last booking of every single day.
+    {
+      const { result } = withPlantedAppointment(
+        `tstzrange(${CLOSES} - interval '1 hour', ${CLOSES}, '[)')`,
+        DAY,
+        0,
+        () => run('pnpm', ['domain-invariants']),
+      )
+      check(
+        'a treatment ending exactly at close with no turnaround is accepted',
+        !result.failed,
+        String(result.output).slice(-4000),
+      )
+    }
+
+    // 206f. The fourth claim: an after-midnight start filed on the calendar date it falls on rather than
+    //       on the trading date it belongs to. Trading runs 11:00-02:00, so the half-hour before close is
+    //       01:30 the following morning and belongs to the PREVIOUS trading date.
+    {
+      const NEXT_DAY = `(select trading_date from business_day where trading_date > ${DAY} order by trading_date limit 1)`
+      const { result } = withPlantedAppointment(
+        `tstzrange(${CLOSES} - interval '30 minutes', ${CLOSES} - interval '15 minutes', '[)')`,
+        NEXT_DAY,
+        0,
+        () => runExpectingFailure('pnpm', ['domain-invariants']),
+      )
+      checkRejectedBy(
+        'an after-midnight appointment filed on the wrong business day is refused by name',
+        result,
+        'domain-invariant-wrong-business-day',
+      )
+      check(
+        'and the message says which window the start fell outside',
+        result.output.includes('filed on the wrong business day'),
+        result.output.slice(-4000),
+      )
+    }
+  }
+
+  // 206g. The three routes W-SITE-11 deferred here are covered BECAUSE this suite audits them, and the
+  //       coverage is DERIVED rather than declared. So removing the axe call from the walkthrough must
+  //       make `pnpm perf-layers` report them as uncovered — without this, the three paths could be
+  //       taken out of the baseline by anybody and nothing would notice they were never audited.
+  {
+    const refused = withEditedFile(
+      WALKTHROUGH,
+      (text) => replaceOnce(text, 'const result = await auditPage(page, {', 'const result = ({'),
+      () => runExpectingFailure('pnpm', ['perf-layers']),
+    )
+    checkRejectedBy(
+      'removing the axe run from the walkthrough makes the three routes read as uncovered',
+      refused,
+      'a-new-public-document-is-covered-by-axe-and-a-baseline',
+    )
+    for (const path of ['/tag-loader', '/therapists', '/therapists/[slug]']) {
+      check(
+        `and names ${path} specifically`,
+        refused.output.includes(path),
+        refused.output.slice(-3000),
+      )
+    }
+  }
+
+  // 206h. The same from the other side: the baseline may not keep listing a route that IS covered, or
+  //       the list would excuse nothing while reading as an allowance. This is the rule that stops the
+  //       three being quietly put back.
+  {
+    const refused = withEditedFile(
+      'lighthouse/budget.json',
+      (text) => replaceOnce(text, '    "/treatments",', '    "/therapists",\n    "/treatments",'),
+      () => runExpectingFailure('pnpm', ['perf-layers']),
+    )
+    checkRejectedBy(
+      'putting a now-covered route back into the uncovered baseline is refused',
+      refused,
+      'a-new-public-document-is-covered-by-axe-and-a-baseline',
+    )
+  }
+
+  // 206i. The census is a `pnpm verify` step AND a CI job of its own, and the job runs the walkthrough
+  //       BEFORE it. That order is load-bearing rather than tidy: the census refuses a run that examined
+  //       no appointment, and a freshly migrated and seeded database holds none — so a job that seeded
+  //       and censused would fail on the floor, correctly and uselessly.
+  {
+    const workflow = readFileSync('.github/workflows/ci.yml', 'utf8')
+    const chain = JSON.parse(readFileSync('package.json', 'utf8')).scripts.verify
+    // NOT a verify step, and this case is the record of why. It was one, and the floor fired: measured,
+    // four appointment-heavy suites run in order leave ZERO appointment rows behind, and a freshly
+    // seeded database has none either — so the step failed on "examined nothing" in the one place it
+    // ran. A gate that fails every commit for a reason nobody can fix in the commit is a gate somebody
+    // deletes, so the census moved to the job that gives it an estate and
+    // `scripts/check-gate-registry.mjs` carries the reason as a declared CI-only entry.
+    check(
+      'the domain invariant census is NOT a verify step, because it would fail on the floor there',
+      !chain.includes('pnpm domain-invariants'),
+      chain,
+    )
+    check(
+      'and its CI-only status is DECLARED with a reason rather than inferred from its absence',
+      readFileSync('scripts/check-gate-registry.mjs', 'utf8').includes("'pnpm domain-invariants',"),
+      'pnpm domain-invariants is registered in case 29 and declared nowhere as CI-only',
+    )
+    // The per-commit half: docs/14 §3 says these four run on EVERY unit, and what runs on every unit is
+    // the itest — in the integration suite, planting one breach per claim with the database's own guard
+    // dropped. Without this the move above would have quietly reduced the four claims to a CI job.
+    check(
+      'and the four claims are exercised on every verify by the planted-breach suite',
+      readFileSync('vitest.integration.config.ts', 'utf8').includes('packages/**/*.itest.ts') &&
+        existsSync('packages/fixtures/src/domain-invariants.itest.ts'),
+      'packages/fixtures/src/domain-invariants.itest.ts is not reachable from the integration glob',
+    )
+    check(
+      'and it has a CI job of its own',
+      /^\s{2}domain-invariants:$/m.test(workflow),
+      'no `domain-invariants:` job in .github/workflows/ci.yml',
+    )
+    const walkthroughStep = workflow.indexOf('apps/web/src/m1-walkthrough.itest.ts')
+    const censusStep = workflow.lastIndexOf('run: pnpm domain-invariants')
+    check(
+      'and runs the M1 walkthrough before it, so the census has an estate to examine',
+      walkthroughStep !== -1 && censusStep !== -1 && walkthroughStep < censusStep,
+      `walkthrough at ${walkthroughStep}, census at ${censusStep}`,
+    )
+    const buildStep = workflow.indexOf('pnpm --filter @berelax/web build')
+    check(
+      'and builds the application before driving it (brief rule 17)',
+      buildStep !== -1 && buildStep < walkthroughStep,
+      `build at ${buildStep}, walkthrough at ${walkthroughStep}`,
+    )
+  }
+
+  // 206j. The walkthrough's own shape, asserted because it is what every claim above rests on: it drives
+  //       a BROWSER through all five steps rather than fetching, and it does not confuse the two gaps it
+  //       found with the links that work.
+  {
+    const source = readFileSync(WALKTHROUGH, 'utf8')
+    for (const [what, needle] of [
+      ['starts the built application through the harness', 'startWebServer({'],
+      ['drives a real browser', 'chromium.launch('],
+      [
+        'clicks the slot grid rather than fetching a URL with a slot in it',
+        'button[name="${BOOK_FIELDS.slot}"]',
+      ],
+      ['reaches the confirmation state', 'data-book-state="booked"'],
+      ['reads the appointment back off the database', 'from appointment where booking_id'],
+    ]) {
+      check(`the walkthrough ${what}`, source.includes(needle), `${WALKTHROUGH} has no ${needle}`)
+    }
+    check(
+      'and does not spawn `next start` itself (brief rule 19)',
+      !/spawn\(\s*'pnpm'/.test(source) && !source.includes("'next', 'start'"),
+      `${WALKTHROUGH} spawns the application itself`,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -66118,6 +67000,12 @@ export function chargebackNetEffectFils(`,
     'pnpm headers',
     'pnpm drill-age',
     'pnpm findings',
+    // H-MIG-11's freeze register integrity, in the position `pnpm verify` runs it. Registered here
+    // because that is what makes dropping it from CI a failing build rather than the silent loss of the
+    // one check that holds a frozen tree to naming the role that froze it, the instant and the reason.
+    // The MERGE rule is in `.github/workflows/freeze.yml` and is not a `verify` step: only a pull
+    // request carries labels.
+    'pnpm freeze',
     'pnpm perf-budget',
     'pnpm egress',
     // And the SAQ-A scan beside it, for the same reason in the other direction: it is the one check that
@@ -66148,6 +67036,14 @@ export function chargebackNetEffectFils(`,
     // the one check that re-adds every money identity over every row the database holds, rather than over
     // the rows one unit's own fixture wrote. Its POSITION is asserted separately, in the 152a-152z block.
     'pnpm money-invariants',
+    // B-M1's domain invariant census. Registered here and declared CI-ONLY in
+    // `scripts/check-gate-registry.mjs`, which carries the measured reason: the census refuses an estate
+    // it examined nothing in (ADR 0002), and the integration suite cleans up after itself, so in
+    // `pnpm verify` the step would fail on the floor for every unit agent on every commit. The only run
+    // that HAS an estate is the `domain-invariants` job, which drives the M1 walkthrough first.
+    // Registered because that is what makes dropping it from CI a failing build rather than the silent
+    // loss of the one check that re-derives those four claims over every row the database holds.
+    'pnpm domain-invariants',
     'pnpm db:migrate:dry',
     'pnpm db:drift',
     'pnpm db:conventions',

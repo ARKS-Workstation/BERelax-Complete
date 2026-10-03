@@ -1,0 +1,32 @@
+{
+  "$comment": [
+    "The code freeze register. H-MIG-11.",
+    "",
+    "It ships LIVE AND OPEN rather than absent, which is the findings register's own argument (ADR",
+    "0125): a register created on the day somebody needs it is a register nobody has read, and a",
+    "missing one is indistinguishable from a tree nobody froze.",
+    "",
+    "NOTHING IN THIS BUILD DECLARES A FREEZE. `state` is a value a person sets, in a commit somebody",
+    "reviews, together with the F07 ROLE that set it, the instant and the reason. There is no date",
+    "arithmetic, no 'frozen once the go/no-go passes' and no job that writes here: the cutover date is",
+    "not on file (OPEN-QUESTIONS Y13-cutover-date), so a mechanism that decided when to freeze would be",
+    "deciding a date this build invented (brief rule 15). This is the shape migration 0128 uses for",
+    "'Marked as posted', H-HARD-07's incident register for a declaration and 0153's",
+    "parallel_run_decision for the cutover decision.",
+    "",
+    "`scripts/freeze.mjs --register-only` (`pnpm freeze`, a step of `pnpm verify`) refuses a frozen",
+    "register that names no role, no instant or no reason, refuses a claimant that is not an F07 role,",
+    "and refuses an open register that still carries a claim or names no open question. The merge rule",
+    "is the other entry point: `.github/workflows/freeze.yml` runs it on every pull request with that",
+    "request's labels, and while the tree is frozen a change is merged only if it is labelled",
+    "launch-blocking. That label is a constant in packages/core/src/release/freeze.ts and deliberately",
+    "not a field here: a label named in this file could be edited to one every pull request already",
+    "carries, and the freeze would then permit everything while reading as enforced.",
+    "",
+    "To declare a freeze: set state to \"frozen\" and fill in claim with your role, the instant and why."
+  ],
+  "registerVersion": 1,
+  "state": "open",
+  "claim": null,
+  "openQuestionId": "Y13-cutover-date"
+}

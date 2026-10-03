@@ -313,6 +313,14 @@ export const TEST_PORT_BANDS = {
   // and `book-flow` came to share one. [23_900, 24_200) contains none of RESTRICTED_PORTS and is below
   // EPHEMERAL_PORT_FLOOR.
   'security-headers': { start: 23_900, width: 300 },
+  // B-M1's M1 walkthrough, which needs a real server for the only claim that cannot be made any other
+  // way: the five-step public booking flow driven by a BROWSER from the treatment select to the
+  // confirmation, then the same appointment on the admin calendar. W-SITE-06 deferred that Playwright
+  // pass here by name, and W-SITE-11 deferred the axe-and-baseline coverage of /tag-loader, /therapists
+  // and /therapists/[slug] here too; both need a page that has been laid out.
+  // 24_800 is the band this unit was allocated. [24_800, 25_100) contains none of RESTRICTED_PORTS, is
+  // above every band above it and is well below EPHEMERAL_PORT_FLOOR.
+  'm1-walkthrough': { start: 24_800, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

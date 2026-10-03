@@ -212,3 +212,25 @@ if "--check" in sys.argv:
 
 target.write_text(content)
 print(f"wrote docs/PROGRESS.md — {len(done)}/{len(units)} done, {len(nxt)} ready")
+
+# What is left for the OWNER, printed on every emit. B-M1's acceptance line asks that "the run output
+# names what remains blocked on the owner", and the `## Next up` section above cannot do it: it lists
+# the units that are READY, so once every unit is `done` it is empty and the run says nothing at all
+# about the thirty-odd external items that still hold the release. Those items do not stop being
+# outstanding when the last unit lands — they are the whole content of the go/no-go check's first
+# requirement (`pnpm go-no-go`, H-MIG-11) — so the ledger prints them with the units that named each
+# one, from `blocked_on_owner` and nowhere else.
+owner_items = {}
+for u in units:
+    for item in u.get("blocked_on_owner", []) or []:
+        owner_items.setdefault(item, []).append(u["id"])
+if owner_items:
+    print(
+        f"\nBlocked on the owner: {len(owner_items)} external item(s), named by "
+        f"{sum(len(v) for v in owner_items.values())} unit(s). Every one of them is unmet until the "
+        "owner clears it, and `pnpm go-no-go` refuses a release while any is (docs/11 §5 step 24)."
+    )
+    for item, named_by in sorted(owner_items.items()):
+        print(f"  {item}  — {', '.join(sorted(named_by))}")
+else:
+    print("\nNothing is blocked on the owner, which no state of this manifest has ever reported.")

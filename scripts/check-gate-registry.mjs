@@ -43,6 +43,18 @@ const CI_ONLY = new Map([
     'creates and drops a database of its own, so it is a CI step and not a verify step; H-MIG-09 ' +
       'deferred running the driver in CI to H-HARD-04 for want of a restore drill',
   ],
+  [
+    'pnpm domain-invariants',
+    'the census refuses an estate it examined nothing in (ADR 0002), and the integration suite cleans ' +
+      'up after itself — measured: four appointment-heavy suites run in order leave ZERO appointment ' +
+      'rows behind, and a freshly seeded database has none either. So the only run that HAS an estate ' +
+      'is the `domain-invariants` job, which drives the M1 walkthrough first and censuses what it ' +
+      'wrote. In `pnpm verify` the step would fail on the floor for every unit agent on every commit, ' +
+      'which is the shape a gate gets switched off for. docs/14 §3\u2019s "they run on every unit" is ' +
+      'met by `packages/fixtures/src/domain-invariants.itest.ts` instead: it is in the integration ' +
+      'suite, it plants one breach per claim with the database\u2019s own guard dropped, and it watches ' +
+      'each refusal fire',
+  ],
   ['postgres:16', 'a service container, not a step'],
 ])
 
