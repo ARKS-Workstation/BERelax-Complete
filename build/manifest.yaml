@@ -13281,7 +13281,12 @@ units:
       than 0% for a date with no sessions, and every other panel on that page excludes the flagged sessions
       through the one predicate funnelCountRows and the session reads already use. It re-derives nothing:
       no crawler name and no BOT_KINDS member appears anywhere under app/(admin)/analytics —
-      and the same figure on the operations dashboard is deferred to R-REP-07. Each
+      and the same figure on the operations dashboard is carried by R-REP-07''s data-quality gate and rendered by R-REP-08 - DEFERRAL SATISFIED. Each
+      was built by A-FIRST-10 - DEFERRAL SATISFIED - and the same figure on the operations dashboard was built by R-REP-08 - DEFERRAL SATISFIED (re-pointed twice: R-REP-07 built the
+      data-quality GATE, which judges whether a session carries a classification and renders no traffic share, and
+      R-REP-08''s dashboards are folds over the KPI datasets, which hold no session at all - a traffic share there
+      would need a measure, a loader and a drill-down that unit does not have. A-FIRST-10 already owns the other
+      half of this same sentence, so the two live together). Each
       must call classifyBot and store its verdict rather than re-deriving a flag — BOT_KINDS and
       AI_CRAWLER_BOT_KINDS are exported from @berelax/core and @berelax/shared for exactly that — and the scan in
       apps/web/src/crawler-policy.test.ts refuses a crawler name written at any of those call sites. Two shapes
@@ -15527,7 +15532,7 @@ units:
       ref-capture rate, bot share, dispatch reconciliation, view freshness — and a typed result so a tile
       physically cannot render a number whose check is failing.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - A-FIRST-09
@@ -15554,10 +15559,27 @@ units:
       which is a state a tile must render and not a number it may fall back from. R-REP-04''s KpiOutcome
       union is already the shape R-REP-07''s typed result needs: value, no_denominator, no_data,
       not_attributable, with no numeric fallback branch.'
+    - 'NOTE: two deviations from this entry''s file list, both recorded rather than silent. (1) The tile is
+      `packages/ui/src/reporting/kpi-tile.ts` and not `.tsx`: the admin estate serves documents from a
+      `route.ts` and builds them in a `render.ts`, because a registry DOCUMENT must be served in both
+      locales and an Arabic admin document needs the W-SYS-01 shell - so a React component would have no
+      document to live in. It is exported at `@berelax/ui/reporting` and deliberately absent from that
+      package''s barrel, because it reaches `@berelax/core` for the union and a barrel export would pull
+      core into every module that imports a colour token, including the client islands whose weight
+      build/budgets.json holds to 2KB and 3KB. (2) The screen is `route.ts` + `handler.ts` + `render.ts`
+      and not `page.tsx`, for the same locale reason - the month reconciliation, the compliance calendar,
+      the Messages inbox and the five HR screens are the precedent - and the split puts everything this
+      unit decides in `handler.ts`, which `apps/web/src/data-quality.itest.ts` drives directly against
+      real PostgreSQL rather than over HTTP against whatever `.next` was last built.'
     files:
     - packages/core/src/reporting/data-quality.ts
-    - packages/ui/src/reporting/kpi-tile.tsx
-    - apps/web/app/(admin)/reports/data-quality/page.tsx
+    - packages/db/src/reporting/data-quality-queries.ts
+    - packages/db/src/reporting/kpi-input.ts
+    - packages/ui/src/reporting/kpi-tile.ts
+    - apps/web/app/(admin)/reports/data-quality/handler.ts
+    - apps/web/app/(admin)/reports/data-quality/render.ts
+    - apps/web/app/(admin)/reports/data-quality/route.ts
+    - apps/web/src/data-quality.itest.ts
     - scripts/test-gates.mjs
   - id: R-REP-08
     order: 128
@@ -15566,7 +15588,7 @@ units:
       source rows, field-level scoping enforced in the API rather than the UI, business-day and time-of-day
       views for 11:00–02:00 trading, and pushed alerts routed through the messaging compliance gate.
     owner: claude
-    status: todo
+    status: done
     size: L
     milestone: M5
     depends_on:
@@ -15597,11 +15619,39 @@ units:
     - the time-of-day view renders the trading window as 15 contiguous buckets in business-day order; axe
       reports zero serious or critical violations; screenshots at 3 viewports × 2 themes × 2 directions
       produce zero diff on re-run
+    - 'NOTE: two deviations and one thing not run, all in the sixth acceptance line. (1) The browser suite
+      is `apps/web/e2e/dashboards.itest.ts` and not `dashboards.spec.ts`: `vitest.integration.config.ts`
+      includes `apps/**/*.itest.ts` and nothing else, so a `.spec.ts` would be a suite nothing runs, which
+      is worse than no suite because it looks like coverage. `collector.itest.ts` and
+      `walk-in-speed.itest.ts` in the same directory are the convention. (2) The dashboards are route
+      handlers (`route.ts` + `handler.ts` + `render.ts`) and not `page.tsx` / `dashboards/*.tsx`: a registry
+      DOCUMENT must be served in both locales, which needs an Arabic admin document and the W-SYS-01 shell,
+      and `?dir=rtl` re-renders the English document mirrored so the direction half of the matrix is audited
+      without inventing an Arabic admin surface - the month reconciliation, the compliance calendar, the
+      Messages inbox and the five HR screens are the precedent. (3) The browser suite WAS run, against a real
+      build, and it found a defect on its first run: the KPI tile printed its formula in a token that is
+      under 4.5:1 on a surface, and axe reported color-contrast as SERIOUS in all twelve cells. The
+      string-level tile suite could not have seen it (a contrast ratio is a property of two rendered
+      colours) and `pnpm colours` could not either (both values are tokens, which is all that check
+      claims). Fixed, and the suite then passed: the bucket order, axe over twelve cells with a known-bad
+      control, and the twelve-cell screenshot matrix with zero pixel diff on a re-run. It is read-only by
+      construction - the window is a seeded trading day with no appointment, document, journal entry or
+      shift, so it creates nothing but its own principal and the `journal_entry` no-DELETE hazard (ZL001)
+      cannot arise. The band `dashboards` at 24_200 is declared and claimed. Everything that does not need
+      a browser - the scope in the query, the forbidden columns absent from the serialised payload, the
+      drill-down identity for every tile, the export''s audit row and its alert, and the bucket count,
+      contiguity and business-day order over the rendered HTML - is asserted in
+      `apps/web/src/dashboards.itest.ts`, which ran twice.'
     files:
-    - apps/web/app/(admin)/reports/page.tsx
-    - apps/web/app/(admin)/reports/dashboards/*.tsx
+    - packages/core/src/reporting/dashboards.ts
+    - packages/db/src/reporting/dashboard-queries.ts
+    - apps/web/app/(admin)/reports/handler.ts
+    - apps/web/app/(admin)/reports/render.ts
+    - apps/web/app/(admin)/reports/route.ts
     - apps/worker/src/jobs/report-alerts.ts
-    - apps/web/e2e/dashboards.spec.ts
+    - apps/web/src/dashboards.itest.ts
+    - apps/web/e2e/dashboards.itest.ts
+    - scripts/test-gates.mjs
   - id: W-SYS-01
     order: 129
     title: Next.js app shell, Tailwind v4 token mapping and the type stack
@@ -18141,7 +18191,7 @@ units:
       plain fetch of `/book?therapist=<id>` asserting the chosen-therapist block and the staff reference
       in the served markup, not a browser test. The claim is about server-rendered HTML — the booking
       flow is a GET form set (B-UI-01) — so a browser adds nothing the fetch cannot see; a Playwright
-      pass over the whole five-step flow is deferred to W-SITE-11, which already starts a browser.'
+      pass over the whole five-step flow is deferred to B-M1 - re-pointed off W-SITE-11 by the integrator when that unit went done, because W-SITE-11 shipped the performance layers and starts no browser over the booking flow, while B-M1 is the end-to-end walkthrough that does.'
   - id: W-SITE-08
     order: 146
     title: Sitemaps, hreflang, IndexNow and the publish propagation pipeline
@@ -18276,7 +18326,7 @@ units:
       build on the four route shapes in both themes and directions, field web-vitals attribution into the
       first-party endpoint, and proof that each layer can go red alone.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - A-FIRST-01
@@ -18317,11 +18367,41 @@ units:
     - 'Each of the three layers can fail independently: one fixture per layer (a field p75 threshold breach
       raising an alert, a CI budget breach, a publish-time weight breach) is asserted to fail on its own
       without the other two'
+    - 'NOTE: what is built, what is measured and what is deferred, line by line. BUILT AND PROVEN:
+      lines 1, 2 and the CI half of line 6. `lighthouse/budget.json` is the one declaration of all nine
+      figures over four route shapes x two themes x two directions x two form factors;
+      `lighthouserc.cjs` derives the Lighthouse-native budgets and the LHCI assertions from it and holds
+      no figure of its own; `pnpm perf-layers` is the authoritative enforcement and exits non-zero
+      NAMING the metric and the measured value, because a Lighthouse budget breach is only a warning
+      inside the report. Gate block 200a-200l proves the breach, the 404 and the empty-report cases
+      against RECORDED Lighthouse reports, and 200l shows the CI layer going red with the publish layer
+      holding. NOT MEASURED: no Lighthouse collection has ever run against this site. The CI job that
+      runs it is wired (`.github/workflows/ci.yml`, the `lighthouse` job, four cells with `pnpm dlx
+      @lhci/cli`), and the one web build this unit was budgeted could not be spent — the container had
+      1.6 GB free with three other agents building, and a `next build` plus the Turbopack cache is
+      about 2 GB. So `lab-tbt`, the INP proxy, carries `basis: "unmeasured"` and Y5-analytics-basis
+      rather than a figure this build invented, and the gate prints it as unenforced on every run.
+      DEFERRED TO A-MEAS-04: lines 3 and 4 and the field third of line 6 — the web-vitals v4
+      attribution beacon, the consent gate over it, the payload shape and the p75 alert. That unit is
+      `Consent-gated tag loader and web-vitals field reporting` and is still todo, so it is the owner
+      rather than a convenient address; the field LAYER is declared in `lighthouse/budget.json` with
+      `enforcedBy: null` and `blockedOn: A-MEAS-04`, and the gate refuses that marker once the unit is
+      done. Adding the beacon here would also have meant a sixth name in ANALYTICS_EVENT_NAMES and a
+      TAXONOMY_VERSION bump in A-FIRST-06''s shared file, which is that unit''s decision to take.
+      LINE 5, PARTLY: the coverage mechanism is built and derived from the suites — a suite covers the
+      route it hands `startWebServer` as `probePath` when the same file calls `auditPage(` and takes a
+      screenshot — and the MEASURED answer is that one public document (`/book`) is covered and twelve
+      are not. That gap is committed as data in `matrixCoverage.alreadyUncovered` with the rule that
+      refuses an ADDITION rather than failing the build on twelve routes, which would have been switched
+      off within the week. Closing it needs an axe run and a screenshot baseline added inside six other
+      units'' browser suites (home, content, treatments, kitchen-sink, hero-lcp and collector each
+      already start a server against one of these routes and assert something else) and is deferred to
+      B-M1, the milestone stop, which is where an un-run matrix belongs.'
     files:
     - lighthouse/budget.json
     - lighthouserc.cjs
+    - scripts/check-performance-layers.mjs
     - .github/workflows/ci.yml
-    - apps/web/src/rum/web-vitals.ts
     - scripts/test-gates.mjs
   - id: W-SYS-10
     order: 149

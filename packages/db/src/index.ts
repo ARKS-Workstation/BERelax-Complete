@@ -361,6 +361,36 @@ export {
   packageEntitlements,
   packageSoldLessReleasedFils,
 } from './reporting/cohort-queries.ts'
+// R-REP-08's drill-down and time-of-day reads. The scope is a value the QUERY takes and the projection
+// is the role's, because a drill-down and an export both return what the query returned rather than
+// what a view drew. Each row carries its own contribution, so `sum(amount)` over the rows is the tile's
+// figure — computed on the other side by R-REP-03's measure reducer, which is what makes the M5
+// identity two paths to one number rather than one path asserted twice.
+export {
+  DASHBOARD_COLUMN_KEYS,
+  type DashboardDrillDownArgs,
+  type DashboardDrillDownRow,
+  type DashboardTimeOfDayRow,
+  dashboardDrillDown,
+  dashboardTimeOfDay,
+} from './reporting/dashboard-queries.ts'
+// R-REP-07's data-quality readings. Two figures per check and the rows behind them; the JUDGEMENT is
+// `packages/core/src/reporting/data-quality.ts`'s, because `db` may not import `core` and because a gate
+// handed its readings is a gate a test can hand readings that disagree. `DATA_QUALITY_CHECK_IDS` is a
+// second spelling of `core`'s list and `packages/fixtures/src/data-quality.itest.ts` holds the two equal
+// as sequences in the same commit.
+export {
+  DATA_QUALITY_CHECK_IDS as DB_DATA_QUALITY_CHECK_IDS,
+  type DataQualityArgs,
+  type DataQualityCheckId,
+  type DataQualityDrillDownRow,
+  type DataQualityReadingRow,
+  type DataQualityReadingSet,
+  type DataQualitySideRow,
+  type DataQualityWindow,
+  dataQualityDrillDown,
+  dataQualityReadings,
+} from './reporting/data-quality-queries.ts'
 // R-REP-06's forecast and seasonality reads. The arithmetic is `@berelax/core`'s; these are the rows, and
 // every one of them is of a commitment somebody has already made (ADR 0073) — there is no read of history
 // here to extrapolate from. `payrollForecastCensus` deliberately returns no amount at all: a partial wage
@@ -383,6 +413,21 @@ export {
   type SeasonalityRoomDayRow,
   seasonalityPeriod,
 } from './reporting/forecast-queries.ts'
+// The loader for R-REP-03's KPI datasets. It supplies SIX and says which six: a KPI reading a dataset
+// this loader does not load is not offered rather than rendered as `no_data`, because an empty dataset
+// is a figure of zero in a sum and an absent one is not (ADR 0070).
+export {
+  KPI_INPUT_LOADED_DATASETS,
+  type KpiAppointmentRow,
+  type KpiBusinessDayRow,
+  type KpiInputProvenance,
+  type KpiInputRows,
+  type KpiRevenueLineRow,
+  type KpiRoomClosureRow,
+  type KpiRoomDayRow,
+  type KpiRosteredShiftRow,
+  kpiInputRows,
+} from './reporting/kpi-input.ts'
 // R-REP-04's KPI reads. The contribution margin and the eight operational KPIs are ARITHMETIC and live in
 // `@berelax/core`; these are the rows they are computed from. `kpiLedgerMovement` goes through
 // `statementLedgerFigures` rather than aggregating `journal_line` again, which is what that module asks

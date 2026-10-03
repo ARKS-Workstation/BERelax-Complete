@@ -1,0 +1,218 @@
+{
+  "note": "W-SITE-11's performance budgets: the ONE statement of every figure the Lighthouse layer enforces, and of every cell it enforces them in. It is NOT Lighthouse's own budgets schema, and that is deliberate: three of the eight figures cannot be expressed as a Lighthouse budget at all (CLS and DOM size are audits rather than budget metrics, and `requests before LCP` is derived from the network-requests audit against the LCP timing), and the two that differ by form factor cannot be written in one Lighthouse budgets file because a Lighthouse budget carries no form factor. So every figure is declared once here, with its BASIS and with the mechanism that enforces it, and `scripts/check-performance-layers.mjs` emits the Lighthouse-native subset at check time and enforces the rest itself. A second hand-written Lighthouse budgets file would be a second statement of these numbers, and the symptom of a second statement is a CI job that passes on a figure nobody meant.",
+  "basisNote": "Every figure here comes from W-SITE-11's acceptance line in build/manifest.yaml, which is why each one carries `basis: \"acceptance\"`. A figure with `basis: \"unmeasured\"` carries an openQuestionId and is NOT enforced: the alternative was to invent a number, and a budget this repository guessed at is a budget that either never fires or fires on correct code. Do not give an unmeasured figure a value without a measurement recorded beside it.",
+  "routeShapes": [
+    {
+      "id": "home",
+      "registryPath": "/",
+      "lighthousePathPattern": "/",
+      "why": "The page every visitor lands on, and the one with the hero video. docs/08 §8's cut order exists for this route."
+    },
+    {
+      "id": "treatment",
+      "registryPath": "/treatments/[slug]",
+      "lighthousePathPattern": "/treatments/*",
+      "why": "The commercial page: one treatment, its price table and its gallery. The most numerous shape on the site and the one a search result lands on."
+    },
+    {
+      "id": "therapist",
+      "registryPath": "/therapists/[slug]",
+      "lighthousePathPattern": "/therapists/*",
+      "why": "A therapist's own page. The route exists since W-SITE-06 landed (/therapists/[slug] is in the route registry), so this shape is enforced rather than declared ahead of it; the integrator cleared the marker at that unit's merge."
+    },
+    {
+      "id": "gallery",
+      "registryPath": "/spa",
+      "lighthousePathPattern": "/spa",
+      "why": "The gallery route: twelve images, which is the heaviest page the site serves and the one docs/08 §8's cut order reaches fourth."
+    }
+  ],
+  "cells": {
+    "note": "Four route shapes x two themes x two directions, and the two axes are carried differently because the site reads them differently. DIRECTION is a locale and therefore a URL: `localisedPath` gives the Arabic path, and an Arabic page ships a different font subset, so its weight is a different measurement rather than the same one mirrored. THEME is `prefers-color-scheme`, which no Lighthouse setting exposes — it is forced with Chrome's own `--blink-settings=preferredColorScheme` (0 dark, 1 light), declared here so the flag and the cell cannot disagree. `pathPrefix` is `LOCALE_PREFIX`'s own value from apps/web/src/i18n/locales.ts, and `scripts/check-performance-layers.mjs` holds the two equal: a prefix spelled here as well as there would be a second statement of which URL the Arabic document lives at, and the symptom is a Lighthouse run against a 404.",
+    "themes": [
+      {
+        "theme": "light",
+        "chromeFlag": "--blink-settings=preferredColorScheme=1"
+      },
+      {
+        "theme": "dark",
+        "chromeFlag": "--blink-settings=preferredColorScheme=0"
+      }
+    ],
+    "directions": [
+      {
+        "direction": "ltr",
+        "locale": "en",
+        "pathPrefix": ""
+      },
+      {
+        "direction": "rtl",
+        "locale": "ar",
+        "pathPrefix": "/ar"
+      }
+    ]
+  },
+  "formFactors": [
+    {
+      "id": "mobile",
+      "lighthousePreset": null,
+      "why": "Lighthouse's default: a throttled 4G phone. docs/08 §8 — \"mobile is where the budget bites\"."
+    },
+    {
+      "id": "desktop",
+      "lighthousePreset": "desktop",
+      "why": "The same pages on a desk. Two of the eight figures are looser here, and both are about bytes and requests rather than about time: a desk has the bandwidth for the larger renditions the art direction serves it."
+    }
+  ],
+  "budgets": [
+    {
+      "id": "lab-lcp",
+      "label": "Largest contentful paint",
+      "metric": "largest-contentful-paint",
+      "unit": "ms",
+      "mobile": 2000,
+      "desktop": 2000,
+      "basis": "acceptance",
+      "enforcedBy": "lighthouse-budget",
+      "why": "2.0s, from the acceptance line. The same on both form factors because it is a figure about the reader's wait and not about the connection: a desk that loads more bytes has more bandwidth to load them with."
+    },
+    {
+      "id": "lab-cls",
+      "label": "Cumulative layout shift",
+      "metric": "cumulative-layout-shift",
+      "unit": "score",
+      "mobile": 0.05,
+      "desktop": 0.05,
+      "basis": "acceptance",
+      "enforcedBy": "lhci-assertion",
+      "why": "0.05, from the acceptance line. Not expressible as a Lighthouse BUDGET — `timings` budgets cover the time metrics only — so it is an LHCI assertion over the audit's numeric value."
+    },
+    {
+      "id": "lab-tbt",
+      "label": "Total blocking time, as the INP proxy",
+      "metric": "total-blocking-time",
+      "unit": "ms",
+      "mobile": null,
+      "desktop": null,
+      "basis": "unmeasured",
+      "openQuestionId": "Y5-analytics-basis",
+      "enforcedBy": "lighthouse-budget",
+      "why": "The acceptance line names total blocking time as the INP proxy and gives NO figure, and this repository has never run Lighthouse against this site — the one build this unit was budgeted could not be spent (see the manifest NOTE). So the figure is absent rather than invented: a budget this build guessed at would either never fire or fire on correct code, and the second is how a gate comes to be switched off. `scripts/check-performance-layers.mjs` refuses to enforce an unmeasured budget and REPORTS it as unenforced on every run, so it cannot be quietly forgotten."
+    },
+    {
+      "id": "first-party-js",
+      "label": "First-party JavaScript, transferred",
+      "metric": "script",
+      "unit": "kib",
+      "mobile": 110,
+      "desktop": 110,
+      "basis": "acceptance",
+      "enforcedBy": "lighthouse-budget",
+      "why": "110KB gzip, from the acceptance line. Lighthouse's `resourceSizes` budget is over TRANSFER size, which on this site is the gzip size — and over first-party bytes by construction rather than by a filter: `pnpm egress` and the `third-party-count` budget below hold the third-party count at zero, so every script byte on the page is this build's."
+    },
+    {
+      "id": "css",
+      "label": "Stylesheets, transferred",
+      "metric": "stylesheet",
+      "unit": "kib",
+      "mobile": 25,
+      "desktop": 25,
+      "basis": "acceptance",
+      "enforcedBy": "lighthouse-budget",
+      "why": "25KB gzip, from the acceptance line. `build/budgets.json` holds the token layer to 6KB and the Tailwind theme to 4KB as FILES; this is the same subject measured over the wire, which is what a reader waits for."
+    },
+    {
+      "id": "total-page",
+      "label": "Everything the page transfers",
+      "metric": "total",
+      "unit": "kib",
+      "mobile": 1945,
+      "desktop": 3277,
+      "basis": "acceptance",
+      "enforcedBy": "lighthouse-budget",
+      "why": "1.9MB mobile and 3.2MB desktop, from the acceptance line, as KiB because that is the unit a Lighthouse budget is in: 1.9 x 1024 = 1945.6, floored to 1945, and 3.2 x 1024 = 3276.8, floored to 3277 — rounded so that the enforced figure is never LOOSER than the stated one on mobile, where the budget bites. The desktop allowance is the art direction's: docs/08 serves a desk the larger hero rendition and the 174KB AVIF, which `build/budgets.json` already measures as files."
+    },
+    {
+      "id": "requests-before-lcp",
+      "label": "Requests the browser made before the largest contentful paint",
+      "metric": "requests-before-lcp",
+      "unit": "count",
+      "mobile": 8,
+      "desktop": 10,
+      "basis": "acceptance",
+      "enforcedBy": "derived",
+      "why": "8 mobile and 10 desktop, from the acceptance line. Lighthouse has no budget and no audit for this: it is derived from the `network-requests` audit against the LCP timing, which is why `scripts/check-performance-layers.mjs` is the thing that fails the job rather than Lighthouse's own report. It is the figure that catches a collector, a font or a third script joining the critical chain — the half of A-FIRST-06's acceptance line that its own byte budget explicitly could not measure."
+    },
+    {
+      "id": "dom-size",
+      "label": "Elements in the document",
+      "metric": "dom-size",
+      "unit": "count",
+      "mobile": 1500,
+      "desktop": 1500,
+      "basis": "acceptance",
+      "enforcedBy": "lhci-assertion",
+      "why": "1500, from the acceptance line. An audit rather than a budget, so it is an LHCI assertion. The gallery route is the one this is really about: twelve images with a figure and a caption each is the shape that grows."
+    },
+    {
+      "id": "third-party-count",
+      "label": "Third-party requests",
+      "metric": "third-party",
+      "unit": "count",
+      "mobile": 0,
+      "desktop": 0,
+      "basis": "structural",
+      "statedIn": "scripts/check-egress-guard.mjs",
+      "enforcedBy": "lighthouse-budget",
+      "why": "ZERO, and the figure is not this unit's: A-MEAS-01's egress guard already refuses a third-party host anywhere in the client, and docs/08 §8's first-party JS budget is only a first-party budget because of it. Declared here because a budget over `script` bytes says nothing about WHOSE bytes they are, and a tag manager added tomorrow would pass the 110KB budget on its first day."
+    }
+  ],
+  "layers": {
+    "note": "docs/08 §8's three independent enforcement layers, named, with the module that enforces each and the gate that proves it can go red ALONE. The independence is the claim: any of the three failing is a red build, and a design where one layer's failure masked another's would be one layer with three names.",
+    "entries": [
+      {
+        "id": "ci",
+        "label": "Lighthouse CI budgets",
+        "enforcedBy": "scripts/check-performance-layers.mjs",
+        "goesRedAlone": "gate case 200e, over a recorded Lighthouse report that breaches one budget and holds every other"
+      },
+      {
+        "id": "publish",
+        "label": "The publish-time weight check",
+        "enforcedBy": "packages/core/src/publication/weight.ts",
+        "goesRedAlone": "gate case 200g, which breaches the critical-path weight with every Lighthouse budget holding"
+      },
+      {
+        "id": "field",
+        "label": "Field web-vitals attribution",
+        "enforcedBy": "packages/ui/src/analytics/web-vitals.ts",
+        "goesRedAlone": null,
+        "why": "The field layer is the beacon and its p75 alert. A-MEAS-04 landed it in packages/ui/src/analytics/web-vitals.ts as the taxonomy's `web_vitals` event, so the layer names its enforcement; the integrator cleared the marker at that unit's merge. `goesRedAlone` stays null because no p75 threshold has been MEASURED here - that figure is Y5-analytics-basis, and a target nobody measured would be invented."
+      }
+    ]
+  },
+  "matrixCoverage": {
+    "note": "The MEASURED gap, committed as data rather than excused. W-SITE-11's fifth acceptance line asks that every route in the registry be covered by both an axe run and a visual-regression baseline. Derived from the suites rather than declared — a suite's subject is the `probePath` it hands `startWebServer`, and it covers that route when the same file both calls `auditPage(` and takes a screenshot — the answer on the day this gate was written was that ONE public document is covered (`/book`) and twelve are not. `pnpm a11y` audits the design specimen across the whole matrix and the per-route sweeps live in individual browser suites, so the gap is real rather than an artefact of the scan. A gate that failed the build on twelve routes would have been switched off within the week, so what the rule refuses is an ADDITION: a public document written after this gate is covered or it is refused, and a path removed from this list cannot be put back — `scripts/check-performance-layers.mjs` reports a stale entry as its own violation. INTEGRATOR, at the W-SITE-11 merge: /tag-loader, /therapists and /therapists/[slug] were added by A-MEAS-04 and W-SITE-06 in branches running in PARALLEL with this gate, so they were uncovered when it was written even though they appear newer. They are recorded here rather than excused: public-site.itest.ts asserts server-rendered HTML by fetch and starts no browser, so adding axe to it is a new browser matrix, not a line. B-M1 drives these routes in a real browser and is the unit that covers them; a NOTE on its manifest entry says so.",
+    "coveredWhenWritten": [
+      "/book"
+    ],
+    "alreadyUncovered": [
+      "/",
+      "/about",
+      "/collector",
+      "/contact",
+      "/faq",
+      "/hero-demo",
+      "/journal",
+      "/kitchen-sink",
+      "/pricing",
+      "/spa",
+      "/tag-loader",
+      "/therapists",
+      "/therapists/[slug]",
+      "/treatments",
+      "/treatments/[slug]"
+    ],
+    "closedBy": "Each of these needs an axe run and a screenshot baseline in the browser suite that already drives it — home.itest.ts, content.itest.ts, treatments.itest.ts, kitchen-sink.itest.ts, hero-lcp.itest.ts and collector.itest.ts all start a server against one of them and assert something else. That is a change inside six other units' suites and is NOT this unit's: it is recorded as a deferral on W-SITE-11 in build/manifest.yaml."
+  }
+}

@@ -500,6 +500,9 @@ importers:
 
   packages/ui:
     dependencies:
+      '@berelax/core':
+        specifier: workspace:*
+        version: link:../core
       '@berelax/media':
         specifier: workspace:*
         version: link:../media

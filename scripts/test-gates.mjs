@@ -62492,6 +62492,898 @@ export function chargebackNetEffectFils(`,
   )
 }
 
+// 198a-198z. (R-REP-07) The data-quality gate: every rule shown to be able to stop firing, the
+//            distinction between "they disagree" and "nobody checked" shown to be able to collapse, and
+//            the tile shown to be able to print a figure it must not.
+//
+//            The unit's whole subject is a refusal, and every mutation below leaves a system that WORKS.
+//            A tolerance of one fils, a check that reads "pass" when nothing has run, a tile with a
+//            fallback for the state it cannot render: each reads as a fix for a blank screen, and each
+//            puts a number in front of somebody who will price from it.
+//
+//            198a to 198g run the two unit suites and are fast. 198h onwards drive the integration
+//            suite, which needs a migrated and seeded database.
+{
+  const DQ_TS = 'packages/core/src/reporting/data-quality.ts'
+  const DQ_TEST = 'packages/core/src/reporting/data-quality.test.ts'
+  const TILE_TS = 'packages/ui/src/reporting/kpi-tile.ts'
+  const TILE_TEST = 'packages/ui/src/reporting/kpi-tile.test.ts'
+  const DQ_QUERIES = 'packages/db/src/reporting/data-quality-queries.ts'
+  const KPI_INPUT = 'packages/db/src/reporting/kpi-input.ts'
+  const HANDLER = 'apps/web/app/(admin)/reports/data-quality/handler.ts'
+  const DQ_ITEST = 'apps/web/src/data-quality.itest.ts'
+  const dqUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const dqIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // The control for the whole block. Every case asserts that a BROKEN tree is caught, and that says
+  // nothing at all unless the committed tree passes.
+  {
+    const core = run('pnpm', dqUnit(DQ_TEST))
+    check(
+      'data quality: the committed gate suite passes, which is the control for 198a to 198d',
+      !core.failed,
+      `the data-quality unit suite does not pass on the committed tree:\n${core.output}`,
+    )
+    const tile = run('pnpm', dqUnit(TILE_TEST))
+    check(
+      'data quality: the committed tile suite passes, which is the control for 198e to 198g',
+      !tile.failed,
+      `the KPI tile suite does not pass on the committed tree:\n${tile.output}`,
+    )
+  }
+
+  /*
+    198a. The freshness check narrowed from "everything" to the revenue facts.
+
+    The mutation nobody would review as a defect: a check that claimed to attest every subject now
+    attests the one it is obviously about. Every other rule still passes, every tile still renders, and
+    the figures reading the dimensions are from that commit gated by nothing at all — which is the one
+    failure of this unit that looks exactly like success.
+  */
+  checkRejectedBy(
+    'data quality: 198a a KPI dataset that no check attests is caught',
+    withEditedFile(
+      DQ_TS,
+      (text) =>
+        replaceOnce(text, '    attests: DATA_QUALITY_SUBJECTS,', "    attests: ['revenueLines'],"),
+      () => runExpectingFailure('pnpm', dqUnit(DQ_TEST)),
+    ),
+    'every-kpi-dataset-is-attested-by-a-check',
+  )
+
+  /*
+    198b. The rule reading the SHIPPED registry while judging the one it was handed.
+
+    This is a defect that was really in the first version of this module, and its shape is why the rules
+    take an argument at all: a detector that consults the shipped registry cannot fire for a deliberately
+    broken one, so the rule about a KPI reaching no check could never have been seen to fire. The two
+    cases in the unit suite that blind every `attests` list are what found it.
+  */
+  checkRejectedBy(
+    'data quality: 198b a rule that judges the shipped registry instead of its argument is caught',
+    withEditedFile(
+      DQ_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '    .filter((kpi) => checksGating(datasetsOfKpi(kpi, kpiRegistry), checks).length === 0)',
+          '    .filter((kpi) => checksGating(datasetsOfKpi(kpi, kpiRegistry)).length === 0)',
+        ),
+      () => runExpectingFailure('pnpm', dqUnit(DQ_TEST)),
+    ),
+    'every-kpi-is-gated-by-at-least-one-check',
+  )
+
+  /*
+    198c. A check with no reading answering `pass`.
+
+    The acceptance line in one line of code: "a check that has never run reads 'unknown', never 'pass'".
+    The mutation is what somebody writes to make a screen look calm before a pass has ever run, and from
+    that commit a build that has reconciled nothing reports seven green rows.
+  */
+  checkRejectedBy(
+    'data quality: 198c a check that has never run reading as a pass is caught',
+    withEditedFile(
+      DQ_TS,
+      (text) => replaceOnce(text, "      state: 'unknown',", "      state: 'pass',"),
+      () => runExpectingFailure('pnpm', dqUnit(DQ_TEST)),
+    ),
+    'reads unknown, never pass, for a check that has never run',
+  )
+
+  /*
+    198d. One fils of tolerance in the identity.
+
+    The most plausible mutation in the block, and the one with no visible symptom: an identity that
+    accepts a variance of one reads as robustness against rounding, and this build has no rounding to be
+    robust against — money is integer fils and VAT is derived so that net + vat = gross exactly
+    (ADR 0007). What it accepts is a real discrepancy, every day, growing.
+  */
+  checkRejectedBy(
+    'data quality: 198d an identity that tolerates one fils is caught',
+    withEditedFile(
+      DQ_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  const holds = check.relation === 'equals' ? variance === 0n : variance <= 0n",
+          "  const holds = check.relation === 'equals' ? variance <= 1n && variance >= -1n : variance <= 0n",
+        ),
+      () => runExpectingFailure('pnpm', dqUnit(DQ_TEST)),
+    ),
+    'fails on one fils, in both directions',
+  )
+
+  /*
+    198e. The gate reporting "nobody checked" as "they disagree".
+
+    Two refusals collapsed into one, which looks like simplification. The cost is that a build which has
+    never run a reconciliation pass reports its figures as unreconciled — and the first response to that
+    is to go looking for a discrepancy nothing has claimed exists, rather than to run the pass.
+  */
+  checkRejectedBy(
+    'data quality: 198e an unattested figure reported as an unreconciled one is caught',
+    withEditedFile(
+      DQ_TS,
+      (text) => replaceOnce(text, "      state: 'unattested',", "      state: 'unreconciled',"),
+      () => runExpectingFailure('pnpm', dqUnit(DQ_TEST)),
+    ),
+    'distinguishes a check that disagreed from one that never ran',
+  )
+
+  /*
+    198f. A fallback added to the tile's figure.
+
+    `?? '0'` on a branch that cannot be reached, added by somebody making the types quiet. It is
+    unreachable until the union widens, and then it is a zero on a dashboard — ADR 0070's whole subject,
+    in the one file that renders the figure.
+  */
+  checkRejectedBy(
+    'data quality: 198f a numeric fallback in the KPI tile is caught',
+    withEditedFile(
+      TILE_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '        `<p class="kpi-tile__figure">${safeText(figure.value)}` +',
+          '        `<p class="kpi-tile__figure">${safeText(figure.value ?? \'0\')}` +',
+        ),
+      () => runExpectingFailure('pnpm', dqUnit(TILE_TEST)),
+    ),
+    'the tile source contains ??',
+  )
+
+  /*
+    198g. The tile printing the figure beside the refusal.
+
+    "Show what it would have been" is a request somebody will make, and this is what granting it looks
+    like: the unreconciled branch rendering the figure as well as the warning. Every state assertion
+    still passes — the attribute is still `unreconciled` — and the number is on the screen.
+  */
+  checkRejectedBy(
+    'data quality: 198g a refusal that renders the published figure anyway is caught',
+    withEditedFile(
+      TILE_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '      return `<p class="kpi-tile__why">${safeText(figure.why)}</p>${list(figure.refusedBy)}`',
+          '      return `<p class="kpi-tile__figure">1234.5678</p><p class="kpi-tile__why">${safeText(figure.why)}</p>${list(figure.refusedBy)}`',
+        ),
+      () => runExpectingFailure('pnpm', dqUnit(TILE_TEST)),
+    ),
+    'rendered the published figure',
+  )
+
+  // 198h onwards need the database. They drive the integration suite, which is slower than the four
+  // above by about a minute each, so they are last.
+  {
+    const committed = run('pnpm', dqIntegration(DQ_ITEST))
+    check(
+      'data quality: the committed integration suite passes, which is the control for 198h to 198k',
+      !committed.failed,
+      `the data-quality integration suite does not pass on the committed tree:\n${committed.output}`,
+    )
+  }
+
+  /*
+    198h. A reading with no evidence returned as two sides agreeing at zero.
+
+    The db half of 198c, and the one a type cannot refuse: `{ left: 0, right: 0 }` and `null` are the
+    same pair of numbers and different claims. This is what the query looks like after somebody removes
+    a nullable field to make a screen simpler.
+  */
+  checkRejectedBy(
+    'data quality: 198h a stored check with no pass returning zeroes instead of nothing is caught',
+    withEditedFile(
+      DQ_QUERIES,
+      (text) =>
+        replaceOnce(
+          text,
+          '      observed:\n        dispatch.lastRanAt === null\n          ? null\n          : {',
+          '      observed:\n        false\n          ? null\n          : {',
+        ),
+      () => runExpectingFailure('pnpm', dqIntegration(DQ_ITEST)),
+    ),
+    'a check that has never run',
+  )
+
+  /*
+    198i. The report's permission check removed.
+
+    `guardAdminRoute` still refuses an unauthenticated request, so the screen is still "behind a login"
+    and every other case in the suite still passes. What changes is that the therapist who opens the
+    link gets the business's revenue and utilisation, and nothing records that they did.
+  */
+  checkRejectedBy(
+    'data quality: 198i a report with no permission check is caught',
+    withEditedFile(
+      HANDLER,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (!can(request.principal.role, DATA_QUALITY_PERMISSION)) {',
+          '  if (false && !can(request.principal.role, DATA_QUALITY_PERMISSION)) {',
+        ),
+      () => runExpectingFailure('pnpm', dqIntegration(DQ_ITEST)),
+    ),
+    'refuses a role without report:read and records the refusal',
+  )
+
+  /*
+    198j. A `value` field put back onto the serialised refusal.
+
+    `value: null` on an unreconciled figure, which is what a client that wanted a uniform shape would
+    ask for. The state is still `unreconciled`, every assertion about the state still passes, and the
+    API has acquired a field whose next consumer reads it as a figure of nothing.
+  */
+  checkRejectedBy(
+    'data quality: 198j an API refusal carrying a value field is caught',
+    withEditedFile(
+      HANDLER,
+      (text) =>
+        replaceOnce(
+          text,
+          "        gated.state === 'value' ? { state: 'value', value: publishGatedFigure(gated) } : gated,",
+          "        gated.state === 'value'\n          ? { state: 'value', value: publishGatedFigure(gated) }\n          : ({ ...gated, value: null } as never),",
+        ),
+      () => runExpectingFailure('pnpm', dqIntegration(DQ_ITEST)),
+    ),
+    'at the API and at the rendered layer',
+  )
+
+  /*
+    198k. The loader claiming a dataset it does not load.
+
+    One line added to a declared list, which is how a dashboard comes to offer a cohort tile computed
+    over an empty array — a lifetime value of zero for every cohort, with no state saying so. The
+    declaration and the loader are two statements of one fact, and this is the check that holds them
+    equal.
+  */
+  checkRejectedBy(
+    'data quality: 198k a declared dataset the loader does not load is caught',
+    withEditedFile(
+      KPI_INPUT,
+      (text) =>
+        replaceOnce(
+          text,
+          "  'revenueLines',\n] as const",
+          "  'revenueLines',\n  'cohortMembers',\n] as const",
+        ),
+      () => runExpectingFailure('pnpm', dqIntegration(DQ_ITEST)),
+    ),
+    'holds the loader',
+  )
+}
+
+// 199a-199z. (R-REP-08) The role-scoped dashboards: every refusal shown to be able to stop refusing, the
+//            SCOPE shown to be able to leave the query, the forbidden column shown to be able to come
+//            back into the payload, and the drill-down identity shown to be able to stop holding.
+//
+//            Every mutation below leaves a dashboard that renders. A permission check that passes, a
+//            column that is selected again, a scope clause dropped from one of two queries, a
+//            drill-down whose rows no longer add up: each one reads as a simplification and each one
+//            puts somebody else's figures on a screen.
+//
+//            199a to 199g run the two unit suites and are fast. 199h onwards drive the integration
+//            suite, which needs a migrated and seeded database.
+{
+  const DASH_TS = 'packages/core/src/reporting/dashboards.ts'
+  const DASH_TEST = 'packages/core/src/reporting/dashboards.test.ts'
+  const ALERTS_TS = 'apps/worker/src/jobs/report-alerts.ts'
+  const ALERTS_TEST = 'apps/worker/src/jobs/report-alerts.test.ts'
+  const DASH_QUERIES = 'packages/db/src/reporting/dashboard-queries.ts'
+  const KPI_INPUT = 'packages/db/src/reporting/kpi-input.ts'
+  const DASH_HANDLER = 'apps/web/app/(admin)/reports/handler.ts'
+  const DASH_ITEST = 'apps/web/src/dashboards.itest.ts'
+  const dashUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const dashIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // The control for the whole block. Every case asserts a BROKEN tree is caught, which says nothing
+  // unless the committed tree passes.
+  {
+    const core = run('pnpm', dashUnit(DASH_TEST))
+    check(
+      'dashboards: the committed declarations suite passes, the control for 199a to 199f',
+      !core.failed,
+      `the dashboards unit suite does not pass on the committed tree:\n${core.output}`,
+    )
+    const alerts = run('pnpm', dashUnit(ALERTS_TEST))
+    check(
+      'dashboards: the committed alert suite passes, the control for 199g',
+      !alerts.failed,
+      `the report-alerts suite does not pass on the committed tree:\n${alerts.output}`,
+    )
+  }
+
+  /*
+    199a. The business-wide revenue tile put on the therapist's own dashboard.
+
+    The generous mutation: a therapist asking "how did the salon do" and somebody answering. `tilesFor`
+    drops it at runtime, so nothing visibly breaks — which is exactly why the rule reads the LAYOUT: a
+    declaration nobody can act on is a declaration somebody will later "fix" by removing the filter.
+  */
+  checkRejectedBy(
+    'dashboards: 199a a scoped dashboard publishing a business-wide tile is caught',
+    withEditedFile(
+      DASH_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  therapist: ['treatment_minutes', 'rostered_minutes'],",
+          "  therapist: ['treatment_minutes', 'net_revenue'],",
+        ),
+      () => runExpectingFailure('pnpm', dashUnit(DASH_TEST)),
+    ),
+    'a-scoped-role-publishes-no-business-wide-tile',
+  )
+
+  /*
+    199b. A tile naming a measure the registry does not hold.
+
+    A plausible rename — `net_revenue_fils` reads better than `treatment_net_revenue_fils` — and the
+    consequence is a tile whose figure is not a registered fold, so there is no declaration of what it
+    reads and therefore no drill-down that can be asserted to equal it.
+  */
+  checkRejectedBy(
+    'dashboards: 199b a tile naming an unregistered measure is caught',
+    withEditedFile(
+      DASH_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "    measureId: 'treatment_net_revenue_fils',",
+          "    measureId: 'net_revenue_fils',",
+        ),
+      () => runExpectingFailure('pnpm', dashUnit(DASH_TEST)),
+    ),
+    'tile-names-a-registered-measure',
+  )
+
+  /*
+    199c. The permission check dropped from the tile grant.
+
+    The layout still says what each dashboard is for, so every screen looks right — and the accountant's
+    financial tile is now on the marketer's dashboard, because the layout was never the authorisation.
+  */
+  checkRejectedBy(
+    'dashboards: 199c a tile grant that stopped asking the F07 matrix is caught',
+    withEditedFile(
+      DASH_TS,
+      (text) => replaceOnce(text, '      can(role, tile.requires) &&', '      true &&'),
+      () => runExpectingFailure('pnpm', dashUnit(DASH_TEST)),
+    ),
+    'refuses a tile whose PERMISSION the role lacks',
+  )
+
+  /*
+    199d. The field-group grant dropped from the column projection.
+
+    `return true` for every column, which is what somebody writes to make a drill-down "complete". The
+    screen is unchanged - the UI draws the columns it is given - and the PROJECTION now selects a wage
+    and a clinical note for every role, which is the acceptance line's whole subject.
+  */
+  checkRejectedBy(
+    'dashboards: 199d a column projection that stopped asking the field groups is caught',
+    withEditedFile(
+      DASH_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "      return group === 'operational' || canReadFieldGroup(role, group)",
+          '      return true',
+        ),
+      () => runExpectingFailure('pnpm', dashUnit(DASH_TEST)),
+    ),
+    'never selects a wage or a clinical note',
+  )
+
+  /*
+    199e. The trading buckets numbered from midnight instead of from opening.
+
+    The mutation that looks like a simplification and silently reorders the chart: the hours become
+    0..14 rather than 11..23,0,1, so the two busiest hours of the evening move to the START of the
+    chart. Trading runs 11:00-02:00, which is the whole reason business-day order exists.
+  */
+  checkRejectedBy(
+    'dashboards: 199e trading buckets in clock order rather than business-day order are caught',
+    withEditedFile(
+      DASH_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '      const startHour = (args.opensAtHour + index) % 24',
+          '      const startHour = index % 24',
+        ),
+      () => runExpectingFailure('pnpm', dashUnit(DASH_TEST)),
+    ),
+    'contiguous hours in business-day order',
+  )
+
+  /*
+    199f. The therapist's scope widened to the whole business.
+
+    One role name changed in one condition. Every tile still renders, every permission still holds, and
+    the therapist's screen is now the salon's figures under a per-person label.
+  */
+  checkRejectedBy(
+    'dashboards: 199f a scoped role whose scope became the business is caught',
+    withEditedFile(
+      DASH_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (role !== 'therapist') return { kind: 'business' }",
+          "  if (role !== 'receptionist') return { kind: 'business' }",
+        ),
+      () => runExpectingFailure('pnpm', dashUnit(DASH_TEST)),
+    ),
+    'scopes the therapist to their own employee id',
+  )
+
+  /*
+    199g. The staff alert's class changed to promotional.
+
+    It reads as respecting quiet hours. What it does is hold the one message that says the salon's
+    figures cannot be trusted today until 07:00 - by which time the trading day it is about has closed,
+    because trading runs 11:00-02:00 and the alert is raised at 01:30.
+  */
+  checkRejectedBy(
+    'dashboards: 199g a staff operational alert reclassified as promotional is caught',
+    withEditedFile(
+      ALERTS_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "export const REPORT_ALERT_CLASS: MessageClass = 'transactional'",
+          "export const REPORT_ALERT_CLASS: MessageClass = 'promotional'",
+        ),
+      () => runExpectingFailure('pnpm', dashUnit(ALERTS_TEST)),
+    ),
+    'permits a staff operational alert',
+  )
+
+  // 199h onwards need the database.
+  {
+    const committed = run('pnpm', dashIntegration(DASH_ITEST))
+    check(
+      'dashboards: the committed integration suite passes, the control for 199h to 199k',
+      !committed.failed,
+      `the dashboards integration suite does not pass on the committed tree:\n${committed.output}`,
+    )
+  }
+
+  /*
+    199h. The scope clause dropped from ONE of the two scoped queries.
+
+    The appointment read loses its restriction and the shift read keeps it, which is what a partial edit
+    looks like. The therapist's rostered minutes stay their own and their delivered minutes become the
+    salon's - two figures on one screen, one of them somebody else's, with nothing saying which.
+  */
+  checkRejectedBy(
+    'dashboards: 199h a scoped query that stopped restricting is caught',
+    withEditedFile(
+      KPI_INPUT,
+      (text) =>
+        replaceOnce(
+          text,
+          '      from reporting.fact_appointment\n     where business_day between ${from}::date and ${to}::date\n       and (${scoped}::uuid is null or employee_id = ${scoped}::uuid)',
+          '      from reporting.fact_appointment\n     where business_day between ${from}::date and ${to}::date',
+        ),
+      () => runExpectingFailure('pnpm', dashIntegration(DASH_ITEST)),
+    ),
+    'gives a therapist strictly less than the business',
+  )
+
+  /*
+    199i. A role hard-coded into the column projection.
+
+    `selectableColumnsFor('owner')` rather than the request's own role, which is what a debugging edit
+    leaves behind. Every screen still draws the columns it is given, so nothing looks different - and
+    the serialised payload a second client or an export reads now offers every column to everybody.
+  */
+  checkRejectedBy(
+    'dashboards: 199i a role hard-coded into the column projection is caught',
+    withEditedFile(
+      DASH_HANDLER,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const columns = selectableColumnsFor(args.role)',
+          "  const columns = selectableColumnsFor('owner')",
+        ),
+      () => runExpectingFailure('pnpm', dashIntegration(DASH_ITEST)),
+    ),
+    'carries no salary and no clinical key',
+  )
+
+  /*
+    199j. The export's alert raised under a name the registry does not hold.
+
+    The audit row is still written, so the trail is intact and the export looks fully recorded. What is
+    gone is the only alert that reaches a person: `alertDefinition` is bypassed, nothing routes the
+    event, and a bulk export of the roster notifies nobody.
+  */
+  checkRejectedBy(
+    'dashboards: 199j an export alert raised outside the registry is caught',
+    withEditedFile(
+      DASH_HANDLER,
+      (text) =>
+        replaceOnce(text, '        alertId: definition.id,', "        alertId: 'report_export',"),
+      () => runExpectingFailure('pnpm', dashIntegration(DASH_ITEST)),
+    ),
+    'raises the insider-threat alert',
+  )
+
+  /*
+    199k. The drill-down's contribution changed so the rows no longer add up to the tile.
+
+    Turnaround dropped from the occupied-room-minute rows. It reads as a correction - turnaround is not
+    treatment - and it is the one thing that makes the M5 identity false: the measure includes it
+    because the next client cannot be in the room while it is being reset.
+  */
+  checkRejectedBy(
+    'dashboards: 199k a drill-down whose rows no longer equal the tile is caught',
+    withEditedFile(
+      DASH_QUERIES,
+      (text) =>
+        replaceOnce(
+          text,
+          '                 (a.treatment_minutes + a.turnaround_minutes)::text        as amount,',
+          '                 a.treatment_minutes::text                                 as amount,',
+        ),
+      () => runExpectingFailure('pnpm', dashIntegration(DASH_ITEST)),
+    ),
+    'does not equal its rows',
+  )
+}
+
+// 200a-200z. (W-SITE-11) The performance layers: the budget shown to be able to stop covering what it
+//            claims, the rc file shown to be able to acquire a figure of its own, the unmeasured budget
+//            shown to be able to acquire an invented one, and the Lighthouse job shown to FAIL on a
+//            breach and on a 404 rather than scoring an error page.
+//
+//            Every mutation below leaves a CI job that runs green. A route shape dropped, a theme cell
+//            duplicated, a threshold written into the rc file, a figure given to the metric nobody
+//            measured: each reads as a tidy-up, and each is a budget that no longer bites.
+//
+//            200a to 200h are static and take about a second each. 200i onwards feed the enforcement a
+//            recorded Lighthouse report; none of them needs a browser, a build or a database, which is
+//            the point — `build/budgets.json` records that Lighthouse CI did not exist in this
+//            repository, and a gate that needed a collection to prove itself would be a gate nobody
+//            could run.
+{
+  const PERF_DECL = 'lighthouse/budget.json'
+  const PERF_RC = 'lighthouserc.cjs'
+  const WEIGHT_TEST = 'packages/core/src/publication/weight.test.ts'
+  const LHR_FIXTURE = 'artifacts/__gate_fixture__lhr.report.json'
+  const perf = (args = []) => ['exec', 'node', 'scripts/check-performance-layers.mjs', ...args]
+  const weightUnit = ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', WEIGHT_TEST]
+
+  /**
+   * One recorded Lighthouse report. Every figure is inside its budget unless `overrides` says otherwise,
+   * which is what makes a single breached figure the only difference between a passing fixture and a
+   * failing one.
+   */
+  const lhr = (overrides = {}) => {
+    const kib = (n) => Math.round(n * 1024)
+    const totals = { total: 1200, script: 80, stylesheet: 18, lcp: 1500, status: 200, ...overrides }
+    return JSON.stringify({
+      requestedUrl: 'http://127.0.0.1:3000/',
+      finalDisplayedUrl: 'http://127.0.0.1:3000/',
+      configSettings: { formFactor: 'mobile' },
+      audits: {
+        'resource-summary': {
+          details: {
+            items: [
+              { resourceType: 'total', transferSize: kib(totals.total), requestCount: 5 },
+              { resourceType: 'script', transferSize: kib(totals.script), requestCount: 3 },
+              { resourceType: 'stylesheet', transferSize: kib(totals.stylesheet), requestCount: 1 },
+              { resourceType: 'third-party', transferSize: 0, requestCount: 0 },
+            ],
+          },
+        },
+        'largest-contentful-paint': { numericValue: totals.lcp },
+        'cumulative-layout-shift': { numericValue: 0.01 },
+        'total-blocking-time': { numericValue: 120 },
+        'dom-size': { numericValue: 900 },
+        'network-requests': {
+          details: {
+            items: [
+              {
+                resourceType: 'Document',
+                statusCode: totals.status,
+                networkEndTime: 200,
+                url: 'http://127.0.0.1:3000/',
+              },
+              { resourceType: 'Script', statusCode: 200, networkEndTime: 500, url: 'x' },
+              { resourceType: 'Image', statusCode: 200, networkEndTime: 900, url: 'y' },
+            ],
+          },
+        },
+      },
+    })
+  }
+
+  // The controls for the whole block. Every case asserts a BROKEN tree is caught, which says nothing
+  // unless the committed tree passes — and the second control is the one that matters here, because an
+  // enforcement that rejected every report would satisfy 200i, 200j and 200k at once.
+  {
+    const statik = run('pnpm', perf())
+    check(
+      'performance: the committed budget and rc file agree, the control for 200a to 200h',
+      !statik.failed,
+      `the static performance gate does not pass on the committed tree:\n${statik.output}`,
+    )
+    const measured = withFixture(LHR_FIXTURE, lhr(), () =>
+      run('pnpm', perf(['--reports', 'artifacts'])),
+    )
+    check(
+      'performance: a report inside every budget PASSES, the control for 200i to 200l',
+      !measured.failed,
+      `a Lighthouse report within every declared figure was rejected:\n${measured.output}`,
+    )
+  }
+
+  /*
+    200a. A route shape dropped from the budget.
+
+    The gallery route is the heaviest page the site serves — twelve images, docs/08 §8's cut order
+    reaches it fourth — and dropping it leaves three shapes budgeted, every figure intact and nothing
+    failing. The acceptance line names four.
+  */
+  checkRejectedBy(
+    'performance: 200a a budget that stopped covering one of the four route shapes is caught',
+    withEditedFile(
+      PERF_DECL,
+      (text) => replaceOnce(text, '      "id": "gallery",', '      "id": "gallery-disabled",'),
+      () => runExpectingFailure('pnpm', perf()),
+    ),
+    'budget-covers-every-required-route-shape',
+  )
+
+  /*
+    200b. The blockedOn marker taken off a route the registry does not serve.
+
+    It reads as cleaning up a stale marker. What it does is put `/therapists/[slug]` into the collection
+    while W-SITE-06 has not built it, so Lighthouse scores a 404 page — which scores nearly perfectly —
+    and the budget reports a pass over a route that does not exist.
+  */
+  checkRejectedBy(
+    'performance: 200b a budgeted route that is neither served nor blocked is caught',
+    withEditedFile(
+      PERF_DECL,
+      (text) => replaceOnce(text, '      "blockedOn": "W-SITE-06",\n', ''),
+      () => runExpectingFailure('pnpm', perf()),
+    ),
+    'budget-shape-is-served-or-blocked-on-a-live-unit',
+  )
+
+  /*
+    200c. A figure given to the metric nobody measured.
+
+    The mutation this unit exists against. Total blocking time is the INP proxy, the acceptance line
+    gives no number, and nothing in this repository has ever run Lighthouse against this site — so 200
+    is a plausible, round, completely invented target. It would either never fire or fire on correct
+    code, and the second is how a gate comes to be switched off (brief rule 15).
+  */
+  checkRejectedBy(
+    'performance: 200c an invented figure on an unmeasured budget is caught',
+    withEditedFile(
+      PERF_DECL,
+      (text) =>
+        replaceOnce(
+          text,
+          '      "metric": "total-blocking-time",\n      "unit": "ms",\n      "mobile": null,',
+          '      "metric": "total-blocking-time",\n      "unit": "ms",\n      "mobile": 200,',
+        ),
+      () => runExpectingFailure('pnpm', perf()),
+    ),
+    'budget-figure-has-a-stated-basis',
+  )
+
+  /*
+    200d. The dark theme cell given the light theme's Chrome flag.
+
+    Two cells, one measurement. The matrix still reports four runs per form factor, the job still takes
+    twice as long, and the dark page — which ships a different image ladder — is never measured at all.
+  */
+  checkRejectedBy(
+    'performance: 200d two theme cells measuring the same theme is caught',
+    withEditedFile(
+      PERF_DECL,
+      (text) =>
+        replaceOnce(
+          text,
+          '"theme": "dark",\n        "chromeFlag": "--blink-settings=preferredColorScheme=0"',
+          '"theme": "dark",\n        "chromeFlag": "--blink-settings=preferredColorScheme=1"',
+        ),
+      () => runExpectingFailure('pnpm', perf()),
+    ),
+    'budget-covers-both-themes-and-both-directions',
+  )
+
+  /*
+    200e. A threshold written into the rc file.
+
+    The shape of this whole unit's one design decision: `lighthouserc.cjs` holds no figure, because a
+    threshold in two places is a CI job that passes on the one nobody meant. The mutation is what the
+    obvious implementation looks like.
+  */
+  checkRejectedBy(
+    'performance: 200e a figure written into the Lighthouse config is caught',
+    withEditedFile(
+      PERF_RC,
+      (text) =>
+        replaceOnce(
+          text,
+          '      numberOfRuns: 1,',
+          '      numberOfRuns: 1,\n      maxWaitForLoad: 45000,',
+        ),
+      () => runExpectingFailure('pnpm', perf()),
+    ),
+    'lighthouserc-holds-no-figure-of-its-own',
+  )
+
+  /*
+    200f. The Arabic path prefix changed in the budget.
+
+    `/ar-AE` reads like a correction — it is the hreflang code — and `LOCALE_PREFIX` says `/ar`. Every
+    Arabic cell would then be collected against a URL the application does not serve, and a 404 scores
+    nearly perfectly: half the matrix would report a pass over an error page.
+  */
+  checkRejectedBy(
+    'performance: 200f a locale prefix that disagrees with the i18n module is caught',
+    withEditedFile(
+      PERF_DECL,
+      (text) => replaceOnce(text, '"pathPrefix": "/ar"', '"pathPrefix": "/ar-AE"'),
+      () => runExpectingFailure('pnpm', perf()),
+    ),
+    'budget-locale-prefix-matches-the-i18n-module',
+  )
+
+  /*
+    200g. The unbuilt field layer's owner removed.
+
+    docs/08 §8 says "any of the three failing is a red build". Two of the three are built; the field
+    layer is A-MEAS-04's. Taking the marker off leaves a declaration that claims three layers and names
+    an enforcement for two, which is the sentence this unit must not be able to make.
+  */
+  checkRejectedBy(
+    'performance: 200g an unenforced layer with no owning unit is caught',
+    withEditedFile(
+      PERF_DECL,
+      (text) => replaceOnce(text, '        "blockedOn": "A-MEAS-04",\n', ''),
+      () => runExpectingFailure('pnpm', perf()),
+    ),
+    'every-layer-names-its-enforcement-or-the-unit-that-owns-it',
+  )
+
+  /*
+    200h. A document taken off the already-uncovered baseline while still uncovered.
+
+    The baseline is the measured gap committed as data, and the rule it carries is that the list may only
+    SHRINK as routes become covered. Removing an entry without covering the route makes the gate report
+    the document as newly added — which is the direction that matters, because it is what stops the
+    baseline being widened to excuse the next one.
+  */
+  checkRejectedBy(
+    'performance: 200h a baseline entry removed while the route is still uncovered is caught',
+    withEditedFile(
+      PERF_DECL,
+      (text) => replaceOnce(text, '      "/pricing",\n', ''),
+      () => runExpectingFailure('pnpm', perf()),
+    ),
+    'a-new-public-document-is-covered-by-axe-and-a-baseline',
+  )
+
+  /*
+    200i. A deliberately heavy route: 400KB more image, and an entrance animation above the fold.
+
+    The acceptance line's own fixture. The extra image is the page's total transfer going past the mobile
+    budget; the above-fold entrance animation is the largest paint arriving late, which is the half a
+    byte count cannot see. Both figures are in ONE recorded report, and the enforcement must name the
+    metric and the measured value rather than exiting non-zero and leaving somebody to guess which.
+  */
+  checkRejectedBy(
+    'performance: 200i a heavy route makes the Lighthouse enforcement fail naming the breached budget',
+    withFixture(LHR_FIXTURE, lhr({ total: 1200 + 400, lcp: 2600 }), () =>
+      runExpectingFailure('pnpm', perf(['--reports', 'artifacts'])),
+    ),
+    'largest-contentful-paint measured 2600 ms, budget 2000 ms',
+  )
+
+  /*
+    200j. A target that answered 404.
+
+    Lighthouse scores an error page nearly perfectly: no images, no scripts, one tiny document, instant
+    paint. A job that passed on one would be the purest version of a gate that is not one (ADR 0003),
+    which is why the enforcement reads the document request's own status code rather than the scores.
+  */
+  checkRejectedBy(
+    'performance: 200j a Lighthouse report of a 404 page fails rather than passing vacuously',
+    withFixture(LHR_FIXTURE, lhr({ status: 404 }), () =>
+      runExpectingFailure('pnpm', perf(['--reports', 'artifacts'])),
+    ),
+    'report-is-of-a-document-that-answered-200',
+  )
+
+  /*
+    200k. No report at all.
+
+    The failure a collection that silently did nothing produces: zero breaches over zero evidence. The
+    enforcement exits non-zero rather than reporting a clean sweep, which is the same argument
+    `pnpm boundaries` cruising zero modules made for every floor in this file.
+  */
+  checkRejectedBy(
+    'performance: 200k an enforcement run with no report exits non-zero rather than reporting zero breaches',
+    runExpectingFailure('pnpm', perf(['--reports', 'artifacts/__gate_fixture__absent'])),
+    'report-exists-for-every-collected-target',
+  )
+
+  /*
+    200l. The CI layer and the publish layer go red INDEPENDENTLY.
+
+    docs/08 §8's claim is three layers, not one with three names. Two are built, and this case is what
+    says they are two: with a breaching Lighthouse report the CI layer fails and the publish layer's own
+    suite still passes, and the publish layer's refusals are reached by a figure the CI layer never
+    sees — the critical-path weight of a page, which is a sum over a build rather than a measurement
+    over a run. Neither module imports the other, which is the structural half.
+  */
+  {
+    const ciRed = withFixture(LHR_FIXTURE, lhr({ total: 2400 }), () =>
+      runExpectingFailure('pnpm', perf(['--reports', 'artifacts'])),
+    )
+    const publishStillGreen = run('pnpm', weightUnit)
+    check(
+      'performance: 200l the CI layer goes red while the publish layer holds',
+      ciRed.failed && !publishStillGreen.failed,
+      `ci failed=${ciRed.failed}, publish failed=${publishStillGreen.failed}:\n${ciRed.output}\n${publishStillGreen.output}`,
+    )
+    const script = readFileSync('scripts/check-performance-layers.mjs', 'utf8')
+    const weight = readFileSync('packages/core/src/publication/weight.ts', 'utf8')
+    check(
+      'performance: 200l the two built layers share no module, which is what makes them two',
+      !script.includes('publication/weight') && !weight.includes('check-performance-layers'),
+      'one enforcement layer reaches into the other, so a failure in one could mask or cause the other',
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -63356,6 +64248,7 @@ export function chargebackNetEffectFils(`,
     'pnpm docs-set',
     'pnpm dry-runs',
     'pnpm descriptor-lint',
+    'pnpm perf-layers',
     'pnpm egress',
     // And the SAQ-A scan beside it, for the same reason in the other direction: it is the one check that
     // says no card number can reach anything this build renders, logs or stores, and its whole value is

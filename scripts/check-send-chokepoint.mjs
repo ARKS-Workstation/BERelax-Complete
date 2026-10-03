@@ -184,6 +184,15 @@ const PERMITTED_LITERAL_KILL_SWITCHES = new Map([
       'THROW — so a promotional send through this runtime fails closed rather than reading a false.',
   ],
   [
+    'apps/worker/src/jobs/report-alerts.ts',
+    'The pushed report alert (R-REP-08). Transactional, and internal for the review notices’ and the ' +
+      'weekly report’s reason: the recipient is the owner, the shipped resolver returns null for every ' +
+      'caller, and the three consent evaluators beside the literal THROW. Reading the marketing control ' +
+      'row here would be worse than not reading it — an unreadable marketing table would stop the one ' +
+      'message that says the salon’s figures cannot be trusted today, which is the failure this alert ' +
+      'exists to make visible.',
+  ],
+  [
     'apps/worker/src/jobs/seo-weekly-report.ts',
     'The weekly website report (G-SEO-07). Transactional, and internal for the review notices’ reason: the ' +
       'recipient is the owner, the shipped resolver returns null for every caller, and the three consent ' +

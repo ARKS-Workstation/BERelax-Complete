@@ -4,7 +4,7 @@
 
 # ADR index
 
-105 records, generated from the front matter of each one. Every column below is read
+108 records, generated from the front matter of each one. Every column below is read
 out of the record it describes, so a row cannot be wrong without the record being wrong — which is
 the whole reason this file is not maintained by hand. For the argument behind any of them, read
 [README.md](README.md) and then the record.
@@ -116,3 +116,6 @@ the whole reason this file is not maintained by hand. For the argument behind an
 | [0113](0113-a-301-map-is-a-function-and-the-proxy-resolves-it-from-a-committed-module.md) | A 301 map is a FUNCTION with no gaps and no loops, and the proxy resolves it from a committed module | accepted | 2026-10-03 | W-SITE-09 | docs/01 decisions — none; this is the relaunch-shaped consequence of migration 0029's |
 | [0115](0115-an-attribution-identity-is-a-structural-path-and-never-a-selector.md) | a web-vitals attribution identity is a structural path and never a selector | accepted | 2026-10-03 | A-MEAS-04 | docs/01 decisions — none. This is a mechanism under ADR 0018 (first-party measurement), |
 | [0116](0116-a-reason-is-a-declared-consequence-or-the-agents-own-words.md) | a reason is a declared consequence or the agent's own words, and nothing else is representable | accepted | 2026-10-03 | G-AGT-02 | docs/01 decisions — none. A mechanism under ADR 0002 (a gap is not a nought), beside |
+| [0120](0120-an-unsound-figure-is-a-refusal-and-dependence-on-a-check-is-derived.md) | an unsound figure is a refusal, and which checks gate a figure is DERIVED | accepted | 2026-10-03 | R-REP-07 | docs/01 decisions — none; this is the mechanism behind docs/02 §4's reporting schema and |
+| [0121](0121-role-scoped-means-the-scope-is-in-the-query-and-a-headline-tile-is-a-fold.md) | role-scoped means the scope is in the QUERY, and a headline tile is a FOLD | accepted | 2026-10-03 | R-REP-08 | docs/01 decisions — none; this is the mechanism behind docs/03's reporting set and docs/06 |
+| [0122](0122-a-performance-budget-is-one-declaration-and-an-unmeasured-figure-is-absent.md) | a performance budget is ONE declaration, and an unmeasured figure is absent rather than invented | accepted | 2026-10-03 | W-SITE-11 | docs/01 decisions — none; this is the mechanism behind docs/08 §8's "three independent |

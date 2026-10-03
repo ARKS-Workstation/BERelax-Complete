@@ -22,10 +22,12 @@
     "./patterns/slot-grid": "./src/patterns/slot-grid.tsx",
     "./primitives": "./src/primitives/index.tsx",
     "./primitives/contract": "./src/primitives/contract.ts",
+    "./reporting": "./src/reporting/kpi-tile.ts",
     "./theme-provider": "./src/theme/theme-provider.tsx",
     "./tokens.css": "./src/tokens/tokens.css"
   },
   "dependencies": {
+    "@berelax/core": "workspace:*",
     "@berelax/media": "workspace:*",
     "@berelax/shared": "workspace:*",
     "@radix-ui/react-dialog": "1.1.23",

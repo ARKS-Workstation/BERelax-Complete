@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**199 / 211 units complete.**
+**202 / 211 units complete.**
 
 ## Next up
 
 1. **B-M1 — M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop**
 1. **P-HR-14 — Therapist self-service portal and staff notifications**
-1. **R-REP-07 — The data-quality gate that refuses to show an unreconciled number**
+1. **H-HARD-01 — Security headers, CSP and public-endpoint rate limiting**
 
 ## All units
 
@@ -145,8 +145,8 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 124 | `R-REP-04` | Contribution margin per service and the operational KPI set | `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13`, `R-REP-03` | — | Y9-commission, Y7-mcc |
 | [x] | 125 | `R-REP-05` | Cohorts, LTV, CAC and payback, outstanding package liability | `A-FIRST-08`, `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13`, `R-REP-04` | — | Y9-package-policy, Y11-vat-package |
 | [x] | 126 | `R-REP-06` | Seasonality and the 13-week cash-flow forecast | `R-REP-02`, `R-REP-04` | — | Y8-hours, Y9-windows |
-| [ ] | 127 | `R-REP-07` | The data-quality gate that refuses to show an unreconciled number | `A-FIRST-09`, `A-MEAS-07`, `R-REP-02`, `R-REP-04` | — | — |
-| [ ] | 128 | `R-REP-08` | Role-scoped dashboards, drill-down and pushed alerts | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `F07`, `H04`, `R-REP-05`, `R-REP-06`, `R-REP-07` | M5 | Y6-sender-ids |
+| [x] | 127 | `R-REP-07` | The data-quality gate that refuses to show an unreconciled number | `A-FIRST-09`, `A-MEAS-07`, `R-REP-02`, `R-REP-04` | — | — |
+| [x] | 128 | `R-REP-08` | Role-scoped dashboards, drill-down and pushed alerts | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `F07`, `H04`, `R-REP-05`, `R-REP-06`, `R-REP-07` | M5 | Y6-sender-ids |
 | [x] | 129 | `W-SYS-01` | Next.js app shell, Tailwind v4 token mapping and the type stack | `F11`, `H04` | — | Y12-body-face |
 | [x] | 130 | `W-SYS-02` | Editorial grid, layout primitives and the container-query component set | `W-SYS-01` | — | — |
 | [x] | 131 | `W-SYS-03` | Radix/shadcn primitive set and an axe gate that provably fires | `H05`, `W-SYS-01`, `W-SYS-02` | — | — |
@@ -166,7 +166,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 145 | `W-SITE-06` | Therapist routes and the publishing guard | `B-UI-01`, `B-UI-02`, `B-UI-03`, `B-UI-04`, `B-UI-05`, `P-HR-01`, `P-HR-02`, `P-HR-03`, `P-HR-04`, `P-HR-05`, `P-HR-06`, `P-HR-07`, `P-HR-08`, `P-HR-09`, `P-HR-10`, `P-HR-11`, `P-HR-12`, `P-HR-13`, `P-HR-14`, `W-SITE-03`, `W-SYS-09` | — | Y12-consent-photo, Y8-staff |
 | [x] | 146 | `W-SITE-08` | Sitemaps, hreflang, IndexNow and the publish propagation pipeline | `H02`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07` | M4 | — |
 | [x] | 147 | `W-SITE-09` | Legacy WooCommerce URL migration and the 301 map | `W-SITE-08` | — | Y1-woo-baseline |
-| [ ] | 148 | `W-SITE-11` | Performance enforcement: Lighthouse CI budgets and field RUM | `A-FIRST-01`, `A-FIRST-02`, `A-FIRST-03`, `A-FIRST-04`, `A-FIRST-05`, `A-FIRST-06`, `A-FIRST-07`, `A-FIRST-08`, `A-FIRST-09`, `A-FIRST-10`, `H05`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06` | — | Y5-analytics-basis |
+| [x] | 148 | `W-SITE-11` | Performance enforcement: Lighthouse CI budgets and field RUM | `A-FIRST-01`, `A-FIRST-02`, `A-FIRST-03`, `A-FIRST-04`, `A-FIRST-05`, `A-FIRST-06`, `A-FIRST-07`, `A-FIRST-08`, `A-FIRST-09`, `A-FIRST-10`, `H05`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06` | — | Y5-analytics-basis |
 | [x] | 149 | `W-SYS-10` | Breakpoint preview in the CMS admin | `W-SYS-09` | — | — |
 | [x] | 150 | `G-AGT-01` | Agent registry, heartbeat contract and 2x-interval watchdog | `F09`, `H02` | — | — |
 | [x] | 151 | `G-CONN-01` | google_connections schema: one-to-many, sub-keyed, envelope-encrypted | `F04`, `F08`, `F09` | — | Y2-listing-owner, Y2-gbp-status |

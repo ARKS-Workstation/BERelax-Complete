@@ -56,6 +56,7 @@
     "palette": "python3 scripts/palette.py",
     "palette:emit": "python3 scripts/palette.py --emit",
     "pdf:fixtures": "tsx scripts/render-pdf-fixtures.mjs",
+    "perf-layers": "node scripts/check-performance-layers.mjs",
     "pii": "node scripts/check-staff-pii.mjs",
     "private-documents": "node scripts/check-private-documents.mjs",
     "processors": "tsx scripts/check-processor-register.mjs",
@@ -77,7 +78,7 @@
     "tokens": "tsx scripts/emit-tokens.mjs",
     "tokens:emit": "tsx scripts/emit-tokens.mjs --emit",
     "typecheck": "tsc -p tsconfig.json && tsc -p apps/web/tsconfig.json",
-    "verify": "pnpm lint && pnpm typecheck && pnpm boundaries && pnpm boundaries:test && pnpm purity && pnpm invisibles && pnpm secrets && pnpm rotation && pnpm pii && pnpm deps && pnpm licences && pnpm container && pnpm palette && pnpm tokens && pnpm colours && pnpm cms && pnpm documents && pnpm no-invoice-mutation && pnpm no-autofile && pnpm structured-data && pnpm redirects && pnpm chokepoint && pnpm send-chokepoint && pnpm private-documents && pnpm saq-a && pnpm egress && pnpm event-attributes && pnpm layout && pnpm jobs && pnpm alerts && pnpm processors && pnpm adr && pnpm docs-set && pnpm progress:check && pnpm media && pnpm fixtures && pnpm fonts && pnpm critique && pnpm a11y && pnpm touch-targets && pnpm coverage && pnpm test:integration && pnpm money-invariants && pnpm db:migrate:dry && pnpm db:drift && pnpm db:conventions && pnpm sqlstate && pnpm dry-runs && pnpm budgets && pnpm gate-registry && pnpm gates:test && pnpm descriptor-lint",
+    "verify": "pnpm lint && pnpm typecheck && pnpm boundaries && pnpm boundaries:test && pnpm purity && pnpm invisibles && pnpm secrets && pnpm rotation && pnpm pii && pnpm deps && pnpm licences && pnpm container && pnpm palette && pnpm tokens && pnpm colours && pnpm cms && pnpm documents && pnpm no-invoice-mutation && pnpm no-autofile && pnpm structured-data && pnpm redirects && pnpm chokepoint && pnpm send-chokepoint && pnpm private-documents && pnpm saq-a && pnpm egress && pnpm event-attributes && pnpm layout && pnpm jobs && pnpm alerts && pnpm processors && pnpm adr && pnpm docs-set && pnpm progress:check && pnpm media && pnpm fixtures && pnpm fonts && pnpm critique && pnpm a11y && pnpm touch-targets && pnpm coverage && pnpm test:integration && pnpm money-invariants && pnpm db:migrate:dry && pnpm db:drift && pnpm db:conventions && pnpm sqlstate && pnpm dry-runs && pnpm budgets && pnpm gate-registry && pnpm gates:test && pnpm descriptor-lint && pnpm perf-layers",
     "redirects": "tsx scripts/check-redirect-coverage.mjs",
     "redirects:import": "tsx scripts/import-crawl-baseline.mjs"
   },

@@ -1485,6 +1485,59 @@ export const ROUTES = [
       'its own path, which is what W-SITE-05 made the `indexable` field mean.',
   },
   {
+    id: 'reports-dashboard',
+    path: '/reports',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'R-REP-08s role-scoped dashboards. The dashboard, the SCOPE and the tiles all come from the ' +
+      'signed-in principals role: no query parameter chooses a principal, a role, a scope or a ' +
+      'permission, and the scope is a value the QUERY takes rather than a filter over its result - a ' +
+      'dashboard that read everything and hid rows in the view would leak through the drill-down and ' +
+      'through the export, which are the two things on this screen that return what the query returned. ' +
+      'A handler answering text/html rather than a document, for the reason the month reconciliation, ' +
+      'the compliance calendar, the Messages inbox and the five HR screens all give: a registry document ' +
+      'must be served in BOTH locales, which needs an Arabic admin document and the W-SYS-01 shell, and ' +
+      '?dir=rtl re-renders this English document mirrored so the direction half of the accessibility ' +
+      'matrix is audited without inventing an Arabic admin surface. Dynamic, and ?from= and ?to= are ' +
+      'REQUIRED with no default: a screen answering for "the last thirty days" answers a different ' +
+      'question every day, so a figure quoted from it could not be traced back. NO sampleParams, for the ' +
+      'month reconciliations reason: which windows hold data depends on which days have been refreshed. ' +
+      'It WRITES - its POST is the export, which records an audit_event with operation=export and the ' +
+      'row count and raises the registered insider-threat alert in the same transaction - and a GET that ' +
+      'exported would put an actor nobody signed in with into an append-only trail. The /reports prefix ' +
+      'in ADMIN_GROUP_PREFIXES is what makes it noindex.',
+  },
+  {
+    id: 'reports-data-quality',
+    path: '/reports/data-quality',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'R-REP-07s data-quality screen: every registered reconciliation check with its last run, its two ' +
+      'figures and the rows behind a failure, plus the KPI tiles those checks gate so a reader can see ' +
+      'what is refused rather than only that something was. A handler answering text/html rather than a ' +
+      'document, for the reason the month reconciliation, the compliance calendar, the Messages inbox and ' +
+      'the five HR screens all give: a registry document must be served in BOTH locales, which needs an ' +
+      'Arabic admin document and the W-SYS-01 shell. Dynamic, and ?from= and ?to= are REQUIRED with no ' +
+      'default: a page answering for "the last thirty days" answers a different question every day, so a ' +
+      'link to it could not be cited - and this page is cited, because it is the evidence that a figure ' +
+      'somebody acted on was sound at the time. NO sampleParams, for the month reconciliations reason: ' +
+      'the windows that have data depend on which days have been refreshed, so a sample window would be ' +
+      'a URL the harness opened against a window that may hold nothing. ?format=json serves the same ' +
+      'computation as the HTML, so the API and the rendered layer cannot disagree about whether a figure ' +
+      'is publishable. Authorisation is report:read and a refusal writes audit_event with ' +
+      "operation='denied'. The /reports prefix in ADMIN_GROUP_PREFIXES is what makes it noindex.",
+  },
+  {
     id: 'reviews-queue',
     path: '/reviews',
     kind: 'handler',
@@ -2076,6 +2129,12 @@ export const ADMIN_GROUP_PREFIXES: readonly string[] = [
   // M-TILL-13. `/packages` and `/till` both cover a whole group: the cash-up screen sits under `/till` and
   // arrives noindex before it is written, which is what this list is for.
   '/packages',
+  // R-REP-07's data-quality screen. A prefix rather than a bare path because the reporting estate is
+  // already allocated there — R-REP-08's role-scoped dashboards and their drill-downs land under it — and
+  // a screen holding a business's own revenue, utilisation and reconciliation state is not a page for the
+  // public. The second route under a prefix arrives noindex on the commit that creates it rather than on
+  // the commit that remembers to.
+  '/reports',
   // G-REV-02's paste form. A prefix rather than a bare path because the reviews admin will grow a queue and
   // an approval screen (G-REV-04, G-REV-05), and a prefix added with the first route covers them all.
   '/reviews',

@@ -71,7 +71,7 @@ const fils = (value: number): string => `${value.toLocaleString('en-AE')} fils`
 const CAMPAIGNS_CSS = `
 main{max-width:70rem;margin:0 auto;padding:var(--space-4,1rem);font-family:var(--font-body,system-ui)}
 table{width:100%;border-collapse:collapse}
-th,td{text-align:start;padding:var(--space-2,.5rem);border-bottom:1px solid var(--colour-border,#ddd)}
+th,td{text-align:start;padding:var(--space-2,.5rem);border-bottom:1px solid var(--colour-border)}
 .lede p{max-width:60ch}
 .stale{font-weight:700}
 .empty{padding:var(--space-4,1rem)}
