@@ -13276,7 +13276,7 @@ units:
       bot-flagged sessions from the funnel is deferred to A-FIRST-09 — DEFERRAL SATISFIED: its
       funnelCountRows excludes bot sessions by default and includes them behind an explicit parameter,
       and the steps are MATERIALISED either way so the verdict stays recoverable. The bot-filtered share on the analytics page
-      is deferred to A-FIRST-10, and the same figure on the operations dashboard is deferred to R-REP-07. Each
+      is deferred to A-FIRST-10, and the same figure on the operations dashboard is deferred to R-REP-08, which owns that dashboard (re-pointed by R-REP-07: that unit built the data-quality GATE, which judges whether every session carries a classification, and it renders no traffic share). Each
       must call classifyBot and store its verdict rather than re-deriving a flag — BOT_KINDS and
       AI_CRAWLER_BOT_KINDS are exported from @berelax/core and @berelax/shared for exactly that — and the scan in
       apps/web/src/crawler-policy.test.ts refuses a crawler name written at any of those call sites. Two shapes
@@ -15409,7 +15409,7 @@ units:
       ref-capture rate, bot share, dispatch reconciliation, view freshness — and a typed result so a tile
       physically cannot render a number whose check is failing.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - A-FIRST-09

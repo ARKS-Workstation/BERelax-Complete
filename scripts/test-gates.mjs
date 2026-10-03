@@ -60948,6 +60948,297 @@ export function chargebackNetEffectFils(`,
   )
 }
 
+// 198a-198z. (R-REP-07) The data-quality gate: every rule shown to be able to stop firing, the
+//            distinction between "they disagree" and "nobody checked" shown to be able to collapse, and
+//            the tile shown to be able to print a figure it must not.
+//
+//            The unit's whole subject is a refusal, and every mutation below leaves a system that WORKS.
+//            A tolerance of one fils, a check that reads "pass" when nothing has run, a tile with a
+//            fallback for the state it cannot render: each reads as a fix for a blank screen, and each
+//            puts a number in front of somebody who will price from it.
+//
+//            198a to 198g run the two unit suites and are fast. 198h onwards drive the integration
+//            suite, which needs a migrated and seeded database.
+{
+  const DQ_TS = 'packages/core/src/reporting/data-quality.ts'
+  const DQ_TEST = 'packages/core/src/reporting/data-quality.test.ts'
+  const TILE_TS = 'packages/ui/src/reporting/kpi-tile.ts'
+  const TILE_TEST = 'packages/ui/src/reporting/kpi-tile.test.ts'
+  const DQ_QUERIES = 'packages/db/src/reporting/data-quality-queries.ts'
+  const KPI_INPUT = 'packages/db/src/reporting/kpi-input.ts'
+  const HANDLER = 'apps/web/app/(admin)/reports/data-quality/handler.ts'
+  const DQ_ITEST = 'apps/web/src/data-quality.itest.ts'
+  const dqUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const dqIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // The control for the whole block. Every case asserts that a BROKEN tree is caught, and that says
+  // nothing at all unless the committed tree passes.
+  {
+    const core = run('pnpm', dqUnit(DQ_TEST))
+    check(
+      'data quality: the committed gate suite passes, which is the control for 198a to 198d',
+      !core.failed,
+      `the data-quality unit suite does not pass on the committed tree:\n${core.output}`,
+    )
+    const tile = run('pnpm', dqUnit(TILE_TEST))
+    check(
+      'data quality: the committed tile suite passes, which is the control for 198e to 198g',
+      !tile.failed,
+      `the KPI tile suite does not pass on the committed tree:\n${tile.output}`,
+    )
+  }
+
+  /*
+    198a. The freshness check narrowed from "everything" to the revenue facts.
+
+    The mutation nobody would review as a defect: a check that claimed to attest every subject now
+    attests the one it is obviously about. Every other rule still passes, every tile still renders, and
+    the figures reading the dimensions are from that commit gated by nothing at all — which is the one
+    failure of this unit that looks exactly like success.
+  */
+  checkRejectedBy(
+    'data quality: 198a a KPI dataset that no check attests is caught',
+    withEditedFile(
+      DQ_TS,
+      (text) =>
+        replaceOnce(text, '    attests: DATA_QUALITY_SUBJECTS,', "    attests: ['revenueLines'],"),
+      () => runExpectingFailure('pnpm', dqUnit(DQ_TEST)),
+    ),
+    'every-kpi-dataset-is-attested-by-a-check',
+  )
+
+  /*
+    198b. The rule reading the SHIPPED registry while judging the one it was handed.
+
+    This is a defect that was really in the first version of this module, and its shape is why the rules
+    take an argument at all: a detector that consults the shipped registry cannot fire for a deliberately
+    broken one, so the rule about a KPI reaching no check could never have been seen to fire. The two
+    cases in the unit suite that blind every `attests` list are what found it.
+  */
+  checkRejectedBy(
+    'data quality: 198b a rule that judges the shipped registry instead of its argument is caught',
+    withEditedFile(
+      DQ_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '    .filter((kpi) => checksGating(datasetsOfKpi(kpi, kpiRegistry), checks).length === 0)',
+          '    .filter((kpi) => checksGating(datasetsOfKpi(kpi, kpiRegistry)).length === 0)',
+        ),
+      () => runExpectingFailure('pnpm', dqUnit(DQ_TEST)),
+    ),
+    'every-kpi-is-gated-by-at-least-one-check',
+  )
+
+  /*
+    198c. A check with no reading answering `pass`.
+
+    The acceptance line in one line of code: "a check that has never run reads 'unknown', never 'pass'".
+    The mutation is what somebody writes to make a screen look calm before a pass has ever run, and from
+    that commit a build that has reconciled nothing reports seven green rows.
+  */
+  checkRejectedBy(
+    'data quality: 198c a check that has never run reading as a pass is caught',
+    withEditedFile(
+      DQ_TS,
+      (text) => replaceOnce(text, "      state: 'unknown',", "      state: 'pass',"),
+      () => runExpectingFailure('pnpm', dqUnit(DQ_TEST)),
+    ),
+    'reads unknown, never pass, for a check that has never run',
+  )
+
+  /*
+    198d. One fils of tolerance in the identity.
+
+    The most plausible mutation in the block, and the one with no visible symptom: an identity that
+    accepts a variance of one reads as robustness against rounding, and this build has no rounding to be
+    robust against — money is integer fils and VAT is derived so that net + vat = gross exactly
+    (ADR 0007). What it accepts is a real discrepancy, every day, growing.
+  */
+  checkRejectedBy(
+    'data quality: 198d an identity that tolerates one fils is caught',
+    withEditedFile(
+      DQ_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  const holds = check.relation === 'equals' ? variance === 0n : variance <= 0n",
+          "  const holds = check.relation === 'equals' ? variance <= 1n && variance >= -1n : variance <= 0n",
+        ),
+      () => runExpectingFailure('pnpm', dqUnit(DQ_TEST)),
+    ),
+    'fails on one fils, in both directions',
+  )
+
+  /*
+    198e. The gate reporting "nobody checked" as "they disagree".
+
+    Two refusals collapsed into one, which looks like simplification. The cost is that a build which has
+    never run a reconciliation pass reports its figures as unreconciled — and the first response to that
+    is to go looking for a discrepancy nothing has claimed exists, rather than to run the pass.
+  */
+  checkRejectedBy(
+    'data quality: 198e an unattested figure reported as an unreconciled one is caught',
+    withEditedFile(
+      DQ_TS,
+      (text) => replaceOnce(text, "      state: 'unattested',", "      state: 'unreconciled',"),
+      () => runExpectingFailure('pnpm', dqUnit(DQ_TEST)),
+    ),
+    'distinguishes a check that disagreed from one that never ran',
+  )
+
+  /*
+    198f. A fallback added to the tile's figure.
+
+    `?? '0'` on a branch that cannot be reached, added by somebody making the types quiet. It is
+    unreachable until the union widens, and then it is a zero on a dashboard — ADR 0070's whole subject,
+    in the one file that renders the figure.
+  */
+  checkRejectedBy(
+    'data quality: 198f a numeric fallback in the KPI tile is caught',
+    withEditedFile(
+      TILE_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '        `<p class="kpi-tile__figure">${safeText(figure.value)}` +',
+          '        `<p class="kpi-tile__figure">${safeText(figure.value ?? \'0\')}` +',
+        ),
+      () => runExpectingFailure('pnpm', dqUnit(TILE_TEST)),
+    ),
+    'the tile source contains ??',
+  )
+
+  /*
+    198g. The tile printing the figure beside the refusal.
+
+    "Show what it would have been" is a request somebody will make, and this is what granting it looks
+    like: the unreconciled branch rendering the figure as well as the warning. Every state assertion
+    still passes — the attribute is still `unreconciled` — and the number is on the screen.
+  */
+  checkRejectedBy(
+    'data quality: 198g a refusal that renders the published figure anyway is caught',
+    withEditedFile(
+      TILE_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '      return `<p class="kpi-tile__why">${safeText(figure.why)}</p>${list(figure.refusedBy)}`',
+          '      return `<p class="kpi-tile__figure">1234.5678</p><p class="kpi-tile__why">${safeText(figure.why)}</p>${list(figure.refusedBy)}`',
+        ),
+      () => runExpectingFailure('pnpm', dqUnit(TILE_TEST)),
+    ),
+    'rendered the published figure',
+  )
+
+  // 198h onwards need the database. They drive the integration suite, which is slower than the four
+  // above by about a minute each, so they are last.
+  {
+    const committed = run('pnpm', dqIntegration(DQ_ITEST))
+    check(
+      'data quality: the committed integration suite passes, which is the control for 198h to 198k',
+      !committed.failed,
+      `the data-quality integration suite does not pass on the committed tree:\n${committed.output}`,
+    )
+  }
+
+  /*
+    198h. A reading with no evidence returned as two sides agreeing at zero.
+
+    The db half of 198c, and the one a type cannot refuse: `{ left: 0, right: 0 }` and `null` are the
+    same pair of numbers and different claims. This is what the query looks like after somebody removes
+    a nullable field to make a screen simpler.
+  */
+  checkRejectedBy(
+    'data quality: 198h a stored check with no pass returning zeroes instead of nothing is caught',
+    withEditedFile(
+      DQ_QUERIES,
+      (text) =>
+        replaceOnce(
+          text,
+          '      observed:\n        dispatch.lastRanAt === null\n          ? null\n          : {',
+          '      observed:\n        false\n          ? null\n          : {',
+        ),
+      () => runExpectingFailure('pnpm', dqIntegration(DQ_ITEST)),
+    ),
+    'a check that has never run',
+  )
+
+  /*
+    198i. The report's permission check removed.
+
+    `guardAdminRoute` still refuses an unauthenticated request, so the screen is still "behind a login"
+    and every other case in the suite still passes. What changes is that the therapist who opens the
+    link gets the business's revenue and utilisation, and nothing records that they did.
+  */
+  checkRejectedBy(
+    'data quality: 198i a report with no permission check is caught',
+    withEditedFile(
+      HANDLER,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (!can(request.principal.role, DATA_QUALITY_PERMISSION)) {',
+          '  if (false && !can(request.principal.role, DATA_QUALITY_PERMISSION)) {',
+        ),
+      () => runExpectingFailure('pnpm', dqIntegration(DQ_ITEST)),
+    ),
+    'refuses a role without report:read and records the refusal',
+  )
+
+  /*
+    198j. A `value` field put back onto the serialised refusal.
+
+    `value: null` on an unreconciled figure, which is what a client that wanted a uniform shape would
+    ask for. The state is still `unreconciled`, every assertion about the state still passes, and the
+    API has acquired a field whose next consumer reads it as a figure of nothing.
+  */
+  checkRejectedBy(
+    'data quality: 198j an API refusal carrying a value field is caught',
+    withEditedFile(
+      HANDLER,
+      (text) =>
+        replaceOnce(
+          text,
+          "        gated.state === 'value' ? { state: 'value', value: publishGatedFigure(gated) } : gated,",
+          "        gated.state === 'value'\n          ? { state: 'value', value: publishGatedFigure(gated) }\n          : ({ ...gated, value: null } as never),",
+        ),
+      () => runExpectingFailure('pnpm', dqIntegration(DQ_ITEST)),
+    ),
+    'at the API and at the rendered layer',
+  )
+
+  /*
+    198k. The loader claiming a dataset it does not load.
+
+    One line added to a declared list, which is how a dashboard comes to offer a cohort tile computed
+    over an empty array — a lifetime value of zero for every cohort, with no state saying so. The
+    declaration and the loader are two statements of one fact, and this is the check that holds them
+    equal.
+  */
+  checkRejectedBy(
+    'data quality: 198k a declared dataset the loader does not load is caught',
+    withEditedFile(
+      KPI_INPUT,
+      (text) =>
+        replaceOnce(
+          text,
+          "  'revenueLines',\n] as const",
+          "  'revenueLines',\n  'cohortMembers',\n] as const",
+        ),
+      () => runExpectingFailure('pnpm', dqIntegration(DQ_ITEST)),
+    ),
+    'holds the loader',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

@@ -4,7 +4,7 @@
 
 # ADR index
 
-100 records, generated from the front matter of each one. Every column below is read
+101 records, generated from the front matter of each one. Every column below is read
 out of the record it describes, so a row cannot be wrong without the record being wrong — which is
 the whole reason this file is not maintained by hand. For the argument behind any of them, read
 [README.md](README.md) and then the record.
@@ -111,3 +111,4 @@ the whole reason this file is not maintained by hand. For the argument behind an
 | [0108](0108-a-spend-cap-is-the-databases-or-it-is-a-cap-until-two-workers-run.md) | a spend cap is the DATABASE's, or it is a cap until two workers run | accepted | 2026-10-03 | C-AUTO-10 | docs/01 decisions — none; this is the mechanism behind docs/03 §5's campaigns, and it stands |
 | [0109](0109-a-journey-that-cannot-be-expressed-is-a-finding-and-a-birthday-has-no-year.md) | a journey the DSL cannot express is a FINDING, not a second DSL; and a birthday has no year | accepted | 2026-10-03 | C-AUTO-11 | docs/01 decisions — none; this is the mechanism behind docs/03 §5's stock journeys and |
 | [0110](0110-discreet-is-a-narrow-privacy-claim-and-the-mcc-gate-is-three-layers.md) | "discreet" is a NARROW privacy claim, and the MCC gate is three layers with no invented value | accepted | 2026-10-03 | Y-PAY-10 | docs/01 decisions — none; this is the go-live-shaped consequence of |
+| [0120](0120-an-unsound-figure-is-a-refusal-and-dependence-on-a-check-is-derived.md) | an unsound figure is a refusal, and which checks gate a figure is DERIVED | accepted | 2026-10-03 | R-REP-07 | docs/01 decisions — none; this is the mechanism behind docs/02 §4's reporting schema and |
