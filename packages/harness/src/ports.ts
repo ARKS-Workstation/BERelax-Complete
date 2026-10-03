@@ -251,6 +251,14 @@ export const TEST_PORT_BANDS = {
   // 19_100 is the band this unit was allocated. 16_800 through 19_000 are allocations held by units in
   // `template-editor` and `book-flow` came to share one. [19_100, 19_400) contains none of
   'flow-builder': { start: 19_100, width: 300 },
+  // H-MIG-10's walk-in stopwatch, which needs a real server because the claim is a wall-clock duration
+  // through the BUILT application: a pure render cannot measure how long the desk waits, and the figure
+  // the pilot is judged on is the one a browser produces against the bytes `next build` emitted.
+  // 22_700 is the band this unit was allocated. 19_400 through 22_600 are allocations held by units in
+  // other worktrees, and a band chosen from what one worktree can see is exactly how `template-editor`
+  // and `book-flow` came to share one. [22_700, 23_000) contains none of RESTRICTED_PORTS and is below
+  // EPHEMERAL_PORT_FLOOR.
+  'walk-in-speed': { start: 22_700, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

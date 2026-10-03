@@ -59,6 +59,7 @@ import {
   PACKAGE_EXPIRY_AGENT,
   runPackageExpirySweep,
 } from './jobs/package-expiry.ts'
+import { PARALLEL_RUN_RECONCILE_JOB_DEFINITION } from './jobs/parallel-run-reconcile.ts'
 import { RECONCILE_DLR_JOB } from './jobs/reconcile-dlr.ts'
 import { runRecurringCostCheck } from './jobs/recurring-cost-check.ts'
 import { REPORTING_REFRESH_JOB_DEFINITION } from './jobs/reporting-refresh.ts'
@@ -547,6 +548,7 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
   // open. Its own agent and its own heartbeat row (0138), because a reconciliation nobody ran looks
   // exactly like one that found nothing.
   DISPATCH_RECONCILIATION_JOB_DEFINITION,
+  PARALLEL_RUN_RECONCILE_JOB_DEFINITION,
 ]
 
 /**

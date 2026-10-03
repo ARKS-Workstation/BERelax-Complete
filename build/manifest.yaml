@@ -22159,7 +22159,7 @@ units:
       the system, pilot feedback captured against a closed taxonomy and turned into manifest fix units,
       and the front-desk speed requirement measured rather than asserted.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-UI-01
@@ -22192,9 +22192,48 @@ units:
       outside the window rather than producing a misleading zero
     files:
     - apps/worker/src/jobs/parallel-run-reconcile.ts
-    - apps/web/e2e/walk-in-speed.spec.ts
+    - apps/web/e2e/walk-in-speed.itest.ts
     - scripts/pilot-feedback-to-units.mjs
     - artifacts/pilot/walk-in-speed.json
+    - artifacts/pilot/feedback.json
+    - packages/db/migrations/0153_parallel_run.sql
+    - packages/db/src/schema/parallel-run.ts
+    - packages/db/src/services/parallel-run.ts
+    - packages/shared/src/parallel-run.ts
+    - packages/core/src/pilot/feedback.ts
+    - packages/core/src/pilot/feedback.test.ts
+    - packages/core/src/pilot/walk-in-speed.ts
+    - packages/core/src/pilot/walk-in-speed.test.ts
+    - packages/fixtures/src/parallel-run.itest.ts
+    - docs/adr/0107-the-paper-side-is-a-named-persons-claim-and-the-cutover-decision-is-not-a-function-of-it.md
+    notes:
+    - 'NOTE: the declared file apps/web/e2e/walk-in-speed.spec.ts was written as walk-in-speed.itest.ts.
+      vitest.integration.config.ts''s include is `apps/**/*.itest.ts`, so a .spec.ts is a test nothing
+      runs — ADR 0002 in the file name.'
+    - 'NOTE: THE WALK-IN p95 IS NOT MEASURED, and artifacts/pilot/walk-in-speed.json records that rather
+      than a figure: verdict `not_measured`, p95Ms null — not 0, which would pass a ten-second budget
+      with room to spare. Brief rule 23: a wall-clock percentile taken in an agent container with
+      several agents on four cores is a figure about the container, and in a committed report it is
+      indistinguishable from a figure about the product. The suite measures under
+      WALK_IN_SPEED_MEASURE=1 on a machine somebody chose and skips loudly on stderr otherwise; its
+      report-integrity half ALWAYS runs and holds the artefact to the verdict the arithmetic gives for
+      the artefact''s own figures, so a hand-edited within_budget over three samples fails. This is the
+      unit''s own provisional note enforced: real-device results recorded as absent, not assumed
+      passing (Y12-pilot, Y14-devices).'
+    - 'NOTE: the pilot feedback log is EMPTY because the pilot has not run (Y12-pilot is an owner
+      verification task). The taxonomy, the planner and the generator are complete and are exercised
+      against a SYNTHETIC log whose every summary says so, so no fixture item can be mistaken for a
+      complaint somebody made. The generator prints a manifest fragment and does NOT edit
+      build/manifest.yaml.'
+    - 'NOTE: OPENS Y8-parallel-run-window. The window start and end are two settings with no date and a
+      BLANK default — a date has no strictest safe reading, and app_setting.value is not null so a
+      null-defaulted setting cannot be seeded at all, which the integration suite''s global setup found
+      by failing on the insert. The reconciliation refuses to run while either is unset rather than
+      reporting zero days.'
+    - 'NOTE: allocations USED — migration 0153, SQLSTATEs ZY741-ZY746, ADR 0107, gate block 185a-185z,
+      and the test port band { start: 22_700, width: 300 } claimed by the walk-in-speed suite.
+      ZY747-ZY750 are released unused and deliberately unregistered. SCHEMA_VERSION is 153 and the
+      ledger carries a paragraph opening `// 153 is 0153_parallel_run.sql`.'
   - id: Y-PAY-01
     order: 193
     title: Payment gateway port, adapter conformance suite and provider registry
