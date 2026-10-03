@@ -24,7 +24,9 @@ import { type FailureScript, failureError } from '../failure.ts'
 import type {
   BusinessProfileProvider,
   GbpAccount,
+  GbpBusinessPeriod,
   GbpLocation,
+  GbpSpecialHourPeriod,
   GoogleOAuthProvider,
   GoogleRevocation,
   GoogleTokens,
@@ -590,6 +592,49 @@ export const GBP_ACCOUNT_FIXTURES: readonly GbpAccount[] = [
  * plausible-looking value is indistinguishable from a configured one — and a wrong `placeId` stored as a
  * fact is a review reply published against somebody else's listing (the brief's rule 15).
  */
+/**
+ * The trading week on the profile, as `regularHours.periods`: 11:00 to 02:00 the NEXT day, daily.
+ *
+ * docs/13 §2's hours, expressed the way the API expresses them, which is why `closeDay` is the day after
+ * `openDay` on every period. A fixture that closed at the end of the opening day would make every
+ * read-modify-write test pass against a profile that says this premises shuts at midnight.
+ */
+export const GBP_REGULAR_PERIODS: readonly GbpBusinessPeriod[] = Object.freeze(
+  (
+    [
+      ['SUNDAY', 'MONDAY'],
+      ['MONDAY', 'TUESDAY'],
+      ['TUESDAY', 'WEDNESDAY'],
+      ['WEDNESDAY', 'THURSDAY'],
+      ['THURSDAY', 'FRIDAY'],
+      ['FRIDAY', 'SATURDAY'],
+      ['SATURDAY', 'SUNDAY'],
+    ] as const
+  ).map(([openDay, closeDay]) => ({
+    openDay,
+    openTime: { hours: 11, minutes: 0 },
+    closeDay,
+    closeTime: { hours: 2, minutes: 0 },
+  })),
+)
+
+/**
+ * The Ramadan variation, in `specialHours` where docs/10 §7 says it belongs.
+ *
+ * A fixture rather than a calculated date: Ramadan is lunar and announced late (0003's
+ * `premises_closure.is_confirmed` exists for that), and a computed date would be this build inventing a
+ * calendar. What matters to the test is that a dated variation EXISTS on the profile and is still there
+ * after a weekly-hours write, which any date proves.
+ */
+export const GBP_RAMADAN_SPECIAL_HOURS: readonly GbpSpecialHourPeriod[] = Object.freeze([
+  {
+    startDate: { year: 2027, month: 2, day: 18 },
+    endDate: { year: 2027, month: 3, day: 19 },
+    openTime: { hours: 20, minutes: 0 },
+    closeTime: { hours: 3, minutes: 0 },
+  },
+])
+
 export const AL_ZAHIYAH_LOCATION: GbpLocation = {
   name: 'locations/fake-al-zahiyah-1',
   title: 'BE RELAX — Massage Center and Spa',
@@ -601,6 +646,10 @@ export const AL_ZAHIYAH_LOCATION: GbpLocation = {
   },
   metadata: { placeId: 'ChIJ-fake-place-al-zahiyah' },
   websiteUri: 'https://berelaxmassage.com/',
+  regularHours: { periods: GBP_REGULAR_PERIODS },
+  // Present on the fixture ON PURPOSE. The acceptance criterion is that a human-approved hours update
+  // leaves them untouched, and a fixture with no special hours would pass that assertion for ever.
+  specialHours: { specialHourPeriods: GBP_RAMADAN_SPECIAL_HOURS },
 }
 
 /**
@@ -647,6 +696,33 @@ export function createFakeBusinessProfile(options: FakeGoogleOptions): BusinessP
     hasBusinessAuthority: true,
   }
   const reviews = new Map(REVIEW_FIXTURES.map((review) => [review.reviewId, { ...review }]))
+  /**
+   * Locations as they stand after a patch, by name.
+   *
+   * An overlay rather than a mutated fixture, because `GBP_LOCATION_FIXTURES` is module-level and frozen
+   * in spirit: a fake that edited it would leak one test's write into the next file's reads, which is the
+   * shape of flake nobody attributes to a fake.
+   */
+  const patched = new Map<string, GbpLocation>()
+  const resolveLocation = (name: string): GbpLocation | undefined =>
+    patched.get(name) ??
+    Object.values(locationsByAccount)
+      .flat()
+      .find((location) => location.name === name)
+
+  /**
+   * The fields `locations.patch` may name, and the only ones this fake honours.
+   *
+   * A closed set, because an `updateMask` naming a field the API does not accept is a 400 — and because
+   * a fake that accepted anything would let a client's mask drift without a single test noticing.
+   */
+  const PATCHABLE_FIELDS = [
+    'title',
+    'storefrontAddress',
+    'websiteUri',
+    'regularHours',
+    'specialHours',
+  ] as const
 
   const guard = (operation: string, summary: string): void => {
     const armed = failures.take()
@@ -730,9 +806,7 @@ export function createFakeBusinessProfile(options: FakeGoogleOptions): BusinessP
       guard('getLocation', `Reading ${name} failed`)
       requireReadMask('getLocation', readMask)
 
-      const found = Object.values(locationsByAccount)
-        .flat()
-        .find((location) => location.name === name)
+      const found = resolveLocation(name)
       if (found === undefined) {
         log.record({
           provider: GOOGLE_BUSINESS_PROFILE,
@@ -751,6 +825,75 @@ export function createFakeBusinessProfile(options: FakeGoogleOptions): BusinessP
         detail: { name, placeId: found.metadata.placeId },
       })
       return found
+    },
+
+    /**
+     * `locations.patch`, with the behaviour that makes docs/10 §7's warning real.
+     *
+     * A field named in the `updateMask` is set from the payload — and **cleared when the payload does not
+     * carry it**, which is what a field mask means and is exactly how a naive whole-object PATCH wipes the
+     * Ramadan `specialHours`. A fake that merged instead of replacing would make the write adapter's
+     * narrow mask look like a style preference: every test would pass with or without it.
+     */
+    async updateLocation({ name, location, updateMask }) {
+      guard('updateLocation', `Patching ${name} failed`)
+      const current = resolveLocation(name)
+      if (current === undefined) {
+        log.record({
+          provider: GOOGLE_BUSINESS_PROFILE,
+          operation: 'updateLocation',
+          outcome: 'failure',
+          summary: `No location ${name}`,
+          detail: { failureMode: 'rejected', name },
+        })
+        throw failureError(GOOGLE_BUSINESS_PROFILE, 'rejected')
+      }
+      // `updateMask` is mandatory on the real API and a `*` names every field, which is the whole-object
+      // PATCH. Both are reproduced rather than tolerated: the adapter refuses each one earlier, and a
+      // fake that was lenient would put that refusal beyond the reach of a test.
+      const named =
+        updateMask === undefined || updateMask.length === 0
+          ? []
+          : updateMask.includes('*')
+            ? [...PATCHABLE_FIELDS]
+            : [...updateMask]
+      const unknown = named.filter(
+        (field) => !(PATCHABLE_FIELDS as readonly string[]).includes(field),
+      )
+      if (named.length === 0 || unknown.length > 0) {
+        log.record({
+          provider: GOOGLE_BUSINESS_PROFILE,
+          operation: 'updateLocation',
+          outcome: 'failure',
+          summary:
+            named.length === 0
+              ? 'updateLocation rejected: updateMask is mandatory'
+              : `updateLocation rejected: updateMask names ${unknown.join(', ')}`,
+          detail: { failureMode: 'rejected', name, unknown },
+        })
+        throw failureError(GOOGLE_BUSINESS_PROFILE, 'rejected')
+      }
+      const next: Record<string, unknown> = { ...current }
+      for (const field of named) {
+        const supplied = (location as Record<string, unknown>)[field]
+        if (supplied === undefined) delete next[field]
+        else next[field] = supplied
+      }
+      const updated = next as unknown as GbpLocation
+      patched.set(name, updated)
+      log.record({
+        provider: GOOGLE_BUSINESS_PROFILE,
+        operation: 'updateLocation',
+        outcome: 'success',
+        summary: `${name} patched: ${named.join(', ')}`,
+        detail: {
+          name,
+          updateMask: named,
+          // So a test can assert from the LOG that the write did not name the field it must not touch.
+          specialHourPeriods: updated.specialHours?.specialHourPeriods.length ?? 0,
+        },
+      })
+      return updated
     },
 
     async getVoiceOfMerchantState(locationName: string) {

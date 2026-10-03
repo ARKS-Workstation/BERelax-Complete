@@ -553,6 +553,57 @@ export const DEFAULT_TEMPLATES: readonly DefaultTemplate[] = [
       'التقييمات ليُصاغ لك رد عليه.',
     variables: ['link'],
   },
+  /*
+    The weekly website report (G-SEO-07, docs/07 §3).
+
+    ONE variable, `{{report}}`, and that is the decision worth writing down. Every other template in this
+    file owns its sentence and takes a value or two; this one owns the frame and takes the whole body,
+    because the body is five prioritised actions whose number, order and wording are derived from what the
+    week's run found. A template with a field per action would have to declare a fixed five — and the
+    acceptance line is that a three-finding week renders three and says so, which a five-field template
+    cannot express without blanks in the sentence.
+
+    So `renderSeoWeeklyReport` in `@berelax/core` composes the body, where the readability rules can be
+    asserted over the text a reader actually receives, and this row holds the words around it. Those words
+    stay editable without a deploy, which is the point of `message_template` at all.
+
+    Email and not SMS, for `review.count_increase`'s reason one row along: the next step is *read something
+    and decide*, and the thing being read is five paragraphs long.
+
+    The Arabic variant exists for M-VAT-11's reason and carries its caveat verbatim: no table in this build
+    records which language a member of staff reads, so the selector asks for `en`, and picking a locale per
+    ROLE would be a guess about a person (ADR 0020). Its `{{report}}` body is composed in English by the
+    renderer today, which is honest rather than hidden — a machine translation of a report somebody acts on
+    would be this build inventing the owner's words.
+  */
+  {
+    key: 'seo.weekly_report',
+    messageClass: 'transactional',
+    approvalState: 'approved',
+    purpose:
+      'The weekly plain-English website report: five prioritised actions, the figures with a line each ' +
+      'saying what they mean, and the run own heartbeat facts so a stopped agent is visible in the ' +
+      'email as well as the console (G-SEO-07, docs/07 SS3).',
+    channel: 'email',
+    locale: 'en',
+    subject: 'Your website report for this week',
+    body: 'Here is this week\u2019s website report.\n\n{{report}}',
+    variables: ['report'],
+  },
+  {
+    key: 'seo.weekly_report',
+    messageClass: 'transactional',
+    approvalState: 'approved',
+    purpose:
+      'The weekly plain-English website report: five prioritised actions, the figures with a line each ' +
+      'saying what they mean, and the run own heartbeat facts so a stopped agent is visible in the ' +
+      'email as well as the console (G-SEO-07, docs/07 SS3).',
+    channel: 'email',
+    locale: 'ar',
+    subject: 'تقرير موقعك لهذا الأسبوع',
+    body: 'هذا تقرير موقعك لهذا الأسبوع.\n\n{{report}}',
+    variables: ['report'],
+  },
   {
     key: 'review.request',
     messageClass: 'promotional',

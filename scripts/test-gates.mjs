@@ -56484,6 +56484,1005 @@ export function chargebackNetEffectFils(`,
   }
 }
 
+// 165a-165z. (G-SEO-06) The GBP-versus-website check: the cage that keeps it read-only shown to be alive,
+// the narrow updateMask shown to be what saves the Ramadan hours, the grouping shown to be what stops
+// seven rows for one mistake, and the sliding window shown to be the only shape of limiter that holds.
+//
+// The subject of this block is a check that is ALLOWED TO KNOW LESS THAN IT SEEMS TO. There is no Business
+// Profile API access (docs/10 §4, Y3-gbp-api), so the Google side of every comparison at launch is a named
+// human's claim — and the three ways that goes wrong are all invisible to a test that only asks whether a
+// finding was produced: the claim loses its author and reads as an observation, the form pre-fills itself
+// from the premises row so the check compares the site against itself, or the checker grows the button that
+// "just fixes it" and an agent starts writing to the business's Google profile.
+//
+// The fourth is the limiter, and it is the one that is wrong by default: a refilling bucket and a fixed
+// window both satisfy "at most six per minute" for the window they happen to measure and neither satisfies
+// it for every window. Case 165h is what makes the difference measurable rather than argued.
+{
+  const CHECKER = 'packages/google/src/seo/gbp-consistency.ts'
+  const COMPARE = 'packages/core/src/seo/gbp-consistency.ts'
+  const COMPARE_SUITE = 'packages/core/src/seo/gbp-consistency.test.ts'
+  const WRITE = 'packages/google/src/adapters/business-information-write.ts'
+  const WRITE_SUITE = 'packages/google/src/adapters/business-information-write.test.ts'
+  const BUCKET = 'packages/google/src/rate-limit/token-bucket.ts'
+  const BUCKET_SUITE = 'packages/google/src/rate-limit/token-bucket.test.ts'
+  const FAKE = 'packages/providers/src/google/fake-google.ts'
+  const SCREEN = 'apps/web/app/(admin)/agents/seo/gbp-snapshot/render.ts'
+  const SCREEN_SUITE = 'apps/web/src/gbp-snapshot-render.test.ts'
+  const CHECKER_SUITE = 'packages/google/src/seo/gbp-consistency.test.ts'
+  const NAP_SUITE = 'packages/fixtures/src/seo-nap-literals.test.ts'
+  const CHECK_ITEST = 'packages/google/src/seo/gbp-consistency.itest.ts'
+  const runUnit = (...files) =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const runItest = (...files) =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', ...files])
+  const cruise = () =>
+    run('pnpm', ['exec', 'depcruise', '--config', '.dependency-cruiser.cjs', 'packages', 'apps'])
+
+  // 165a. THE case the acceptance criterion names: the checker must not be able to REACH the write. The
+  // fixture adds the import the day somebody builds the "fix it" button, and the rule has to fire by name
+  // — it can only ever fire on a fixture, because the committed tree satisfies it, so this is the only
+  // evidence it is alive (ADR 0003).
+  withEditedFile(
+    CHECKER,
+    (source) =>
+      replaceOnce(
+        source,
+        "import { LOCATION_READ_MASK } from '../adapters/business-information.ts'",
+        "import { LOCATION_READ_MASK } from '../adapters/business-information.ts'\n" +
+          "import { applyApprovedHours } from '../adapters/business-information-write.ts'\n" +
+          'void applyApprovedHours',
+      ),
+    () =>
+      checkRejectedBy(
+        'boundaries: a consistency checker that can reach the Business Profile write is caught',
+        cruise(),
+        'gbp-consistency-check-is-read-only',
+      ),
+  )
+
+  // 165b. And its control. Without it 165a is satisfied by a rule that condemns the checker however it is
+  // written, which would be a rule nobody could make pass — worse than no rule, because it reads as proof.
+  {
+    const clean = cruise()
+    check(
+      'boundaries: the committed checker satisfies the read-only rule',
+      !clean.failed && clean.output.includes('no dependency violations found'),
+      clean.output,
+    )
+  }
+
+  // 165c. The payload-wider-than-its-mask refusal, removed. This is the naive whole-object PATCH, and it
+  // is the only one of the three refusals that DESTROYS data rather than failing: a field mask clears a
+  // named field the payload does not carry, so a request assembled from a whole getLocation answer wipes
+  // every field the read mask did not cover — the Ramadan specialHours among them (docs/10 §7).
+  withEditedFile(
+    WRITE,
+    (source) =>
+      replaceOnce(source, '  if (beyond.length > 0) {', '  if (beyond.length > 0 && false) {'),
+    () =>
+      checkRejectedBy(
+        'gbp write: a payload wider than its updateMask that is no longer refused is caught',
+        runUnit(WRITE_SUITE),
+        'which its updateMask does not name',
+      ),
+  )
+
+  // 165d. The approved-field allowlist, widened to everything. `'*'` is the whole-object PATCH and
+  // `storefrontAddress` is this system overwriting the business's address on Google, when the NAP
+  // authority runs the other way (ADR 0085 decision 6).
+  withEditedFile(
+    WRITE,
+    (source) =>
+      replaceOnce(
+        source,
+        "export const UPDATABLE_FIELDS: readonly string[] = ['regularHours']",
+        "export const UPDATABLE_FIELDS: readonly string[] = ['regularHours', 'storefrontAddress', '*']",
+      ),
+    () =>
+      checkRejectedBy(
+        'gbp write: an updateMask allowlist that admits the whole object is caught',
+        runUnit(WRITE_SUITE),
+        // The TEST's name, not the refusal's sentence: vitest elides a long source line in its code
+        // frame, so a long expected string is not in the output even when the right case failed.
+        'refuses a mask this build has not approved',
+      ),
+  )
+
+  // 165e. The read-modify-write turned into a write: the payload built from the location that was just
+  // read. The mask is still narrow, so Google accepts it today — and it is one mask edit from sending
+  // every stale field it now carries. This is the shape a reviewer cannot see at the call site.
+  withEditedFile(
+    WRITE,
+    (source) =>
+      replaceOnce(
+        source,
+        '  const payload: Partial<GbpLocation> = { regularHours: { periods: update.periods } }',
+        '  const payload: Partial<GbpLocation> = { ...before, regularHours: { periods: update.periods } }',
+      ),
+    () =>
+      checkRejectedBy(
+        'gbp write: a patch assembled from the whole location it just read is caught',
+        runUnit(WRITE_SUITE),
+        'which its updateMask does not name',
+      ),
+  )
+
+  // 165f. The FAKE, made lenient. This is the control that keeps every "the special hours survive"
+  // assertion meaning something: a fake that merged instead of replacing would pass them all with the
+  // narrow mask removed, so the fake's clearing behaviour is itself a thing that has to be seen to matter.
+  withEditedFile(
+    FAKE,
+    (source) =>
+      replaceOnce(
+        source,
+        '        if (supplied === undefined) delete next[field]',
+        '        if (supplied === undefined) void field',
+      ),
+    () =>
+      checkRejectedBy(
+        'gbp write: a fake that cannot wipe a masked field, which would make the whole claim vacuous, is caught',
+        runUnit(WRITE_SUITE),
+        'specialHours',
+      ),
+  )
+
+  // 165g. The grouping, removed: one finding per DAY. Seven identical rows for one wrong closing time is
+  // ADR 0085's cry-wolf failure in its purest form — a reader cannot tell seven copies of one problem from
+  // seven problems — and the acceptance criterion is stated as a COUNT for exactly this reason.
+  withEditedFile(
+    COMPARE,
+    (source) =>
+      replaceOnce(
+        source,
+        '    const key = `${siteText}\\u0000${gbpText}`',
+        '    const key = `${siteText}\\u0000${gbpText}\\u0000${dayOfWeek}`',
+      ),
+    () =>
+      checkRejectedBy(
+        'gbp consistency: a comparison that reports one finding per day rather than per disagreement is caught',
+        runUnit(COMPARE_SUITE),
+        'reports exactly two findings for a whole-week hours divergence',
+      ),
+  )
+
+  // 165h. The limiter's shape, which is the measured half of ADR 0087. A continuously refilling bucket
+  // admits one call every windowMs/limit, so twenty submissions produce ELEVEN inside the first minute at
+  // 6/min — over the cap the criterion names and over the cap Google enforces. The fixture evicts by
+  // elapsed share rather than by the oldest admitted call, which is that bucket exactly.
+  withEditedFile(
+    BUCKET,
+    (source) =>
+      replaceOnce(
+        replaceOnce(
+          source,
+          '      await this.clock.waitUntil(oldest + this.windowMs)',
+          '      await this.clock.waitUntil(oldest + Math.floor(this.windowMs / this.limit))',
+        ),
+        '    while (this.window.length > 0 && (this.window[0] as number) + this.windowMs <= now) {',
+        '    while (\n      this.window.length > 0 &&\n      (this.window[0] as number) + Math.floor(this.windowMs / this.limit) <= now\n    ) {',
+      ),
+    () =>
+      // BOTH halves, because a refilling bucket is a refill rate AND an eviction rule: shortening only
+      // the wait leaves the window unevicted and the limiter spins instead of over-admitting, which fails
+      // for the wrong reason and proves nothing about the shape.
+      checkRejectedBy(
+        'rate limit: a refilling bucket that admits more than the cap inside one minute is caught',
+        runUnit(BUCKET_SUITE),
+        'admits the cap immediately',
+      ),
+  )
+
+  // 165i. The queue, turned into a drop. A limiter that discards is a limiter that throws away an edit a
+  // human approved, and the symptom is a change that silently did not happen — which is why the acceptance
+  // line asks for a FINAL DELIVERY COUNT rather than for a queue length.
+  withEditedFile(
+    BUCKET,
+    (source) =>
+      replaceOnce(
+        source,
+        '      const oldest = this.window[0] as number',
+        '      if (this.admittedCalls.length > 0) return\n      const oldest = this.window[0] as number',
+      ),
+    () =>
+      checkRejectedBy(
+        'rate limit: a limiter that drops a queued call instead of delivering it is caught',
+        runUnit(BUCKET_SUITE),
+        'toHaveLength',
+      ),
+  )
+
+  // 165j. The slot taken BEFORE the wait: the task attempted early. "Never attempted early" cannot be
+  // proved by a passing count — a limiter that ran everything immediately and then slept would produce
+  // the same twenty deliveries — so the suite asserts the instant each task SAW, and this is the fixture
+  // that moves it.
+  withEditedFile(
+    BUCKET,
+    (source) =>
+      replaceOnce(
+        source,
+        '      await this.acquire(queuedAtMs)\n      return await task()',
+        '      const running = task()\n      await this.acquire(queuedAtMs)\n      return await running',
+      ),
+    () =>
+      checkRejectedBy(
+        'rate limit: a limiter that starts the call before its slot arrives is caught',
+        runUnit(BUCKET_SUITE),
+        'attempted',
+      ),
+  )
+
+  // 165k. The provenance hedge, removed from the manual arm. This is the epistemic claim of the whole unit
+  // (ADR 0087 decision 1): a snapshot is a named human's CLAIM, and a sentence that described it the way it
+  // describes an API read would make the weaker evidence carry the stronger claim — with nothing in a
+  // finding to tell the two apart.
+  withEditedFile(
+    COMPARE,
+    (source) =>
+      replaceOnce(
+        source,
+        "  return provenance.authority === 'business_information_v1'",
+        "  return provenance.authority !== 'xx_never'",
+      ),
+    () =>
+      checkRejectedBy(
+        'gbp consistency: a manual snapshot described as an observation is caught',
+        runUnit(COMPARE_SUITE),
+        'rather than an observation',
+      ),
+  )
+
+  // 165l. The form, pre-filled from the premises row. The one failure a lint cannot see: a form that shows
+  // the website's own hours beside an empty field is answered by pressing Enter, and the check then reports
+  // "consistent" about a profile nobody looked at. Both the checker's own suite and the screen's assert the
+  // negative, and this fixture is what proves either of them would notice.
+  withEditedFile(
+    CHECKER,
+    (source) =>
+      replaceOnce(
+        source,
+        "    fields.push({ name: `open-${row.dayOfWeek}`, label: `${day}: opens`, kind: 'time_of_day' })",
+        "    fields.push({\n      name: `open-${row.dayOfWeek}`,\n      label: `${day}: opens (${row.openTime})`,\n      kind: 'time_of_day',\n    })",
+      ),
+    () =>
+      checkRejectedBy(
+        'gbp snapshot: a form pre-filled with the website’s own figures is caught',
+        runUnit(CHECKER_SUITE),
+        'carries no value from the website side',
+      ),
+  )
+
+  // 165m. The NAP scan's google half, emptied. The checker and the write adapter are the two modules in
+  // this build with the strongest reason to hold a copy of the hours — comparing the premises against the
+  // profile is literally what one of them does — and a scan that walked only `packages/core/src/seo`
+  // reported a clean tree while the module whose subject IS NAP consistency answered about its own literal.
+  withEditedFile(
+    CHECKER,
+    (source) => `${source}\nconst __gateOpens = '11:00'\nvoid __gateOpens\n`,
+    () =>
+      checkRejectedBy(
+        'NAP scan: an opening-hour literal in the GBP checker is caught',
+        runUnit(NAP_SUITE),
+        'holds no literal of an opening-hour time',
+      ),
+  )
+
+  // 165n. And the write adapter, which is the other named file. Two files share one list, and a list with
+  // only one of them exercised is how the other quietly stops being scanned.
+  withEditedFile(
+    WRITE,
+    (source) => `${source}\nconst __gatePhone = '+971501234567'\nvoid __gatePhone\n`,
+    () =>
+      checkRejectedBy(
+        'NAP scan: a telephone literal in the Business Profile write adapter is caught',
+        runUnit(NAP_SUITE),
+        'holds no literal of a telephone number',
+      ),
+  )
+
+  // 165o. The screen's permission check, removed from the render. The fields are greyed from the SAME
+  // predicate the POST refuses on, and a screen offering a control the server refuses is the defect the
+  // suggestions handler records one layer out.
+  withEditedFile(
+    SCREEN,
+    (source) =>
+      replaceOnce(
+        source,
+        "  const disabled = mayRecord ? '' : ' disabled'",
+        "  const disabled = ''\n  void mayRecord",
+      ),
+    () =>
+      checkRejectedBy(
+        'gbp snapshot: a form offered to a role that may not record a claim is caught',
+        runUnit(SCREEN_SUITE),
+        'shows the fields read-only and offers no button',
+      ),
+  )
+
+  // 165y. Every case above is satisfied by something failing, so this one is satisfied by the real tree:
+  // the five suites pass as committed. Without it the fourteen cases above are consistent with suites that
+  // were already red.
+  {
+    const real = runUnit(
+      COMPARE_SUITE,
+      CHECKER_SUITE,
+      WRITE_SUITE,
+      BUCKET_SUITE,
+      SCREEN_SUITE,
+      NAP_SUITE,
+    )
+    check(
+      'the committed GBP comparison, checker, write adapter, limiter, screen and NAP scan all pass',
+      !real.failed,
+      real.output,
+    )
+  }
+
+  // 165z. And the database suite, which is where the two claims a pure test cannot reach are made: the
+  // website side really comes from `premises_hours` and the price in force, and the recorded claim really
+  // lands in append-only `audit_event` with the actor who made it.
+  {
+    const pair = runItest(CHECK_ITEST)
+    check(
+      'gbp consistency: the premises read, both modes and the recorded claim pass against the real database',
+      !pair.failed,
+      pair.output,
+    )
+  }
+}
+
+// 172a-172z. (G-SEO-07) The weekly report: the cap shown to be a cap and not a floor, every prose rule
+// shown to be able to stop firing, and the send shown to be on the one choke point.
+//
+// The subject of this block is a COUNT that must be able to come up short. "Five prioritised actions" is
+// satisfied perfectly by a renderer that pads, and padding is invisible to every test that only asks
+// whether five rows appeared — which is why 172a breaks the cap in the direction nobody would notice
+// (three findings rendering five) rather than in the direction a reader would.
+//
+// The prose rules are the other half, and they share one failure mode: each of them is a scan over a body
+// that is clean today, so none of them has ever been seen to fire against the real tree. Cases 172c
+// through 172g are the only evidence they are alive (ADR 0003), and 172h is the one that matters most —
+// the readability check measures the RENDERED BODY, and a check over the template would pass for ever
+// while the sentences the data produced grew.
+{
+  const REPORT = 'packages/core/src/seo/weekly-report.ts'
+  const REPORT_SUITE = 'packages/core/src/seo/weekly-report.test.ts'
+  const JOB = 'apps/worker/src/jobs/seo-weekly-report.ts'
+  const JOB_ITEST = 'apps/worker/src/jobs/seo-weekly-report.itest.ts'
+  const runUnit = (...files) =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const runItest = (...files) =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', ...files])
+  const chokepoint = () => run('pnpm', ['send-chokepoint'])
+
+  // 172a. THE case the acceptance criterion names. A renderer that pads to the cap satisfies "exactly
+  // five prioritised actions" and makes the report a floor rather than a finding — and the padding would
+  // be the fifth-best action in a quiet week, which is noise a reader learns to skip.
+  withEditedFile(
+    REPORT,
+    (source) =>
+      replaceOnce(
+        source,
+        '  const actions = ordered.slice(0, cap)',
+        '  const actions = ordered.slice(0, cap)\n' +
+          '  while (actions.length < cap && ordered.length > 0) actions.push(ordered[0])',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: a renderer that pads three findings up to the cap is caught',
+        runUnit(REPORT_SUITE),
+        'renders three from three and states the honest count',
+      ),
+  )
+
+  // 172b. And the count sentence, made a constant. "We found five things" is what a reader believes, so a
+  // report whose sentence does not come from the data is worse than one that shows four rows.
+  withEditedFile(
+    REPORT,
+    (source) =>
+      replaceOnce(
+        source,
+        "        : `We found ${actions.found} ${actions.found === 1 ? 'thing' : 'things'} worth doing. ` +",
+        '        : `We found ${SEO_WEEKLY_ACTION_CAP} things worth doing. ` +',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: a count sentence that does not come from the findings is caught',
+        runUnit(REPORT_SUITE),
+        'renders three from three and states the honest count',
+      ),
+  )
+
+  // 172c. The sentence-length rule, disabled. A long sentence in a weekly email is not a style complaint:
+  // it is where the action goes missing, and the configured maximum is the only thing standing between
+  // the report and a paragraph.
+  withEditedFile(
+    REPORT,
+    (source) =>
+      replaceOnce(
+        source,
+        '    if (words > options.maxSentenceWords) {',
+        '    if (words > options.maxSentenceWords && false) {',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: a readability check that no longer measures sentence length is caught',
+        runUnit(REPORT_SUITE),
+        'reports a sentence over the maximum',
+      ),
+  )
+
+  // 172d. The metric-explanation rule, disabled. A number with no explanation is a number the reader
+  // cannot act on, and the commonest kind in this subject reads as self-explanatory to whoever wrote it.
+  withEditedFile(
+    REPORT,
+    (source) =>
+      replaceOnce(
+        source,
+        '    if (!report.body.includes(metric.explanation)) {',
+        '    if (!report.body.includes(metric.explanation) && false) {',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: a metric printed with no explanation that is no longer reported is caught',
+        runUnit(REPORT_SUITE),
+        'reports a metric printed with no explanation',
+      ),
+  )
+
+  // 172e. The forbidden-content rule, emptied. Scope URLs, SQL and raw resource identifiers get into a
+  // report by somebody pasting a diagnostic into a template, and the first person to receive one is the
+  // owner.
+  withEditedFile(
+    REPORT,
+    (source) =>
+      replaceOnce(
+        source,
+        '  for (const forbidden of SEO_REPORT_FORBIDDEN) {',
+        '  for (const forbidden of []) {',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: a scope URL or SQL in the body that is no longer reported is caught',
+        runUnit(REPORT_SUITE),
+        'reports a scope URL, SQL and a raw identifier',
+      ),
+  )
+
+  // 172f. The jargon rule, disabled. The glossary is a MAP rather than a blocklist, so the failure this
+  // guards is not a banned word — it is a term used with no line defining it, which is how a report about
+  // CTR becomes a report only the person who wrote it can read.
+  withEditedFile(
+    REPORT,
+    (source) =>
+      replaceOnce(
+        source,
+        '    if (!report.body.includes(gloss)) {',
+        '    if (!report.body.includes(gloss) && false) {',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: a jargon term used with no gloss that is no longer reported is caught',
+        runUnit(REPORT_SUITE),
+        'reports a jargon term used with no line defining it',
+      ),
+  )
+
+  // 172g. And the other direction, which a refusal cannot state: the glossary must not print a definition
+  // for a term the report did not use. Six glosses in a report that uses one is four lines pushing the
+  // five actions below the fold, which is the same attention failure in the opposite direction.
+  withEditedFile(
+    REPORT,
+    (source) =>
+      replaceOnce(
+        source,
+        '    .filter(([term]) => new RegExp(`\\\\b${term.toLowerCase()}\\\\b`).test(lower))',
+        '    .filter(() => true)',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: a glossary that defines terms the report never used is caught',
+        runUnit(REPORT_SUITE),
+        'glosses only what is said',
+      ),
+  )
+
+  // 172h. The discrepancy explanation, rendered unconditionally. Both branches are the acceptance line,
+  // and the zero branch is the one that is wrong by default: `rareQueryGapExplanation` has a confident
+  // sentence for a window with nothing withheld, and it belongs on the dashboard beside the query report
+  // rather than in an email that is five actions long.
+  withEditedFile(
+    REPORT,
+    (source) =>
+      replaceOnce(
+        source,
+        '    if (gap.withheldClicks > 0 || gap.withheldImpressions > 0) {',
+        '    if (true) {',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: the click discrepancy explained when there is no discrepancy is caught',
+        runUnit(REPORT_SUITE),
+        'omits it when it is zero',
+      ),
+  )
+
+  // 172i. The degraded sentence, removed. A report built from the stored copy that did not say so is the
+  // worst outcome available here: the figures look live, and the decision a reader takes from them differs.
+  withEditedFile(
+    REPORT,
+    (source) =>
+      replaceOnce(
+        source,
+        '  if (input.degradedBecause !== null) {',
+        '  if (input.degradedBecause !== null && false) {',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: a degraded run that does not say so is caught',
+        runUnit(REPORT_SUITE),
+        'states a degraded run in one plain sentence',
+      ),
+  )
+
+  // 172j. The never-succeeded heartbeat, rendered as an instant. `null` and an instant are different
+  // facts, and a report that printed "last finished on null" — or worse, today — would say the agent is
+  // fine on the exact week it stopped.
+  withEditedFile(
+    REPORT,
+    (source) =>
+      replaceOnce(
+        source,
+        '    input.heartbeat.lastSuccessAtIso === null',
+        '    input.heartbeat.lastSuccessAtIso === undefined',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: a never-succeeded heartbeat rendered as an instant is caught',
+        runUnit(REPORT_SUITE),
+        'distinguishes never-succeeded from an instant',
+      ),
+  )
+
+  // 172k. The readability gate on the send path, removed. Plain English is ENFORCED and not hoped for:
+  // a body that broke its own rules would be sent once and read as the house style from then on.
+  withEditedFile(
+    JOB,
+    (source) =>
+      replaceOnce(
+        source,
+        '      if (prose.length > 0) {',
+        '      if (prose.length > 0 && false) {',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: a job that sends a body breaking its own prose rules is caught',
+        runItest(JOB_ITEST),
+        'refuses to send a body that breaks its own prose rules',
+      ),
+  )
+
+  // 172l. The recipient, invented. `NO_OWNER_REPORT_ADDRESS` returns null because no table in this build
+  // holds an owner address, and a plausible one is worse than a blank one (brief rule 15) — this is also
+  // the fixture that proves the itest would notice a default appearing.
+  withEditedFile(
+    JOB,
+    (source) =>
+      replaceOnce(
+        source,
+        'export const NO_OWNER_REPORT_ADDRESS: ReportRecipientResolver = () => null',
+        "export const NO_OWNER_REPORT_ADDRESS: ReportRecipientResolver = () =>\n  'owner@berelax.example.invalid'",
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: an invented owner address is caught',
+        runItest(JOB_ITEST),
+        'sends nothing when there is no owner address on file',
+      ),
+  )
+
+  // 172m. The heartbeat facts, taken from a constant rather than from the row. The acceptance line asks
+  // for the rendered values to be compared TO THE ROW, and this is what proves the itest does that rather
+  // than comparing a literal to the literal that produced it.
+  withEditedFile(
+    JOB,
+    (source) =>
+      replaceOnce(
+        source,
+        '        costToDateFils: facts.costToDateFils,',
+        '        costToDateFils: 0,',
+      ),
+    () =>
+      checkRejectedBy(
+        'weekly report: a cost figure that does not come from the agent rows is caught',
+        runItest(JOB_ITEST),
+        'carries the heartbeat facts the agent_heartbeat row holds',
+      ),
+  )
+
+  // 172n. The marketing kill switch, with its reason removed from the permitted list. This runtime is the
+  // seventh transactional-only one to declare a literal, and the scanner's whole point is that each one is
+  // a DECLARED exception with a reason rather than a `false` somebody wrote in passing (C-AUTO-07).
+  withEditedFile(
+    'scripts/check-send-chokepoint.mjs',
+    (source) =>
+      // The whole ENTRY is deleted rather than re-pointed. The scanner also self-checks that every
+      // DECLARED permission was seen, so renaming the path fails it with "6 of 7 declared literal kill
+      // switches found" — a self-check failure rather than the rule, which proves nothing about the rule.
+      replaceOnce(
+        source,
+        "    'apps/worker/src/jobs/seo-weekly-report.ts',",
+        "    'apps/worker/src/jobs/__gate_fixture_not_a_real_path__.ts',",
+      ).replace(
+        /\n {2}\[\n {4}'apps\/worker\/src\/jobs\/__gate_fixture_not_a_real_path__\.ts',[\s\S]*?\n {2}\],/,
+        '',
+      ),
+    () =>
+      checkRejectedBy(
+        'send choke point: the weekly report runtime declaring an undeclared kill-switch literal is caught',
+        chokepoint(),
+        'marketing-kill-switch-state-has-one-home',
+      ),
+  )
+
+  // 172o. The body, no longer handed to the template's `{{report}}` placeholder. This is what proves the
+  // report really travels through the seeded row rather than being assembled some other way — and the
+  // single-variable shape is the decision behind it: a template with a field per action has to declare a
+  // fixed five, so a three-finding week renders two blanks in the sentence, which is the padding the
+  // acceptance line forbids arriving through the template instead of the renderer.
+  //
+  // The first version of this case edited `DEFAULT_TEMPLATES` instead, and passed: the pass reads
+  // `message_template`, which is seeded from that array ONCE, so editing the array changes nothing until
+  // somebody re-seeds. A gate case that edits a seed source and asserts on a database is a case about
+  // nothing, and this is the note that stops the next person writing it again.
+  withEditedFile(
+    JOB,
+    (source) =>
+      replaceOnce(source, '        values: { report: report.body },', '        values: {},'),
+    () =>
+      checkRejectedBy(
+        'weekly report: a pass that does not hand its body to the template is caught',
+        runItest(JOB_ITEST),
+        'lands in the fake Resend outbox',
+      ),
+  )
+
+  // 172y. Every case above is satisfied by something failing, so this one is satisfied by the real tree:
+  // the renderer's suite and the messaging corpus pass as committed.
+  {
+    const real = runUnit(REPORT_SUITE, 'packages/messaging/src/template-corpus.test.ts')
+    check(
+      'the committed weekly report renderer and the template corpus both pass',
+      !real.failed,
+      real.output,
+    )
+  }
+
+  // 172z. And the database suite, which is where the four claims a pure test cannot reach are made: the
+  // heartbeat facts come from the rows, the template comes from the seed, the HTML part is the bytes the
+  // transport was handed, and F03's divert and ADR 0005's refusal are decided by the real configuration.
+  {
+    const pair = runItest(JOB_ITEST)
+    check(
+      'weekly report: the heartbeat read, the seeded template, the stored HTML part and both F03 halves pass against the real database',
+      !pair.failed,
+      pair.output,
+    )
+  }
+}
+
+// 173a-173z. (G-REV-07) The legacy v4 path: the quarantine shown to be alive in BOTH halves, the path
+// shown to depend on the persisted accountId, the flip shown to be a row, and the degradation shown to be
+// the declared one rather than a second answer.
+//
+// The subject of this block is code that is NEVER RUN in production. There is no Business Profile API
+// access (docs/10 §4, Y3-gbp-api), `delivery_mode` stays `manual` on every row the intake writes, and the
+// whole API path exists to be turned on later by somebody under pressure. That makes every rule here a
+// rule whose failure would be discovered on the worst possible day, and it is why the two halves of the
+// quarantine are both fixtured: a dependency rule cannot see a pasted host string and a scan cannot see an
+// import, so a tree that satisfies one of them is not quarantined.
+{
+  const ADAPTER = 'packages/google/src/adapters/reviews-v4.ts'
+  const ADAPTER_SUITE = 'packages/google/src/adapters/reviews-v4.test.ts'
+  const MODE = 'packages/google/src/reviews/api-mode.ts'
+  const RECONCILE = 'packages/google/src/reviews/reconcile.ts'
+  const QUARANTINE_SUITE = 'packages/fixtures/src/reviews-v4-quarantine.test.ts'
+  const API_ITEST = 'packages/google/src/review-api-mode.itest.ts'
+  const CONSUMERS = 'packages/google/src/consumers.ts'
+  const runUnit = (...files) =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const runItest = (...files) =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', ...files])
+  const cruise = () =>
+    run('pnpm', ['exec', 'depcruise', '--config', '.dependency-cruiser.cjs', 'packages', 'apps'])
+
+  // 173a. THE edge half of the quarantine. A worker job, a route or the SEO agent holding a reference to
+  // the adapter is a second module to change on migration day and the one nobody remembers. The fixture
+  // puts the import in the SEO agent's directory, where no other rule forbids it, so the case proves this
+  // rule rather than an older one shadowing it.
+  withEditedFile(
+    'packages/google/src/seo/gsc-snapshot.ts',
+    (source) =>
+      `import { MYBUSINESS_V4_HOST as __gate } from '../adapters/reviews-v4.ts'\nvoid __gate\n${source}`,
+    () =>
+      checkRejectedBy(
+        'boundaries: a module outside the reviews subsystem importing the v4 adapter is caught',
+        cruise(),
+        'reviews-v4-is-quarantined',
+      ),
+  )
+
+  // 173b. And its control. Without it 173a is satisfied by a rule that condemns the adapter however it is
+  // imported, which would be a rule nobody could make pass — worse than no rule, because it reads as
+  // proof.
+  {
+    const clean = cruise()
+    check(
+      'boundaries: the committed tree satisfies the v4 quarantine rule',
+      !clean.failed && clean.output.includes('no dependency violations found'),
+      clean.output,
+    )
+  }
+
+  // 173c. The STRING half, which the dependency rule cannot see at all. This is the hazard that actually
+  // happens: somebody pastes the host into a worker to try a call by hand, and the import graph says
+  // nothing about it.
+  withEditedFile(
+    'packages/google/src/seo/gsc-snapshot.ts',
+    (source) => `${source}\nconst __gateHost = 'mybusiness.googleapis.com'\nvoid __gateHost\n`,
+    () =>
+      checkRejectedBy(
+        'quarantine scan: the legacy v4 host pasted into another module is caught',
+        runUnit(QUARANTINE_SUITE),
+        'finds it in no other module',
+      ),
+  )
+
+  // 173d. And the scan's own liveness: the host REMOVED from the adapter. A scan that found the string
+  // nowhere would report a clean tree, which is the way this check stops being a check.
+  withEditedFile(
+    ADAPTER,
+    (source) =>
+      // BOTH occurrences: the constant and the doc comment above it. The scan reads the whole file, so a
+      // host left in a comment keeps it passing — which is right for the repository-wide rule (a pasted
+      // host in a comment is one edit from being used) and is what made the first version of this case
+      // report PASS about a module whose constant said `example.invalid`.
+      replaceOnce(
+        replaceOnce(
+          source,
+          "export const MYBUSINESS_V4_HOST = 'mybusiness.googleapis.com'",
+          "export const MYBUSINESS_V4_HOST = 'example.invalid'",
+        ),
+        ' * `mybusiness.googleapis.com` — not `mybusinessbusinessinformation`,',
+        ' * The legacy one, not `mybusinessbusinessinformation`,',
+      ),
+    () =>
+      checkRejectedBy(
+        'quarantine scan: the host missing from the module it is quarantined in is caught',
+        runUnit(QUARANTINE_SUITE),
+        'finds the host in the quarantined module',
+      ),
+  )
+
+  // 173e. The path built WITHOUT the persisted account: `locations/{l}/reviews`, which is what a client
+  // that had only ever seen v1 would write. It 404s, and it 404s at 03:00 on a cron job rather than in a
+  // test — which is the whole reason the account is on the capability row.
+  withEditedFile(
+    ADAPTER,
+    (source) =>
+      replaceOnce(
+        source,
+        '  return `${MYBUSINESS_V4_BASE}${reviewsPathFor(ref)}`',
+        '  return `${MYBUSINESS_V4_BASE}${String(ref?.location)}/reviews`',
+      ),
+    () =>
+      checkRejectedBy(
+        'reviews v4: a path built without the persisted accountId is caught',
+        runUnit(ADAPTER_SUITE),
+        'builds the path from the PERSISTED accountId',
+      ),
+  )
+
+  // 173f. The construction-time refusal, removed. A misconfigured capability row would then be discovered
+  // at the first reply rather than when the submitter is wired, and the acceptance line asks for the
+  // failure to be loud with ZERO transport calls.
+  withEditedFile(
+    ADAPTER,
+    (source) => replaceOnce(source, '  parseGbpResourceRef(deps.resourceRef)\n', ''),
+    () =>
+      checkRejectedBy(
+        'reviews v4: a submitter constructed against a v1-shaped ref is caught',
+        runUnit(ADAPTER_SUITE),
+        'fails loudly on a v1-shaped ref',
+      ),
+  )
+
+  // 173g. The missing-id refusal, replaced by the empty string this code originally had. It would build
+  // `.../reviews//reply` and spend a slot out of the ten-a-minute budget the whole profile shares
+  // discovering that a pasted row has nothing on the listing to reply to.
+  withEditedFile(
+    ADAPTER,
+    (source) =>
+      replaceOnce(
+        source,
+        '      const googleReviewId = googleIdOrRefuse(review)',
+        "      const googleReviewId = review.googleReviewId ?? ''",
+      ),
+    () =>
+      checkRejectedBy(
+        'reviews v4: a reply to a review with no google_review_id is caught',
+        runUnit(ADAPTER_SUITE),
+        'refuses a review with no google_review_id',
+      ),
+  )
+
+  // 173h. The limiter, bypassed. docs/10 §7 states 6/min against a 10/min cap Google says cannot be
+  // raised, and a transport call outside the window is a call the whole profile's budget does not know
+  // about.
+  withEditedFile(
+    ADAPTER,
+    (source) =>
+      replaceOnce(
+        source,
+        '      await deps.limit.run(async () => {',
+        '      await (async (fn) => fn())(async () => {',
+      ),
+    () =>
+      checkRejectedBy(
+        'reviews v4: a reply submitted outside the per-profile rate limit is caught',
+        runUnit(ADAPTER_SUITE),
+        'holds twenty replies to six transport calls',
+      ),
+  )
+
+  // 173i. The signature, invented. `Y9-reply-signature` is OPEN and this is the unit it was handed to: a
+  // plausible sign-off appended here would be published under the owner's name on an indexed page and
+  // would be indistinguishable from one they had configured (the brief's rule 15).
+  withEditedFile(
+    ADAPTER,
+    (source) =>
+      replaceOnce(
+        source,
+        '          comment: reply,',
+        '          comment: `${reply}\\n\\n— BE RELAX`,',
+      ),
+    () =>
+      checkRejectedBy(
+        'reviews v4: an invented reply signature is caught',
+        runUnit(ADAPTER_SUITE),
+        'appending no signature',
+      ),
+  )
+
+  // 173j. The flip, read from a constant instead of the row. This is the acceptance line: *flipping
+  // delivery_mode to api is a capability-row change, not a deploy*. A mode decided anywhere but the row
+  // is a second answer, and the one the database's own timestamp constraint does not know about.
+  withEditedFile(
+    MODE,
+    (source) => replaceOnce(source, "  if (review.deliveryMode === 'manual') {", '  if (true) {'),
+    () =>
+      checkRejectedBy(
+        'api mode: a delivery mode that does not come from the row is caught',
+        runItest(API_ITEST),
+        'delivers through the API path after delivery_mode is flipped',
+      ),
+  )
+
+  // 173k. The lint refusal, left to `classifyGoogleError`. It would be filed as `TransientUpstream`,
+  // which does not degrade, so the owner would be handed a Google error naming a correlation id instead
+  // of the rule they have to fix — and the reply would look like an outage.
+  withEditedFile(
+    MODE,
+    (source) =>
+      replaceOnce(
+        source,
+        "      if (rules === null) throw error\n      return { kind: 'refused' as const, rules }",
+        '      void rules\n      throw error',
+      ),
+    () =>
+      checkRejectedBy(
+        'api mode: a lint refusal reported as an upstream Google failure is caught',
+        runItest(API_ITEST),
+        'returns a lint refusal as a refusal',
+      ),
+  )
+
+  // 173l. The declared degraded mode, replaced by one chosen at the call site. `../consumers.ts` is the
+  // table everyone reads, and a consumer that decided its own would be the branch in production nobody
+  // updates — with the autoresponder going silent, which is indistinguishable from "no reviews arrived".
+  withEditedFile(
+    CONSUMERS,
+    (source) =>
+      replaceOnce(
+        source,
+        "  reviewAutoresponder: {\n    capability: 'gbp_reviews',\n    scopes: [GOOGLE_SCOPE_BUSINESS_MANAGE],\n    degradesTo: 'draft_only',",
+        "  reviewAutoresponder: {\n    capability: 'gbp_reviews',\n    scopes: [GOOGLE_SCOPE_BUSINESS_MANAGE],\n    degradesTo: 'disabled',",
+      ),
+    () =>
+      checkRejectedBy(
+        'api mode: an autoresponder that degrades to anything but draft_only is caught',
+        runItest(API_ITEST),
+        'degrades to draft_only',
+      ),
+  )
+
+  // 173m. The ambiguous match, resolved by picking the first candidate. Two star-only five-star reviews
+  // from "A Google user" on one day is an ordinary Saturday, and attaching the id to the wrong draft is
+  // silent, permanent and carries every later reply with it.
+  withEditedFile(
+    RECONCILE,
+    (source) =>
+      replaceOnce(
+        source,
+        "    if (outcome.kind === 'ambiguous') {",
+        "    if (outcome.kind === 'ambiguous' && false) {",
+      ),
+    () =>
+      checkRejectedBy(
+        'first sync: an ambiguous match that is resolved rather than reported is caught',
+        runItest(API_ITEST),
+        'writes nothing for an ambiguous match',
+      ),
+  )
+
+  // 173n. The backfill, replaced by an insert. The row carries the approved draft and the delivery
+  // history, so a second row for one review doubles it in the queue and in every count the owner is
+  // shown — which is the acceptance line's "exactly four rows with zero duplicates".
+  withEditedFile(
+    RECONCILE,
+    (source) =>
+      replaceOnce(
+        source,
+        "    if (outcome.kind === 'backfilled') {",
+        "    if (outcome.kind === 'backfilled' && false) {",
+      ),
+    () =>
+      checkRejectedBy(
+        'first sync: an API review inserted as a new row instead of backfilled is caught',
+        runItest(API_ITEST),
+        'leaves exactly four rows',
+      ),
+  )
+
+  // 173o. The zone, dropped from the date. `reconcileApiReviewId` matches on
+  // `(reviewed_at at time zone $zone)::date`, and a review left at 23:58 UTC is the NEXT day in
+  // Asia/Dubai — which is the date Google shows and the only one a pasted row can have been typed from.
+  withEditedFile(
+    RECONCILE,
+    (source) =>
+      replaceOnce(
+        source,
+        '    const local = toLocal(instantFromIso(review.createdAtIso), zone)',
+        "    const local = { date: review.createdAtIso.slice(0, 10), time: '00:00' }",
+      ),
+    () =>
+      checkRejectedBy(
+        'first sync: a review date read in the wrong zone is caught',
+        runItest(API_ITEST),
+        'backfills three pasted rows',
+      ),
+  )
+
+  // 173y. Every case above is satisfied by something failing, so this one is satisfied by the real tree:
+  // the adapter suite and the quarantine scan pass as committed.
+  {
+    const real = runUnit(ADAPTER_SUITE, QUARANTINE_SUITE)
+    check('the committed v4 adapter and the quarantine scan both pass', !real.failed, real.output)
+  }
+
+  // 173z. And the database suite, which is where the five claims a pure test cannot reach are made: the
+  // flip observed mid-test, the four-row first sync, the ambiguous match writing nothing, the declared
+  // degradation with its owner-visible event row, and migration 0145's quarterly obligation.
+  {
+    const pair = runItest(API_ITEST)
+    check(
+      'api mode: the flip, the first sync, the degradation and the quarterly obligation pass against the real database',
+      !pair.failed,
+      pair.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

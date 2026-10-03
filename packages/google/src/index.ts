@@ -39,6 +39,17 @@ export {
   readPlaceAggregate,
 } from './adapters/places-aggregate.ts'
 export {
+  createReviewsV4Submitter,
+  listReviewsV4,
+  MYBUSINESS_V4_BASE,
+  MYBUSINESS_V4_HOST,
+  REVIEW_HAS_NO_GOOGLE_ID,
+  type ReviewsV4Deps,
+  reviewsV4Limit,
+  reviewsV4ListUrl,
+  reviewsV4ReplyUrl,
+} from './adapters/reviews-v4.ts'
+export {
   assertRowCarriesDimensions,
   assertRowCountsArePlausible,
   fetchSearchAnalyticsRows,
@@ -282,6 +293,23 @@ export {
 } from './oauth/revoke.ts'
 export { createPostgresConnectionStore } from './postgres-store.ts'
 export {
+  type AdmittedCall,
+  businessInformationEditLimit,
+  PerProfileRateLimit,
+  type PerProfileRateLimitOptions,
+  type RateLimitClock,
+  reviewReplyLimit,
+  type SimulatedRateLimitClock,
+  simulatedRateLimitClock,
+  systemRateLimitClock,
+} from './rate-limit/token-bucket.ts'
+export {
+  deliverInStoredMode,
+  type StoredModeDeps,
+  type StoredModeInput,
+  type StoredModeOutcome,
+} from './reviews/api-mode.ts'
+export {
   approveReply,
   deliverApprovedReply,
   markReplyPostedManually,
@@ -322,6 +350,13 @@ export {
   readLlmProviderChoice,
   saveLlmProviderChoice,
 } from './reviews/llm-provider.ts'
+export {
+  type AmbiguousReview,
+  type FirstSyncDeps,
+  type FirstSyncInput,
+  type FirstSyncResult,
+  reconcileFirstSync,
+} from './reviews/reconcile.ts'
 export { type RewrapReport, rewrapRefreshTokens } from './rewrap.ts'
 export {
   type IngestCandidatesDeps,
@@ -348,6 +383,24 @@ export {
   type SeoModelAnswer,
 } from './seo/draft-suggestions.ts'
 export {
+  type GbpCheckMode,
+  type GbpConsistencyDeps,
+  type GbpConsistencyOutcome,
+  type GbpManualSnapshot,
+  type GbpSnapshotDay,
+  type GbpSnapshotForm,
+  type GbpSnapshotFormField,
+  type GbpSnapshotPrice,
+  googleHoursFrom,
+  manualSnapshotForm,
+  recordManualSnapshot,
+  runGbpConsistencyCheck,
+  snapshotHoursFrom,
+  snapshotPricesFrom,
+  websiteHoursFrom,
+  websitePricesFrom,
+} from './seo/gbp-consistency.ts'
+export {
   assertWindowRespectsLag,
   type CollectOptions,
   collectGscSnapshot,
@@ -359,6 +412,7 @@ export {
   positionCenti,
   toWarehouseRow,
 } from './seo/gsc-snapshot.ts'
+
 export {
   runGscNightlySnapshot,
   SEO_GSC_SNAPSHOT_AGENT,

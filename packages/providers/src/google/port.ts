@@ -151,6 +151,85 @@ export interface GbpPostalAddress {
   readonly postalCode?: string
 }
 
+/**
+ * A time of day as Business Information v1 structures it: two integers, never a string.
+ *
+ * Faithful because it changes the client. The API has no `"11:00"` anywhere; hours are structured
+ * `periods` (docs/10 §7), and a port that flattened them to strings would make every read-modify-write
+ * parse and re-render a value it only needed to carry — which is where a `02:00` close becomes a `2:00`
+ * and a profile's trading day silently shortens.
+ */
+export interface GbpTimeOfDay {
+  readonly hours: number
+  readonly minutes: number
+}
+
+/** The day names the API uses. Upper case, as it spells them. */
+export type GbpDayOfWeek =
+  | 'MONDAY'
+  | 'TUESDAY'
+  | 'WEDNESDAY'
+  | 'THURSDAY'
+  | 'FRIDAY'
+  | 'SATURDAY'
+  | 'SUNDAY'
+
+/**
+ * One trading period of `regularHours`.
+ *
+ * `closeDay` is separate from `openDay` and that is the field that matters here: this business trades
+ * 11:00–02:00 (docs/13 §2), so a period opens on one day and closes on the NEXT. A shape with one day
+ * per period cannot express it, and the nearest thing it can express — closing at the end of the opening
+ * day — is a profile that says the premises shuts at midnight.
+ */
+export interface GbpBusinessPeriod {
+  readonly openDay: GbpDayOfWeek
+  readonly openTime: GbpTimeOfDay
+  readonly closeDay: GbpDayOfWeek
+  readonly closeTime: GbpTimeOfDay
+}
+
+/** A calendar date as the API structures one. Used by `specialHours`, which is dated and not weekly. */
+export interface GbpDate {
+  readonly year: number
+  readonly month: number
+  readonly day: number
+}
+
+/**
+ * One dated variation: a holiday, or a Ramadan evening.
+ *
+ * `closed` and the two times are mutually exclusive on the real API and modelled as optional here for
+ * that reason — a closed day carries no times, and a shape that required them would need invented ones.
+ */
+export interface GbpSpecialHourPeriod {
+  readonly startDate: GbpDate
+  readonly endDate?: GbpDate
+  readonly closed?: boolean
+  readonly openTime?: GbpTimeOfDay
+  readonly closeTime?: GbpTimeOfDay
+}
+
+/**
+ * A patch of one location, with `updateMask` mandatory.
+ *
+ * `updateMask` is **mandatory on the real API** (docs/10 §7) and optional here for `readMask`'s reason:
+ * the acceptance criterion is that the write adapter refuses a mask-less or over-wide patch *before the
+ * transport is touched*, and a required field would make that refusal unreachable from a test. The fake
+ * refuses it too, the way Google does.
+ *
+ * `location` is a PARTIAL location, and the partiality is the whole point. docs/10 §7: *"Ramadan
+ * variations belong in `specialHours` and a naive write wipes them — always read-modify-write with a
+ * narrow `updateMask`, never PATCH the whole object."* A request carrying a complete location is the
+ * naive write, and the adapter refuses one.
+ */
+export interface LocationsPatchRequest {
+  /** `locations/{location}`. */
+  readonly name: string
+  readonly location: Partial<GbpLocation>
+  readonly updateMask?: readonly string[]
+}
+
 export interface GbpLocation {
   /** `locations/{location}` — v1 returns the location WITHOUT its account (docs/10 §7). */
   readonly name: string
@@ -165,6 +244,21 @@ export interface GbpLocation {
    */
   readonly metadata: { readonly placeId: string; readonly mapsUri?: string }
   readonly websiteUri?: string
+  /**
+   * The weekly trading hours. Absent for a profile that has never had any, which is a real state.
+   *
+   * Optional and NOT defaulted to an empty period list, because *no hours on the profile* and *open no
+   * hours at all* are different facts and a consistency check must not report the first as the second.
+   */
+  readonly regularHours?: { readonly periods: readonly GbpBusinessPeriod[] }
+  /**
+   * The dated variations, and the field this whole write path is shaped around.
+   *
+   * docs/10 §7: a naive PATCH of the whole object wipes them, and they are where the Ramadan hours live.
+   * Carried on the read so a read-modify-write can be SEEN not to send them, which is the only form in
+   * which "they survive" is a fact rather than an intention.
+   */
+  readonly specialHours?: { readonly specialHourPeriods: readonly GbpSpecialHourPeriod[] }
 }
 
 /**
@@ -223,6 +317,16 @@ export interface BusinessProfileProvider {
   listLocations(request: LocationsListRequest): Promise<readonly GbpLocation[]>
   /** Business Information v1 `locations.get`. Also `readMask`-mandatory. */
   getLocation(request: LocationsGetRequest): Promise<GbpLocation>
+  /**
+   * Business Information v1 `locations.patch`. Rejects a request with no `updateMask`, as Google does.
+   *
+   * On the port because the human-approved hours update needs it (G-SEO-06) and because leaving it off
+   * would mean the one write this build makes to a profile had no fake to be tested against — so the
+   * read-modify-write that preserves `specialHours` could only ever be reasoned about. It returns the
+   * location as it stands after the patch, which is what lets a test assert the untouched fields are
+   * still there rather than assert the request's own shape.
+   */
+  updateLocation(request: LocationsPatchRequest): Promise<GbpLocation>
   /** Verifications v1 `locations.getVoiceOfMerchantState`. Cheap, and in MVP (docs/10 §7). */
   getVoiceOfMerchantState(locationName: string): Promise<VoiceOfMerchantState>
   listReviews(locationId: string): Promise<readonly Review[]>

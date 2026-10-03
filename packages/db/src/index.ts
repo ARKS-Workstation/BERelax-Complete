@@ -426,10 +426,12 @@ export {
 } from './reporting/statement-queries.ts'
 export {
   type AgentDefinitionRow,
+  type AgentHeartbeatFactsRow,
   type AgentHeartbeatRow,
   type AgentOutcome,
   type AgentRunResult,
   type AlertToRaise,
+  agentHeartbeatFacts,
   agentsWithHeartbeat,
   findAgent,
   openAlerts,
@@ -5234,4 +5236,40 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // `expected_interval_seconds` 86400 and `budget_fils_per_run` 0: the pass reads this build's own tables
 // and performs no outbound call of any kind.
 //
-export const SCHEMA_VERSION = 142 as const
+// 145 is 0145_reviews_v4_changelog_obligation.sql (G-REV-07) — the quarterly duty to read the Business
+// Profile API changelog, as a calendar row rather than as a sentence in a document.
+//
+// docs/10 §8's build-time list ends with an instruction in prose: *read the Business Profile API changelog
+// and deprecation pages before writing the Reviews adapter, with a recurring quarterly reminder to re-read
+// them*. A recurring reminder written in a document is a reminder nobody receives, and `obligation` (0052)
+// is the one place in this build that holds a duty with a cadence, an owner role and a blocking
+// consequence — which makes a row here the only form of this duty that is VISIBLE to the person who owes
+// it. The alternative considered and refused was a comment in the adapter: the adapter is read when
+// somebody is already changing it, and the whole point of a quarterly re-read is to notice a deprecation
+// BEFORE anybody has a reason to open the file. Seeded by the migration for the reason 0052's own rows
+// are: a compliance calendar that exists only in a seeded database is one production can be missing.
+//
+// **`obligation_class` gains `operational`, and the alternative was worse.** The five classes 0052
+// declared are `licence`, `credential`, `hygiene`, `tax` and `labour`, and this duty is none of them.
+// Filing it under the nearest one would be dishonest in a visible place: the compliance calendar and
+// M-VAT-11's dashboard both GROUP by class, so a vendor changelog reading would have appeared to an
+// operator under a heading a regulator owns. 0052's table comment already said the table holds
+// *"statutory and operational obligation definitions"*, so this is the value that comment implied. It is
+// additive and cannot make anything newly blocking:
+// `obligation_blocking_effect_matches_class` permits `blocking_effect = 'none'` for every class and
+// reserves the two blocking effects for `credential` and `licence`. The `alter type` and the INSERT are
+// separate statements because PostgreSQL refuses a new enum value used in the transaction that added it,
+// and both migration runners apply a file with plain `psql -f`.
+//
+// It is NOT `is_unverified`, although every row 0052 seeded is. That flag means *the duty itself is our
+// reading of a secondary source*, and it drives M-VAT-11's open-compliance dashboard; this duty is stated
+// in the imperative in this build's own handover, and nobody has to confirm that Google deprecates APIs.
+// A false positive there is a legal question nobody owes an answer to. `blocking_effect` is `none` for the
+// matching reason: an unread changelog does not stop the premises trading or publishing, and `is_blocking`
+// is GENERATED from the effect so there is no second answer. `anchor_on` is NULL, as on every seeded row,
+// because generation steps from it and a NULL anchor produces no instances rather than invented dates.
+//
+// The ZY661-ZY670 band allocated to this unit is released UNUSED and deliberately unregistered, because
+// `pnpm sqlstate` refuses an entry for a code no migration raises.
+//
+export const SCHEMA_VERSION = 145 as const

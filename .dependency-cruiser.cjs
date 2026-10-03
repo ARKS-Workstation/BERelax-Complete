@@ -325,6 +325,69 @@ module.exports = {
       },
     },
     {
+      name: 'reviews-v4-is-quarantined',
+      comment:
+        'Only packages/google/src/reviews/ and the package barrel may import ' +
+        'packages/google/src/adapters/reviews-v4.ts. docs/10 SS7 calls Reviews the HIGHEST-RISK dependency ' +
+        'in the plan and says why in one line: "Reviews remaining on legacy v4 while everything else ' +
+        'migrated is the clearest possible signal it will move." Everything else this build touches is v1 ' +
+        'on a host Google maintains; this is the one API on a host it has deprecated the rest of. ' +
+        'WHAT THE RULE BUYS. The cost of that migration is the number of modules that know the old shape, ' +
+        'so the manifest puts the goal as "a migration is a day not a month" - which is only true while ' +
+        'the answer to how many modules know is ONE. A route, a worker job or the SEO agent holding a ' +
+        'reference to this adapter is a second module to change, and the one nobody remembers. ' +
+        'The barrel is permitted because it is the package entry point a consumer legitimately imports and ' +
+        'because the submitter has to be wirable from outside; packages/google/src/reviews/ is permitted ' +
+        'because that is the subsystem the adapter belongs to - the send path that takes it as an injected ' +
+        'port, and the first-sync reconciliation. ' +
+        'A DIRECT-dependency rule and not `reachable`, for messaging-providers-only-inside-a-transport ' +
+        'reason: the barrel re-exports the factory, so reachability would condemn every consumer of ' +
+        '@berelax/google and report the intended design as a violation. Tests are exempt - the adapter ' +
+        'suite has to import it to exercise it, and a test ships nowhere. ' +
+        'The HOST STRING half of the same claim cannot be made here at all: dependency-cruiser sees ' +
+        'module edges, not strings. It is packages/fixtures/src/reviews-v4-quarantine.test.ts, which ' +
+        'asserts the host appears in exactly one non-test module. Both halves have known-bad fixtures in ' +
+        'scripts/test-gates.mjs asserting they fire BY NAME.',
+      severity: 'error',
+      from: {
+        pathNot: [
+          '^packages/google/src/reviews/',
+          '^packages/google/src/index\\.ts$',
+          '^packages/google/src/adapters/reviews-v4\\.ts$',
+          '\\.(test|itest)\\.ts$',
+        ],
+      },
+      to: { path: '^packages/google/src/adapters/reviews-v4\\.ts$' },
+    },
+    {
+      name: 'gbp-consistency-check-is-read-only',
+      comment:
+        'packages/google/src/seo/gbp-consistency.ts may not reach ' +
+        'packages/google/src/adapters/business-information-write.ts, which holds the only path to a ' +
+        'Business Profile PATCH. G-SEO-06s acceptance line asks for exactly this: the checker is ' +
+        '"read-only by construction", and construction means the write cannot be referenced rather than ' +
+        'is not currently called. ' +
+        'WHY IT MATTERS MORE THAN IT LOOKS. The checker reports that the profile and the premises row ' +
+        'disagree. The obvious next feature is a button that fixes it, and the obvious implementation is ' +
+        'the checker calling the write while it already has both values in hand - at which point an ' +
+        'agent-driven pass writes to the business Google profile with no human in between. The write ' +
+        'adapter exists and is reached from the SCREEN, where a person approves the change: ' +
+        'applyApprovedHours takes the periods a human approved as an argument and refuses a payload ' +
+        'wider than its mask, because docs/10 SS7 says a naive whole-object PATCH wipes the Ramadan ' +
+        'specialHours. ' +
+        'A `reachable` rule rather than a direct-dependency one, because the hazard is a hop: a helper ' +
+        'module that re-exported the write would satisfy a direct rule while leaving the checker one ' +
+        'import from the PATCH. Tests are exempt - business-information-write.test.ts has to import the ' +
+        'adapter to exercise it, and a test ships nowhere. ' +
+        'The known-bad fixture is in scripts/test-gates.mjs and asserts this rule fires BY NAME.',
+      severity: 'error',
+      from: { path: '^packages/google/src/seo/gbp-consistency\\.ts$' },
+      to: {
+        path: '^packages/google/src/adapters/business-information-write\\.ts$',
+        reachable: true,
+      },
+    },
+    {
       name: 'no-lucide-outside-the-icon-wrapper',
       comment:
         'Only packages/ui/src/icon.tsx may import Lucide. docs/08 §7 asks for it "behind a wrapped ' +
