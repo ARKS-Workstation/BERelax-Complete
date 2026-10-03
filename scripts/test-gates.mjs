@@ -55329,6 +55329,318 @@ export function chargebackNetEffectFils(`,
   }
 }
 
+// 173a-173z. (G-REV-07) The legacy v4 path: the quarantine shown to be alive in BOTH halves, the path
+// shown to depend on the persisted accountId, the flip shown to be a row, and the degradation shown to be
+// the declared one rather than a second answer.
+//
+// The subject of this block is code that is NEVER RUN in production. There is no Business Profile API
+// access (docs/10 §4, Y3-gbp-api), `delivery_mode` stays `manual` on every row the intake writes, and the
+// whole API path exists to be turned on later by somebody under pressure. That makes every rule here a
+// rule whose failure would be discovered on the worst possible day, and it is why the two halves of the
+// quarantine are both fixtured: a dependency rule cannot see a pasted host string and a scan cannot see an
+// import, so a tree that satisfies one of them is not quarantined.
+{
+  const ADAPTER = 'packages/google/src/adapters/reviews-v4.ts'
+  const ADAPTER_SUITE = 'packages/google/src/adapters/reviews-v4.test.ts'
+  const MODE = 'packages/google/src/reviews/api-mode.ts'
+  const RECONCILE = 'packages/google/src/reviews/reconcile.ts'
+  const QUARANTINE_SUITE = 'packages/fixtures/src/reviews-v4-quarantine.test.ts'
+  const API_ITEST = 'packages/google/src/review-api-mode.itest.ts'
+  const CONSUMERS = 'packages/google/src/consumers.ts'
+  const runUnit = (...files) =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const runItest = (...files) =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', ...files])
+  const cruise = () =>
+    run('pnpm', ['exec', 'depcruise', '--config', '.dependency-cruiser.cjs', 'packages', 'apps'])
+
+  // 173a. THE edge half of the quarantine. A worker job, a route or the SEO agent holding a reference to
+  // the adapter is a second module to change on migration day and the one nobody remembers. The fixture
+  // puts the import in the SEO agent's directory, where no other rule forbids it, so the case proves this
+  // rule rather than an older one shadowing it.
+  withEditedFile(
+    'packages/google/src/seo/gsc-snapshot.ts',
+    (source) =>
+      `import { MYBUSINESS_V4_HOST as __gate } from '../adapters/reviews-v4.ts'\nvoid __gate\n${source}`,
+    () =>
+      checkRejectedBy(
+        'boundaries: a module outside the reviews subsystem importing the v4 adapter is caught',
+        cruise(),
+        'reviews-v4-is-quarantined',
+      ),
+  )
+
+  // 173b. And its control. Without it 173a is satisfied by a rule that condemns the adapter however it is
+  // imported, which would be a rule nobody could make pass — worse than no rule, because it reads as
+  // proof.
+  {
+    const clean = cruise()
+    check(
+      'boundaries: the committed tree satisfies the v4 quarantine rule',
+      !clean.failed && clean.output.includes('no dependency violations found'),
+      clean.output,
+    )
+  }
+
+  // 173c. The STRING half, which the dependency rule cannot see at all. This is the hazard that actually
+  // happens: somebody pastes the host into a worker to try a call by hand, and the import graph says
+  // nothing about it.
+  withEditedFile(
+    'packages/google/src/seo/gsc-snapshot.ts',
+    (source) => `${source}\nconst __gateHost = 'mybusiness.googleapis.com'\nvoid __gateHost\n`,
+    () =>
+      checkRejectedBy(
+        'quarantine scan: the legacy v4 host pasted into another module is caught',
+        runUnit(QUARANTINE_SUITE),
+        'finds it in no other module',
+      ),
+  )
+
+  // 173d. And the scan's own liveness: the host REMOVED from the adapter. A scan that found the string
+  // nowhere would report a clean tree, which is the way this check stops being a check.
+  withEditedFile(
+    ADAPTER,
+    (source) =>
+      // BOTH occurrences: the constant and the doc comment above it. The scan reads the whole file, so a
+      // host left in a comment keeps it passing — which is right for the repository-wide rule (a pasted
+      // host in a comment is one edit from being used) and is what made the first version of this case
+      // report PASS about a module whose constant said `example.invalid`.
+      replaceOnce(
+        replaceOnce(
+          source,
+          "export const MYBUSINESS_V4_HOST = 'mybusiness.googleapis.com'",
+          "export const MYBUSINESS_V4_HOST = 'example.invalid'",
+        ),
+        ' * `mybusiness.googleapis.com` — not `mybusinessbusinessinformation`,',
+        ' * The legacy one, not `mybusinessbusinessinformation`,',
+      ),
+    () =>
+      checkRejectedBy(
+        'quarantine scan: the host missing from the module it is quarantined in is caught',
+        runUnit(QUARANTINE_SUITE),
+        'finds the host in the quarantined module',
+      ),
+  )
+
+  // 173e. The path built WITHOUT the persisted account: `locations/{l}/reviews`, which is what a client
+  // that had only ever seen v1 would write. It 404s, and it 404s at 03:00 on a cron job rather than in a
+  // test — which is the whole reason the account is on the capability row.
+  withEditedFile(
+    ADAPTER,
+    (source) =>
+      replaceOnce(
+        source,
+        '  return `${MYBUSINESS_V4_BASE}${reviewsPathFor(ref)}`',
+        '  return `${MYBUSINESS_V4_BASE}${String(ref?.location)}/reviews`',
+      ),
+    () =>
+      checkRejectedBy(
+        'reviews v4: a path built without the persisted accountId is caught',
+        runUnit(ADAPTER_SUITE),
+        'builds the path from the PERSISTED accountId',
+      ),
+  )
+
+  // 173f. The construction-time refusal, removed. A misconfigured capability row would then be discovered
+  // at the first reply rather than when the submitter is wired, and the acceptance line asks for the
+  // failure to be loud with ZERO transport calls.
+  withEditedFile(
+    ADAPTER,
+    (source) => replaceOnce(source, '  parseGbpResourceRef(deps.resourceRef)\n', ''),
+    () =>
+      checkRejectedBy(
+        'reviews v4: a submitter constructed against a v1-shaped ref is caught',
+        runUnit(ADAPTER_SUITE),
+        'fails loudly on a v1-shaped ref',
+      ),
+  )
+
+  // 173g. The missing-id refusal, replaced by the empty string this code originally had. It would build
+  // `.../reviews//reply` and spend a slot out of the ten-a-minute budget the whole profile shares
+  // discovering that a pasted row has nothing on the listing to reply to.
+  withEditedFile(
+    ADAPTER,
+    (source) =>
+      replaceOnce(
+        source,
+        '      const googleReviewId = googleIdOrRefuse(review)',
+        "      const googleReviewId = review.googleReviewId ?? ''",
+      ),
+    () =>
+      checkRejectedBy(
+        'reviews v4: a reply to a review with no google_review_id is caught',
+        runUnit(ADAPTER_SUITE),
+        'refuses a review with no google_review_id',
+      ),
+  )
+
+  // 173h. The limiter, bypassed. docs/10 §7 states 6/min against a 10/min cap Google says cannot be
+  // raised, and a transport call outside the window is a call the whole profile's budget does not know
+  // about.
+  withEditedFile(
+    ADAPTER,
+    (source) =>
+      replaceOnce(
+        source,
+        '      await deps.limit.run(async () => {',
+        '      await (async (fn) => fn())(async () => {',
+      ),
+    () =>
+      checkRejectedBy(
+        'reviews v4: a reply submitted outside the per-profile rate limit is caught',
+        runUnit(ADAPTER_SUITE),
+        'holds twenty replies to six transport calls',
+      ),
+  )
+
+  // 173i. The signature, invented. `Y9-reply-signature` is OPEN and this is the unit it was handed to: a
+  // plausible sign-off appended here would be published under the owner's name on an indexed page and
+  // would be indistinguishable from one they had configured (the brief's rule 15).
+  withEditedFile(
+    ADAPTER,
+    (source) =>
+      replaceOnce(
+        source,
+        '          comment: reply,',
+        '          comment: `${reply}\\n\\n— BE RELAX`,',
+      ),
+    () =>
+      checkRejectedBy(
+        'reviews v4: an invented reply signature is caught',
+        runUnit(ADAPTER_SUITE),
+        'appending no signature',
+      ),
+  )
+
+  // 173j. The flip, read from a constant instead of the row. This is the acceptance line: *flipping
+  // delivery_mode to api is a capability-row change, not a deploy*. A mode decided anywhere but the row
+  // is a second answer, and the one the database's own timestamp constraint does not know about.
+  withEditedFile(
+    MODE,
+    (source) => replaceOnce(source, "  if (review.deliveryMode === 'manual') {", '  if (true) {'),
+    () =>
+      checkRejectedBy(
+        'api mode: a delivery mode that does not come from the row is caught',
+        runItest(API_ITEST),
+        'delivers through the API path after delivery_mode is flipped',
+      ),
+  )
+
+  // 173k. The lint refusal, left to `classifyGoogleError`. It would be filed as `TransientUpstream`,
+  // which does not degrade, so the owner would be handed a Google error naming a correlation id instead
+  // of the rule they have to fix — and the reply would look like an outage.
+  withEditedFile(
+    MODE,
+    (source) =>
+      replaceOnce(
+        source,
+        "      if (rules === null) throw error\n      return { kind: 'refused' as const, rules }",
+        '      void rules\n      throw error',
+      ),
+    () =>
+      checkRejectedBy(
+        'api mode: a lint refusal reported as an upstream Google failure is caught',
+        runItest(API_ITEST),
+        'returns a lint refusal as a refusal',
+      ),
+  )
+
+  // 173l. The declared degraded mode, replaced by one chosen at the call site. `../consumers.ts` is the
+  // table everyone reads, and a consumer that decided its own would be the branch in production nobody
+  // updates — with the autoresponder going silent, which is indistinguishable from "no reviews arrived".
+  withEditedFile(
+    CONSUMERS,
+    (source) =>
+      replaceOnce(
+        source,
+        "  reviewAutoresponder: {\n    capability: 'gbp_reviews',\n    scopes: [GOOGLE_SCOPE_BUSINESS_MANAGE],\n    degradesTo: 'draft_only',",
+        "  reviewAutoresponder: {\n    capability: 'gbp_reviews',\n    scopes: [GOOGLE_SCOPE_BUSINESS_MANAGE],\n    degradesTo: 'disabled',",
+      ),
+    () =>
+      checkRejectedBy(
+        'api mode: an autoresponder that degrades to anything but draft_only is caught',
+        runItest(API_ITEST),
+        'degrades to draft_only',
+      ),
+  )
+
+  // 173m. The ambiguous match, resolved by picking the first candidate. Two star-only five-star reviews
+  // from "A Google user" on one day is an ordinary Saturday, and attaching the id to the wrong draft is
+  // silent, permanent and carries every later reply with it.
+  withEditedFile(
+    RECONCILE,
+    (source) =>
+      replaceOnce(
+        source,
+        "    if (outcome.kind === 'ambiguous') {",
+        "    if (outcome.kind === 'ambiguous' && false) {",
+      ),
+    () =>
+      checkRejectedBy(
+        'first sync: an ambiguous match that is resolved rather than reported is caught',
+        runItest(API_ITEST),
+        'writes nothing for an ambiguous match',
+      ),
+  )
+
+  // 173n. The backfill, replaced by an insert. The row carries the approved draft and the delivery
+  // history, so a second row for one review doubles it in the queue and in every count the owner is
+  // shown — which is the acceptance line's "exactly four rows with zero duplicates".
+  withEditedFile(
+    RECONCILE,
+    (source) =>
+      replaceOnce(
+        source,
+        "    if (outcome.kind === 'backfilled') {",
+        "    if (outcome.kind === 'backfilled' && false) {",
+      ),
+    () =>
+      checkRejectedBy(
+        'first sync: an API review inserted as a new row instead of backfilled is caught',
+        runItest(API_ITEST),
+        'leaves exactly four rows',
+      ),
+  )
+
+  // 173o. The zone, dropped from the date. `reconcileApiReviewId` matches on
+  // `(reviewed_at at time zone $zone)::date`, and a review left at 23:58 UTC is the NEXT day in
+  // Asia/Dubai — which is the date Google shows and the only one a pasted row can have been typed from.
+  withEditedFile(
+    RECONCILE,
+    (source) =>
+      replaceOnce(
+        source,
+        '    const local = toLocal(instantFromIso(review.createdAtIso), zone)',
+        "    const local = { date: review.createdAtIso.slice(0, 10), time: '00:00' }",
+      ),
+    () =>
+      checkRejectedBy(
+        'first sync: a review date read in the wrong zone is caught',
+        runItest(API_ITEST),
+        'backfills three pasted rows',
+      ),
+  )
+
+  // 173y. Every case above is satisfied by something failing, so this one is satisfied by the real tree:
+  // the adapter suite and the quarantine scan pass as committed.
+  {
+    const real = runUnit(ADAPTER_SUITE, QUARANTINE_SUITE)
+    check('the committed v4 adapter and the quarantine scan both pass', !real.failed, real.output)
+  }
+
+  // 173z. And the database suite, which is where the five claims a pure test cannot reach are made: the
+  // flip observed mid-test, the four-row first sync, the ambiguous match writing nothing, the declared
+  // degradation with its owner-visible event row, and migration 0145's quarterly obligation.
+  {
+    const pair = runItest(API_ITEST)
+    check(
+      'api mode: the flip, the first sync, the degradation and the quarterly obligation pass against the real database',
+      !pair.failed,
+      pair.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

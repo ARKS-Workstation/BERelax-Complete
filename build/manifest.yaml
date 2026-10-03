@@ -19792,7 +19792,8 @@ units:
       the same bytes it lints against rather than a second spelling of them. Several fixtures quote a term the
       reply must not contain (cupping, full service, nurse); each is a term of a shipped lexicon, quoted from
       it, and none is a claim about this business'
-    - 'NOTE deferred to G-REV-07 (RE-POINTED from G-REV-06 by G-REV-06, which did NOT build it): the SOURCE
+    - 'NOTE deferred to G-AGT-02 (RE-POINTED from G-REV-07 by G-REV-07, which did NOT build it; RE-POINTED
+      from G-REV-06 by G-REV-06, which did not either): the SOURCE
       of the auto-appended signature. The cap criterion needs the
       mechanism, so renderFinalReply is the one implementation both linters measure and deliverApprovedReply
       takes signature: string | null -- 1,200 passes and 1,201 is refused with the signature counted, and the
@@ -19803,9 +19804,15 @@ units:
       so one naming a person cannot be configured into a reply. G-REV-06 shipped the approval queue and
       passes signature: null from it, with the reason in the handler: a plausible sign-off invented on that
       screen would publish under the owner''s name. Y9-reply-signature is still open, so the remaining work
-      is the SETTING and not the mechanism, and it is handed to G-REV-07 as the only unit left on the reply
-      path -- a signature has to exist for both delivery modes, and that unit is the one that adds the
-      second'
+      is the SETTING and not the mechanism. G-REV-07 added the second delivery mode and passes
+      signature: null from it too -- the v4 adapter appends nothing, asserted byte for byte, and gate case
+      173i is the fixture that proves an invented sign-off would be caught. THREE units have now declined
+      to invent one, and that is the right answer each time rather than a failure to finish: the thing
+      missing is the owner''s answer to Y9-reply-signature, which no unit can supply. Re-pointed to
+      G-AGT-02 because it is the only remaining todo unit that WRITES an agent setting (its kill switches
+      do), so it is the one that can render the card -- and if Y9-reply-signature is still open on the day
+      it lands, the correct action is to leave signature: null again rather than choose a sign-off, because
+      a plausible one is published under the owner''s name on an indexed page (brief rule 15)'
     - 'NOTE deferred to G-REV-06 (DEFERRAL SATISFIED): mandatory human approval itself, the Copy reply
       control, the deep link and the Marked as posted action. This unit ships the function that screen calls, and it takes the approved
       text as an ARGUMENT rather than reading reply_draft, precisely so that the bytes an owner edited are the
@@ -19818,12 +19825,17 @@ units:
       link is placeReviewsDeepLink over the stored placeId, and migration 0128''s ZY342 is the trigger --
       which freezes the lint VERSION and the DIGEST and deliberately NOT reply_approved_text, because this
       unit''s own content_changed detector is reachable only while the digest cannot move'
-    - 'NOTE deferred to G-REV-07: the API-mode submitter is an injected port (ReplySubmitter) and not a
+    - 'NOTE deferred to G-REV-07 (DEFERRAL SATISFIED): the API-mode submitter is an injected port
+      (ReplySubmitter) and not a
       Business Profile client. That units dependency rule forbids the v4 host string from living anywhere but
       its own adapter, so building half of one here would create the second place it lives. What this unit owns
       is that nothing reaches the port unlinted, asserted with a transport spy at ZERO calls on a refusal --
       and gate 141b is the fixture for it, moving the submit call above the lint, which leaves the throw and
-      the missing timestamp intact so only the spy notices'
+      the missing timestamp intact so only the spy notices. G-REV-07 built it: createReviewsV4Submitter in
+      packages/google/src/adapters/reviews-v4.ts implements this port, the host string lives only there
+      (held by a scan AND a dependency rule, because dependency-cruiser cannot see a string), and the
+      reply bytes it submits are the approved bytes unchanged with no signature appended - asserted byte
+      for byte, because Y9-reply-signature is still open'
     - 'NOTE on the boundary this unit does not close, with no guess in place of it. lintPublicDisplayName is
       Latin-script by construction (lexiconTokens splits on everything outside [a-z0-9]), so an ARABIC reply
       produces no banned-claim findings -- the same documented boundary the display-name lint carries, where
@@ -20060,7 +20072,7 @@ units:
       a 6/min token bucket against the 10 edits/min cap, and reconciliation of pasted reviews on first sync.
       Flipping delivery_mode to api is a capability-row change, not a deploy.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - G-CONN-05
@@ -20114,11 +20126,43 @@ units:
       delivery modes and this is the unit that adds the second. ADR 0063 records the consequence the
       settings card meets: a signature is linted like the rest of the reply, so one naming a person cannot
       be configured into one.'
+    - 'NOTE (G-REV-07, this unit): the acceptance list names docs/adr/0009 for the isolation decision.
+      0009 is TAKEN - it is the authorisation matrix and mandatory TOTP, and has been since F07 - so the
+      record is docs/adr/0095. Same shape ADR 0086 recorded for G-SEO-05 migration number.'
+    - 'NOTE (G-REV-07, this unit): the "single-module quarantine" is TWO checks, because neither can make
+      the claim alone. Dependency-cruiser sees module EDGES and not strings, so a rule written as though it
+      could assert a host string would pass for ever while somebody pasted the host into a worker. The
+      string half is packages/fixtures/src/reviews-v4-quarantine.test.ts (the host appears in exactly one
+      non-test module, and in THAT one); the edge half is reviews-v4-is-quarantined in
+      .dependency-cruiser.cjs. Both have known-bad fixtures in gate block 173 asserting they fire by name.'
+    - 'NOTE (G-REV-07, this unit): the files list gains packages/google/src/reviews/api-mode.ts. The
+      acceptance line asks for the flip to be observed MID-TEST as a row change, which needs a function
+      that reads google_reviews.delivery_mode and selects a path from it - and that is the one place in
+      this build that does. It is also where withGoogle wraps the transport call, so quota-zero and
+      access_not_granted degrade to the DECLARED draft_only (from consumers.ts, not a decision taken at the
+      call site) and write the owner-visible health_check_failed event, while a LINT refusal is caught and
+      returned as a value rather than classified as TransientUpstream.'
+    - 'NOTE (G-REV-07, this unit): the reply signature is STILL BLOCKED on OPEN-QUESTIONS
+      Y9-reply-signature, which is open. The NOTE G-REV-06 handed this unit asked for the SOURCE of the
+      signature and nobody has answered what this business signs its replies with, or whether it wants one.
+      The mechanism is unchanged and complete - deliverApprovedReply takes signature: string | null and the
+      1,200-character cap is measured over the rendered total - so what is missing is the setting. api-mode
+      passes null and the v4 adapter appends nothing, asserted byte for byte; gate case 173i is the fixture
+      that proves an invented sign-off would be caught. It is re-pointed to the settings card (G-REV-06)
+      for the third time rather than guessed at: a plausible sign-off would be published under the owner
+      name on an indexed page (brief rule 15).'
+    - 'NOTE (G-REV-07, this unit): migration 0145 is used for the quarterly changelog obligation and it
+      adds the value `operational` to obligation_class, additively - the five classes 0052 declared are
+      licence, credential, hygiene, tax and labour, none of which this duty is, and the compliance calendar
+      and M-VAT-11 dashboard both GROUP by class. SCHEMA_VERSION is 145. The ZY661-ZY670 SQLSTATE band is
+      RELEASED unregistered: the migration raises no code, and pnpm sqlstate refuses an entry for one no
+      migration raises.'
     files:
     - packages/google/src/adapters/reviews-v4.ts
     - packages/google/src/reviews/reconcile.ts
     - packages/google/src/rate-limit/token-bucket.ts
     - docs/adr/0009-reviews-legacy-v4-isolation.md
+
   - id: G-SEO-01
     order: 168
     title: 'GSC warehouse: nightly snapshots, startRow paging, the rare-query gap'

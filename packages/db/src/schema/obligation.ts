@@ -44,6 +44,16 @@ export const obligationClass = pgEnum('obligation_class', [
   'hygiene',
   'tax',
   'labour',
+  /**
+   * Added by 0145 (G-REV-07): a duty this business owes itself rather than a regulator.
+   *
+   * 0052's table comment already said the table holds *"statutory and operational obligation
+   * definitions"*; this is the value that implied. The first row is the quarterly reading of the Business
+   * Profile API changelog, which docs/10 §8 states in the imperative and which nothing else in the build
+   * could make visible to the person who owes it. Filing it under `licence` or `tax` would have put a
+   * vendor changelog under a heading a regulator owns, on a dashboard that groups by this column.
+   */
+  'operational',
 ])
 
 /**
