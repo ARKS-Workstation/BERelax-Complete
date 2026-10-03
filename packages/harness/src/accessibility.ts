@@ -76,7 +76,23 @@ interface RawAxeResults {
 
 /** Runs axe against an already-rendered page. */
 export async function auditPage(page: Page, target: CaptureTarget): Promise<AccessibilityResult> {
-  await page.addScriptTag({ content: axeBundle() })
+  /*
+   * `addInitScript` and not `addScriptTag`, and the reason is H-HARD-01.
+   *
+   * That unit gave the admin and public estates a NONCE content-security policy, which is exactly what
+   * it should do — and a nonce policy refuses an inline script, which is what `addScriptTag({content})`
+   * injects. At the integrating verify it failed 22 audits across every browser suite with
+   * `Refused to execute inline script`, and the policy was right each time.
+   *
+   * `addInitScript` is delivered through the devtools protocol before the document's own scripts run, so
+   * it is not subject to the page's CSP — the mechanism Playwright documents for this. The page is then
+   * reloaded so the injection takes effect on a document that is already open, and the audit runs
+   * against the same bytes a visitor gets. The alternative, a context with `bypassCSP`, would have the
+   * browser ignore the policy for every suite that audits anything, which is a strictly larger change
+   * and would hide a real CSP regression from every one of them.
+   */
+  await page.addInitScript({ content: axeBundle() })
+  await page.reload({ waitUntil: 'load' })
   const raw = (await page.evaluate(async (tags: readonly string[]) => {
     const globals = globalThis as unknown as {
       axe: { run(context: unknown, options: unknown): Promise<unknown> }
