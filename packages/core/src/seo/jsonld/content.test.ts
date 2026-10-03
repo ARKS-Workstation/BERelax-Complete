@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest'
+import {
+  isTherapistPublishable,
+  type TherapistCandidate,
+  therapistPublishingRefusals,
+} from '../therapist-publishable.ts'
 import { organizationId } from './business.ts'
 import {
   breadcrumbListNode,
   faqPageNode,
   imageObjectNode,
-  mayPublishTherapist,
   personId,
   personNodeFor,
   personNodesFor,
-  type TherapistCandidate,
-  therapistPublishingRefusals,
   videoObjectNode,
 } from './content.ts'
 import {
@@ -31,6 +33,7 @@ describe('a therapist is published only with a name AND a recorded consent', () 
     staffReference: 'Therapist 07',
     displayName: 'A Name',
     photographyConsentRecordedAt: '2026-01-01T00:00:00.000Z',
+    retiredAt: null,
   }
 
   it('refuses a therapist with no display name', () => {
@@ -38,7 +41,7 @@ describe('a therapist is published only with a name AND a recorded consent', () 
     // fill one in without a consent row and leave the guard invisible.
     const refusals = therapistPublishingRefusals({ ...named, displayName: null })
     expect([...refusals]).toEqual(['no_display_name'])
-    expect(mayPublishTherapist({ ...named, displayName: null })).toBe(false)
+    expect(isTherapistPublishable({ ...named, displayName: null })).toBe(false)
     expect([...therapistPublishingRefusals({ ...named, displayName: '   ' })]).toEqual([
       'no_display_name',
     ])
@@ -55,6 +58,7 @@ describe('a therapist is published only with a name AND a recorded consent', () 
         staffReference: 'Therapist 07',
         displayName: null,
         photographyConsentRecordedAt: null,
+        retiredAt: null,
       }),
     ]).toEqual(['no_display_name', 'no_photography_consent'])
   })
@@ -103,6 +107,9 @@ describe('a therapist is published only with a name AND a recorded consent', () 
         ...named,
         jobTitle: 'Senior Therapist',
         portraitUrl: `${SPECIMEN_ORIGIN}/portrait.avif`,
+        // Required alongside the URL as of W-SITE-06: a portrait with no alt refuses the page rather than
+        // degrading it, so a literal that sets one and not the other no longer builds a node at all.
+        portraitAlt: 'A therapist in the treatment room',
         url: `${SPECIMEN_ORIGIN}/therapists/a-name`,
       },
       PERSON_OPTIONS,

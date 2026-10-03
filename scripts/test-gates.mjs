@@ -60948,6 +60948,268 @@ export function chargebackNetEffectFils(`,
   )
 }
 
+// 189a-189z. (W-SITE-06) The therapist publishing guard shown to be able to stop refusing: every one of
+//            the three facts it reads removed in turn, the second-guard scan shown to be able to pass with
+//            a second guard in the tree, and the ADR 0021 trap — a STYLE where a SKILL belongs — shown to
+//            resolve nothing rather than half-matching.
+//
+//            A therapist page names a real person, shows their photograph and claims what they are trained
+//            in. So every mutation below leaves a system that WORKS: a page that renders, a card that
+//            links, a sitemap entry, a `Person` node. What changes is WHOSE name is on it. That is why
+//            these are gates rather than tests of a happy path — the defect is invisible in the output and
+//            visible only in whether a refusal still fires.
+{
+  const GUARD = 'packages/core/src/seo/therapist-publishable.ts'
+  const GUARD_TEST = 'packages/core/src/seo/therapist-publishable.test.ts'
+  const GUARD_SCAN = 'apps/web/src/therapist-guard.test.ts'
+  const SITEMAP = 'apps/web/src/therapists/sitemap.ts'
+  const CONTENT = 'apps/web/src/therapists/content.ts'
+  const CONTENT_TEST = 'apps/web/src/therapists/content.test.ts'
+  const REGISTRY = 'apps/web/src/routes/registry.ts'
+  const REGISTRY_TEST = 'apps/web/src/routes/registry.test.ts'
+  const PATHS_TEST = 'apps/web/src/therapists/paths.test.ts'
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+
+  // The control for the whole block. Every case asserts that a BROKEN tree is caught, and that says
+  // nothing unless the committed tree passes.
+  {
+    const guard = run('pnpm', unit(GUARD_TEST))
+    check(
+      'therapists: the committed guard suite passes, which is the control for 189a to 189d',
+      !guard.failed,
+      `the guard suite does not pass on the committed tree:\n${guard.output}`,
+    )
+    const scan = run('pnpm', unit(GUARD_SCAN))
+    check(
+      'therapists: the committed tree passes the one-guard scan, the control for 189e to 189g',
+      !scan.failed,
+      `the one-guard scan does not pass on the committed tree:\n${scan.output}`,
+    )
+    const content = run('pnpm', unit(CONTENT_TEST))
+    check(
+      'therapists: the committed card decisions pass, which is the control for 189h',
+      !content.failed,
+      `the card suite does not pass on the committed tree:\n${content.output}`,
+    )
+  }
+
+  /*
+    189a. Retirement dropped from the guard.
+
+    The mutation that reads as a simplification: `isTherapistPublishable` becomes "has a name and a
+    consent", which is what the generated column says and what everybody expects. The page of a therapist
+    who has left then answers 200 again, with their name, their photograph and a "Book with" action —
+    docs/09 §2's departure clause reversed, and nothing in the output says so.
+  */
+  checkRejectedBy(
+    'therapists: 189a a guard that publishes a therapist who has left is caught',
+    withEditedFile(
+      GUARD,
+      (text) =>
+        replaceOnce(
+          text,
+          '  return candidate.retiredAt === null && therapistPublishingRefusals(candidate).length === 0',
+          '  return therapistPublishingRefusals(candidate).length === 0',
+        ),
+      () => runExpectingFailure('pnpm', unit(GUARD_TEST)),
+    ),
+    'a retired therapist who was publishable is retired, not unpublished',
+  )
+
+  /*
+    189b. The portrait's alt-text refusal removed.
+
+    An alt-less portrait of an identifiable person is the one failure that cannot be repaired after
+    publication: the page is indexed, the image is indexed with it, and a screen reader has announced an
+    unlabelled photograph of somebody who consented to a labelled one. The mutation leaves every other
+    refusal firing and the page rendering.
+  */
+  checkRejectedBy(
+    'therapists: 189b a guard that publishes a portrait with no alt text is caught',
+    withEditedFile(
+      GUARD,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (candidate.portraitUrl !== undefined && (candidate.portraitAlt ?? '').trim() === '') {\n    refusals.push('portrait_without_alt')\n  }\n",
+          '',
+        ),
+      () => runExpectingFailure('pnpm', unit(GUARD_TEST)),
+    ),
+    'a portrait with no alt text refuses the page',
+  )
+
+  /*
+    189c. The empty-slug throw removed.
+
+    A display name of punctuation alone reduces to the empty slug, which is `/therapists/` — the index. So
+    the therapist's page would silently BE the index, the sitemap would carry the index twice, and
+    `employee_public_slug_shape` would refuse the row afterwards with a message about a regular expression
+    rather than about a name.
+  */
+  checkRejectedBy(
+    'therapists: 189c a slug function that returns the empty string is caught',
+    withEditedFile(
+      GUARD,
+      (text) => replaceOnce(text, "  if (slug === '') {", '  if (false) {'),
+      () => runExpectingFailure('pnpm', unit(GUARD_TEST)),
+    ),
+    'refuses a name that reduces to nothing',
+  )
+
+  /*
+    189d. The ADR 0021 trap: a STYLE compared where a SKILL belongs.
+
+    `service.style` is `asian` and `employee_skill.skill` is `asian_style`, and the relation between them
+    is a row in `service_skill` rather than a suffix. The mutation is the spelling that looks obviously
+    equivalent, and under it `knowsAbout` resolves nothing for anybody — so every therapist page refuses
+    with a message about an archived service, which is the wrong diagnosis for the right failure.
+  */
+  checkRejectedBy(
+    'therapists: 189d a specialism resolved against the treatment style rather than the skill is caught',
+    withEditedFile(
+      GUARD,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const matched = live.filter((service) => service.requiredSkill === specialism)',
+          '  const matched = live.filter((service) => `${service.requiredSkill}` === `${specialism}_style`)',
+        ),
+      () => runExpectingFailure('pnpm', unit(GUARD_TEST)),
+    ),
+    'maps a specialism to every live service of that style',
+  )
+
+  /*
+    189e. The sitemap builder filtering on the generated column instead of the guard.
+
+    `row.isPublishable && row.retiredAt === null` is the second guard this unit exists to make impossible.
+    It is right today and wrong the first time a condition is added to the real one — a portrait with no
+    alt text is already such a condition — and the divergence is silent: the sitemap and the structured
+    data would then describe different staff, with every behavioural test green because each half is
+    internally consistent. `therapist-guard.test.ts` is the scan that refuses it by name.
+  */
+  checkRejectedBy(
+    'therapists: 189e a sitemap that re-derives the guard from the generated column is caught',
+    withEditedFile(
+      SITEMAP,
+      (text) =>
+        replaceOnce(
+          text,
+          '    if (!isTherapistPublishable(candidateFor(row))) continue',
+          '    if (!(row.isPublishable && row.retiredAt === null)) continue',
+        ),
+      () => runExpectingFailure('pnpm', unit(GUARD_SCAN)),
+    ),
+    'has no second implementation spelled as the conjunction the generated column uses',
+  )
+
+  /*
+    189f. A second definition of the guard.
+
+    The scan's first claim is that `isTherapistPublishable` is defined in exactly ONE file. A second
+    definition is not a wrong answer: it is a right answer in two places that will stop agreeing, and the
+    day they disagree the route and the sitemap publish different people.
+  */
+  checkRejectedBy(
+    'therapists: 189f a second definition of the guard is caught',
+    withEditedFile(
+      CONTENT,
+      (text) =>
+        `${text}\n/** A second guard, which is the defect 189f is about. */\nexport function isTherapistPublishable(): boolean {\n  return true\n}\n`,
+      () => runExpectingFailure('pnpm', unit(GUARD_SCAN)),
+    ),
+    'is defined in exactly one file',
+  )
+
+  /*
+    189g. A second writer of the publication columns.
+
+    0157 deliberately has NO deferred trigger forcing a display-name rename to leave a 301, where 0029 has
+    one for a service slug — and the migration's header says the reason in so many words: nothing but
+    `publishTherapist` writes a display name. That claim is load-bearing and is only true while this scan
+    passes, so a second `update employee set display_name = …` anywhere is the defect, not an alternative.
+  */
+  checkRejectedBy(
+    'therapists: 189g a second writer of employee.display_name is caught',
+    withEditedFile(
+      SITEMAP,
+      (text) =>
+        `${text}\n// A second writer, which is the defect 189g is about.\n// update employee set display_name = 'x'\nconst SECOND_WRITER = \`update employee set display_name = \$1\`\nvoid SECOND_WRITER\n`,
+      () => runExpectingFailure('pnpm', unit(GUARD_SCAN)),
+    ),
+    'nothing else writes any of the three columns',
+  )
+
+  /*
+    189h. An index card linked for a therapist who may not be published.
+
+    The card is where ADR 0020 is visible, and the mutation is the one a reader of the component would make
+    on purpose: link every card, because a card that does not link looks broken. Eighteen of nineteen links
+    would then 404, the link graph would report eighteen dead internal links, and the page would look fine.
+  */
+  checkRejectedBy(
+    'therapists: 189h an index card that links an unpublishable therapist is caught',
+    withEditedFile(
+      CONTENT,
+      (text) =>
+        replaceOnce(
+          text,
+          '      ...(publishable && row.publicSlug !== null\n        ? { href: therapistPath(locale, row.publicSlug) }\n        : {}),',
+          '      ...(row.publicSlug !== null ? { href: therapistPath(locale, row.publicSlug) } : {}),',
+        ),
+      () => runExpectingFailure('pnpm', unit(CONTENT_TEST)),
+    ),
+    'gives a NAMED therapist with no consent a slug and still no href',
+  )
+
+  /*
+    189i. The declared absence of a sample path replaced by a sample path.
+
+    `/therapists/[slug]` has no URL that answers 200, because no therapist is publishable and this build
+    may not invent one. `noSamplePath` says so in a sentence; `sampleParams` would hand the normalisation
+    walk, the `hreflang` assertions and the screenshot matrix a 404 to assert everything against — which
+    passes, because a 404 has a canonical link and a robots header like any other document.
+  */
+  checkRejectedBy(
+    'therapists: 189i a sample path claimed for a route that has none is caught',
+    withEditedFile(
+      REGISTRY,
+      (text) =>
+        replaceOnce(
+          text,
+          "    noSamplePath:\n      'No therapist is publishable, so no slug answers 200.",
+          "    sampleParams: { slug: 'nobody' },\n    noSamplePathWas:\n      'No therapist is publishable, so no slug answers 200.",
+        ),
+      () => runExpectingFailure('pnpm', unit(REGISTRY_TEST)),
+    ),
+    'the sampleable documents are the documents minus the ones that declare no sample path',
+  )
+
+  /*
+    189j. The `/therapists` prefix spelled twice, differently.
+
+    `packages/db` spells it to write a `redirect_map` row and the registry spells it because it IS the URL
+    space. A disagreement is not a 500: it is a redirect that silently stops matching and an archival whose
+    301 lands on a 404 — 0029's own "a 404 with extra steps". `paths.test.ts` is the check that holds the
+    two equal, which the brief requires in the same commit as the second statement.
+  */
+  checkRejectedBy(
+    'therapists: 189j two different spellings of the /therapists prefix are caught',
+    withEditedFile(
+      'packages/db/src/queries/therapist-pages.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          "export const THERAPIST_INDEX_PATH = '/therapists'",
+          "export const THERAPIST_INDEX_PATH = '/therapist'",
+        ),
+      () => runExpectingFailure('pnpm', unit(PATHS_TEST)),
+    ),
+    'the index path is the registry entry',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

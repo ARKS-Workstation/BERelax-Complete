@@ -269,6 +269,19 @@ export const TEST_PORT_BANDS = {
   // and `book-flow` came to share one. [22_700, 23_000) contains none of RESTRICTED_PORTS and is below
   // EPHEMERAL_PORT_FLOOR.
   'walk-in-speed': { start: 22_700, width: 300 },
+  // The public site's served bytes: W-SITE-06's therapist routes, W-SITE-08's sitemaps and publish loop,
+  // and W-SITE-09's 301 map. ONE suite and one band rather than three, because three of these units were
+  // allocated a single band between them and because `test-ports.test.ts` requires exactly one claimant
+  // per band — a second `startWebServer({ suite: 'public-site' })` would be a second application on one
+  // port, which is the failure rule 18 describes: the loser cannot bind, the winner answers both suites,
+  // and neither green nor red means anything.
+  //
+  // Every claim it holds is about bytes and cannot be made any other way: a status code (200 for a
+  // publishable therapist, 404 for the three that are not, one permanent hop for one who has left), the
+  // XML a sitemap route serves, and the reciprocity between a page's `hreflang` set and the sitemap's.
+  // 23_300 is the band these units were allocated. [23_300, 23_600) is above every band above it and well
+  // below EPHEMERAL_PORT_FLOOR.
+  'public-site': { start: 23_300, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

@@ -6,8 +6,8 @@ import {
   sitemapLocations,
   type TherapistRouteExpectation,
 } from './internal-link-audit.ts'
-import type { TherapistCandidate } from './jsonld/content.ts'
 import type { LinkGraph, LinkNode } from './link-graph.ts'
+import type { TherapistCandidate } from './therapist-publishable.ts'
 import { encloseUntrustedSeoData } from './untrusted-envelope.ts'
 
 /**
@@ -54,6 +54,7 @@ function therapist(
     staffReference,
     displayName: 'Therapist Record 07',
     photographyConsentRecordedAt: '2026-02-01T00:00:00.000Z',
+    retiredAt: null,
     ...overrides,
   }
 }

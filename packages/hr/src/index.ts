@@ -82,3 +82,16 @@ export {
   staffKek,
   staffSecretBinding,
 } from './staff-secret.ts'
+/*
+  W-SITE-06's publication chokepoint. Here rather than in `packages/db` for this package's own reason: the
+  slug is `therapistSlug()` in `@berelax/core` and `packages/db` may never import it, so the one function
+  that applies core's rule to db's rows lives in the layer that already exists for that.
+*/
+export {
+  type ArchiveTherapistInput,
+  archiveTherapist,
+  type PublishTherapistInput,
+  publishTherapist,
+  type TherapistArchivalResult,
+  type TherapistPublicationResult,
+} from './therapist-publication.ts'

@@ -12,6 +12,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
 import { therapistSkill } from './catalogue.ts'
@@ -183,6 +184,15 @@ export const employee = pgTable(
      * the generation expression lives in the migration that owns it.
      */
     isPublishable: boolean('is_publishable').notNull(),
+    /**
+     * The slug of the public therapist page, written by `publishTherapist()` and NULL otherwise (0157).
+     *
+     * An ordinary written column rather than a generated one: the transformation is
+     * `therapistSlug()` in `@berelax/core`, and a `slugify()` in SQL would be a second implementation
+     * of it that `pnpm db:drift` cannot compare. The UNIQUE index is what the database contributes —
+     * two distinct display names can reduce to one slug.
+     */
+    publicSlug: text('public_slug'),
     contractType: employeeContractType('contract_type'),
     /**
      * Integer fils on the `fils_nonneg` domain (ADR 0007), `mode: 'bigint'` for `ledger.ts`'s reason:
@@ -231,6 +241,17 @@ export const employee = pgTable(
       'employee_provisional_names_a_question',
       sql`not ${t.isProvisional} or ${t.openQuestionId} is not null`,
     ),
+    // 0157. An equivalence and not an implication: a slug with no name is a URL for somebody who may not
+    // be published, and a name with no slug 404s a page the admin has just published.
+    check(
+      'employee_public_slug_with_display_name',
+      sql`(${t.displayName} is null) = (${t.publicSlug} is null)`,
+    ),
+    check(
+      'employee_public_slug_shape',
+      sql`${t.publicSlug} is null or ${t.publicSlug} ~ '^[a-z0-9]+(-[a-z0-9]+)*$'`,
+    ),
+    uniqueIndex('employee_public_slug_unique').on(t.publicSlug),
   ],
 )
 

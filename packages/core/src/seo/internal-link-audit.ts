@@ -1,10 +1,10 @@
 import { AppError } from '@berelax/shared'
+import { type LinkGraph, type LinkNode, normaliseLinkPath } from './link-graph.ts'
 import {
   type TherapistCandidate,
   type TherapistPublishingRefusal,
   therapistPublishingRefusals,
-} from './jsonld/content.ts'
-import { type LinkGraph, type LinkNode, normaliseLinkPath } from './link-graph.ts'
+} from './therapist-publishable.ts'
 import type { SeoUntrustedEnvelope } from './untrusted-envelope.ts'
 
 /**
@@ -24,7 +24,7 @@ import type { SeoUntrustedEnvelope } from './untrusted-envelope.ts'
  * ## The rule that is really an absence, and why it needs the therapist rows
  *
  * There are nineteen therapists and none of them has a display name or a recorded photography consent
- * (ADR 0020, Y12-consent-photo), so `mayPublishTherapist` refuses every one and the sitemap carries no
+ * (ADR 0020, Y12-consent-photo), so `isTherapistPublishable` refuses every one and the sitemap carries no
  * therapist route at all. A naive audit reports nineteen orphans — or, worse, a later version reports
  * nineteen *missing pages* — and an owner reading that report learns to scroll past the therapist section,
  * which is where the real defect will eventually appear.

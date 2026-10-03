@@ -47,6 +47,7 @@ import {
   routeById,
   routeByPath,
   routePaths,
+  sampleableDocumentRoutes,
   sampleParamsOf,
   samplePathFor,
   sitemapEntries,
@@ -227,6 +228,7 @@ describe('the registry is internally consistent', () => {
       '/ar/journal',
       '/ar/pricing',
       '/ar/spa',
+      '/ar/therapists',
       '/ar/treatments',
       '/book',
       '/contact',
@@ -234,6 +236,7 @@ describe('the registry is internally consistent', () => {
       '/journal',
       '/pricing',
       '/spa',
+      '/therapists',
       '/treatments',
     ])
     expect(sitemapEntries().every((entry) => entry.changefreq !== null)).toBe(true)
@@ -243,7 +246,14 @@ describe('the registry is internally consistent', () => {
     // A `<loc>` of `https://…/treatments/[slug]` is a sitemap telling a crawler to fetch a 404. The entries
     // function skips it; `parameterisedSitemapRoutes` is what stops that skip from being silent.
     for (const entry of sitemapEntries()) expect(entry.path, entry.path).not.toContain('[')
-    expect(parameterisedSitemapRoutes().map((route) => route.path)).toEqual(['/treatments/[slug]'])
+    // Two of them as of W-SITE-06, and each has its OWN expander — `treatmentSitemapEntries` over the
+    // catalogue and `therapistSitemapEntries` over the roster — because the two sets are decided by
+    // different rows. Enumerated rather than counted: a third pattern added without an expander would be
+    // a section of the sitemap that is silently empty.
+    expect(parameterisedSitemapRoutes().map((route) => route.path)).toEqual([
+      '/therapists/[slug]',
+      '/treatments/[slug]',
+    ])
   })
 
   it('declares a rendering mode from a closed set', () => {
@@ -313,10 +323,29 @@ describe('the registry is internally consistent', () => {
       // needs a real path: it has no canonical URL, no hreflang set and no screenshot, which is what
       // `kind: 'handler'` means. A document's pattern, by contrast, is opened by all three.
       const parameterised = isParameterised(route.path) && route.kind === 'document'
+      // W-SITE-06's `/therapists/[slug]` is the first parameterised document with NO path that answers,
+      // because no therapist is publishable (ADR 0020, Y12-names) and this build may not invent one. It
+      // declares `noSamplePath` with the reason in it, and the two fields are mutually exclusive: a route
+      // with both would be claiming a sample path and explaining why it has none.
+      const declaresNone = 'noSamplePath' in route
       expect(
         Object.keys(sampleParamsOf(route)).length > 0,
-        `${route.id}: sampleParams iff dynamic document`,
-      ).toBe(parameterised)
+        `${route.id}: sampleParams iff dynamic document with a path that answers`,
+      ).toBe(parameterised && !declaresNone)
+      if (declaresNone) {
+        expect(parameterised, `${route.id}: noSamplePath on a route with no dynamic segment`).toBe(
+          true,
+        )
+        // A sentence, not a flag. An empty string would be a route opted out of every harness with nothing
+        // saying why, which is the omission this field exists to make impossible.
+        // A sentence, not a flag: at least forty characters and a space in it. An empty string would be a
+        // route opted out of every harness with nothing saying why, which is the omission this field
+        // exists to make impossible.
+        const reason = (route as { readonly noSamplePath?: string }).noSamplePath ?? ''
+        expect(reason.length, route.id).toBeGreaterThan(40)
+        expect(reason, route.id).toMatch(/\s/)
+        continue
+      }
       if (!parameterised) continue
       // And they have to fill it: `samplePathFor` throws on a segment nobody filled, which is what stops the
       // screenshot harness and the normalisation walk from opening a pattern.
@@ -324,6 +353,23 @@ describe('the registry is internally consistent', () => {
         expect(samplePathFor(route, locale), route.id).not.toContain('[')
       }
     }
+  })
+
+  it('the sampleable documents are the documents minus the ones that declare no sample path', () => {
+    // `string[]`, not the literal union: `declared.includes(route.id)` below is asked about every route
+    // id, and an array whose element type narrowed to the one declared id makes that a type error rather
+    // than a question.
+    const declared: readonly string[] = ROUTES.filter(
+      (route) => route.kind === 'document' && 'noSamplePath' in route,
+    ).map((route) => route.id)
+    expect([...sampleableDocumentRoutes()].map((route) => route.id)).toEqual(
+      documentRoutes()
+        .filter((route) => !declared.includes(route.id))
+        .map((route) => route.id),
+    )
+    // Non-vacuous in both directions: there IS one such route today, so the two sets really differ.
+    expect([...declared]).toEqual(['therapist'])
+    expect(sampleableDocumentRoutes().length).toBe(documentRoutes().length - 1)
   })
 
   it('explains itself', () => {
@@ -496,7 +542,7 @@ describe('acceptance — the proxy is excluded from the CMS, the API and the bui
 
 describe('acceptance — the hreflang set is reciprocal, self-referential and has an x-default', () => {
   it('lists every locale and itself, from both documents', () => {
-    for (const route of documentRoutes()) {
+    for (const route of sampleableDocumentRoutes()) {
       // A parameterised route's set is built for one real page — its sample params — because a set built for
       // the pattern would name `/treatments/[slug]` in every entry.
       const params = sampleParamsOf(route)
@@ -616,7 +662,7 @@ describe('the site origin', () => {
 })
 
 describe('acceptance — the capture matrix reads the registry', () => {
-  const documents = documentRoutes().map((route) => route.id)
+  const documents = sampleableDocumentRoutes().map((route) => route.id)
 
   it('plans three viewports x two themes x two directions for every registry document', () => {
     const plan = capturePlan(documents)

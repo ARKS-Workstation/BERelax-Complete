@@ -54,19 +54,33 @@ export interface TreatmentSitemapEntry {
  */
 function catalogueRoute(): Route {
   const routes = parameterisedSitemapRoutes()
-  const route = routes.find((candidate) => candidate.path.endsWith('/[slug]'))
-  if (routes.length !== 1 || route === undefined) {
+  const route = routes.find((candidate) => candidate.id === 'treatment')
+  // Selected by ID and checked against a DECLARED set of expanders, rather than by the first route whose
+  // path ends in `/[slug]`. That spelling was right while `/treatments/[slug]` was the only parameterised
+  // sitemap route and became wrong the moment W-SITE-06 added `/therapists/[slug]`: `find` would have
+  // taken whichever sorted first and this expander would have filled the treatment section of the sitemap
+  // with therapist paths — a sitemap that is wrong rather than one that is short, which is worse.
+  if (route === undefined || !routes.every((candidate) => EXPANDED_BY_ID.includes(candidate.id))) {
     throw new Error(
       `The registry declares ${routes.length} parameterised sitemap route(s) (${routes
         .map((candidate) => candidate.path)
         .join(
           ', ',
-        )}). This expander knows one: a treatment page keyed by slug. A route it does not know ` +
+        )}), and the expanders cover ${EXPANDED_BY_ID.join(', ')}. A route nothing expands ` +
         'would be absent from every sitemap with nothing to say so.',
     )
   }
   return route
 }
+
+/**
+ * The parameterised sitemap routes that HAVE an expander, by registry id.
+ *
+ * Declared here rather than inferred, because "it is not in this list" is exactly the condition a route
+ * with no expander also satisfies: a check that guessed would let the defect through as an exception.
+ * `therapist` is `apps/web/src/therapists/sitemap.ts`'s.
+ */
+const EXPANDED_BY_ID: readonly string[] = ['therapist', 'treatment']
 
 /**
  * Every treatment page, in every locale it is served in, with its `lastmod`.

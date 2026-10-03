@@ -30,12 +30,12 @@ import {
 import { alternatesFor, siteOrigin } from './routes/alternates.ts'
 import { canonicalPath } from './routes/canonical.ts'
 import {
-  documentRoutes,
   isParameterised,
   NOINDEX_ROBOTS_TAG,
   ROBOTS_HEADER,
   registryPaths,
   routePaths,
+  sampleableDocumentRoutes,
   sampleParamsOf,
   samplePathFor,
 } from './routes/registry.ts'
@@ -244,7 +244,15 @@ function destination(result: Walk): string {
  * is the first such document, and its sample slug is a seeded catalogue row.
  */
 const DOCUMENT_PATHS: readonly string[] = routePaths()
-  .filter((entry) => entry.route.kind === 'document')
+  .filter(
+    (entry) =>
+      entry.route.kind === 'document' &&
+      // W-SITE-06's `/therapists/[slug]` is the first document with no fetchable path at all: no therapist
+      // is publishable, so there is no slug that answers 200 (ADR 0020, Y12-names). The registry says so in
+      // `noSamplePath` and `sampleableDocumentRoutes()` is the one reader of it — walking the pattern would
+      // assert every normalisation rule against a 404, which is what this filter already existed to stop.
+      sampleableDocumentRoutes().some((candidate) => candidate.id === entry.route.id),
+  )
   .map((entry) => (entry.locale === null ? entry.path : samplePathFor(entry.route, entry.locale)))
 
 /**
@@ -462,7 +470,7 @@ describe('acceptance — EN at / and AR at /ar, with a reciprocal self-referenti
   }, 60_000)
 
   it('emits the whole set on every registry document, in both locales', async () => {
-    for (const route of documentRoutes()) {
+    for (const route of sampleableDocumentRoutes()) {
       const heads = new Map<Locale, HeadLinks>()
       const params = sampleParamsOf(route)
       for (const locale of route.locales) {
@@ -496,7 +504,7 @@ describe('acceptance — EN at / and AR at /ar, with a reciprocal self-referenti
   it('advertises only URLs that answer 200 without redirecting', async () => {
     // The agreement between the two halves of this unit: an alternate or a canonical that 301s is a page
     // telling a crawler to ignore what it just said. Every advertised URL is fetched.
-    for (const route of documentRoutes()) {
+    for (const route of sampleableDocumentRoutes()) {
       for (const locale of route.locales) {
         const head = await headLinks(samplePathFor(route, locale))
         for (const href of [head.canonical, ...Object.values(head.alternates)]) {
@@ -779,7 +787,7 @@ describe('acceptance — the screenshot harness reads the registry', () => {
   }
 
   it('captures every registry route at 3 viewports x 2 themes x 2 directions', async () => {
-    const documents = documentRoutes()
+    const documents = sampleableDocumentRoutes()
     const plan = capturePlan(documents.map((route) => route.id))
     // Stated rather than counted after the fact: a matrix that lost an axis would otherwise report a
     // pass over eight cells per route.

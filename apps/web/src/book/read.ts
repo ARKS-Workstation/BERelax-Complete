@@ -90,6 +90,21 @@ const solve = solveAvailabilityQuery satisfies AvailabilitySolve
 const cache = createAvailabilityCache()
 
 /**
+ * The solver and the process-wide memo, handed to the one other surface that previews availability.
+ *
+ * W-SITE-06's therapist page renders an availability preview and, when it comes back empty, the
+ * alternatives region docs/09 §3 specifies. It needs `noAvailabilityAlternatives`, which takes
+ * `AvailabilityDeps` — and the alternative was for that module to build its own `solveAvailabilityQuery`
+ * and its own `createAvailabilityCache()`. Both would be defects this module's header already argues
+ * against: a second `satisfies` line is a second place the `core`/`db` seam is spelled, and a second memo
+ * means a reader moving between the therapist page and the booking flow asks the same question of two
+ * caches with two expiries and can be shown two different answers seconds apart.
+ */
+export function availabilityDeps(now: number): AvailabilityDeps {
+  return { solve, cache, now }
+}
+
+/**
  * The strip is read **anchored at the day asked about**, not at the first open day.
  *
  * `readOpenTradingDays` takes the requested date as its `from`, so the strip's first day is the day the

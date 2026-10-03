@@ -91,7 +91,7 @@ export interface PageGraphOptions {
    * `display_name is not null and photo_consent`, so it cannot be set or forgotten. All nineteen seeded
    * therapists are unnamed and unconsented (Y12-names, Y12-consent-photo), so not one of them passes it.
    *
-   * `personNodesFor` filters on the same two facts through `mayPublishTherapist`, so the day a therapist
+   * `personNodesFor` filters on the same two facts through `isTherapistPublishable`, so the day a therapist
    * becomes publishable the nodes appear without this contract changing — but somebody has to WIRE the
    * read, because nothing in the SEO layer queries `employee`. `structured-data.itest.ts` asserts that no
    * row passes the guard, with the row count as its control, so this cannot quietly stay empty after an

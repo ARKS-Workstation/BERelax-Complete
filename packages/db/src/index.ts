@@ -285,6 +285,15 @@ export {
   reverseChargeExceptions,
 } from './queries/reverse-charge-exceptions.ts'
 export { doNotPairExclusion, therapistsExcludedBy } from './queries/therapist-exclusions.ts'
+export {
+  readServiceSkills,
+  readTherapistPageBySlug,
+  readTherapistPages,
+  type ServiceSkillRow,
+  THERAPIST_INDEX_PATH,
+  type TherapistPageRow,
+  therapistPathFor,
+} from './queries/therapist-pages.ts'
 // M-TILL-13's four till readers. `readTillIssuer` returns the placeholder TRN unvalidated on purpose —
 // `requireIssuerTrn` in `@berelax/core` is the only thing that may put a TRN on a document, and a reader
 // that threw would leave the till unable to draw the screen explaining why it cannot issue one.
@@ -1593,6 +1602,11 @@ export {
   recordGatewayObservation,
   recordReconciliationException,
 } from './repositories/reconciliation.ts'
+export {
+  allRedirects,
+  lookupRedirect,
+  type RedirectRow,
+} from './repositories/redirects.ts'
 export {
   RESCHEDULE_REFUSALS,
   type RescheduleDeps,
@@ -5928,4 +5942,29 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // ZY772 through ZY780 are released UNUSED and deliberately unregistered, because `pnpm sqlstate` refuses
 // an entry for a code no migration raises.
 //
-export const SCHEMA_VERSION = 156 as const
+// 157 is 0157_therapist_public_slug.sql (W-SITE-06) — one nullable column on `employee`, two CHECKs and
+// one UNIQUE index. Mirrored in `packages/db/src/schema/staff.ts`.
+//
+// THE SLUG IS WRITTEN, NOT GENERATED, AND THAT IS THE WHOLE DECISION. `employee.is_publishable` is a
+// generated column and this looked like its sibling. A generated `public_slug` needs an IMMUTABLE
+// `slugify()` in SQL, which is a second implementation of `therapistSlug()` in `@berelax/core` — and
+// `pnpm db:drift` compares column shapes, not the behaviour of two functions, so the two could disagree
+// about a combining mark for ever with every check green. The transformation is spelled once, in core,
+// and `publishTherapist()` is the one writer.
+//
+// WHAT THE DATABASE CONTRIBUTES IS THE REFUSAL TYPESCRIPT CANNOT MAKE. `employee_display_name_unique`
+// already existed and is not enough: `Anna-Maria` and `Anna Maria` are two distinct display names that
+// reduce to one slug, so without `employee_public_slug_unique` they are two therapists at one URL, two
+// sitemap entries for one page, and a route resolution decided by row order.
+// `therapist-publishable.test.ts` asserts that collision as a fact about the function, so the index
+// refuses a known case rather than a hypothetical one.
+//
+// `employee_public_slug_with_display_name` IS AN EQUIVALENCE. A slug with no name is a URL for somebody
+// who may not be published; a name with no slug is a therapist the route cannot find, which presents as a
+// 404 on a page the admin has just published and names neither column.
+//
+// ZY781 through ZY790 are released UNUSED and deliberately unregistered: every refusal here is a CHECK or
+// a unique index, so the codes are 23514 and 23505 and the constraint name says which rule, and
+// `pnpm sqlstate` refuses an entry for a code no migration raises.
+//
+export const SCHEMA_VERSION = 157 as const

@@ -17945,7 +17945,7 @@ units:
       both a display name and recorded photography consent, unlinked cards for everyone else, and 301-on-archival
       rather than a 404.'
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - B-UI-01
@@ -17998,11 +17998,32 @@ units:
       days, same treatment with another therapist, waitlist join), asserted present rather than an empty
       block
     files:
-    - apps/web/app/(public)/therapists/page.tsx
-    - apps/web/app/(public)/therapists/[slug]/page.tsx
+    - apps/web/app/(en)/(public)/therapists/page.tsx
+    - apps/web/app/(en)/(public)/therapists/[slug]/page.tsx
+    - apps/web/app/(ar)/ar/therapists/page.tsx
+    - apps/web/app/(ar)/ar/therapists/[slug]/page.tsx
+    - apps/web/app/_therapists/pages.tsx
     - packages/core/src/seo/therapist-publishable.ts
+    - packages/db/migrations/0157_therapist_public_slug.sql
+    - packages/db/src/queries/therapist-pages.ts
+    - packages/hr/src/therapist-publication.ts
+    - apps/web/src/therapists/read.ts
+    - apps/web/src/therapists/content.ts
+    - apps/web/src/therapists/sitemap.ts
     - apps/web/src/jobs/rewrite-internal-links.ts
-    - tests/routes/therapists.spec.ts
+    - apps/web/src/therapist-guard.test.ts
+    - apps/web/src/public-site.itest.ts
+    notes:
+    - 'NOTE: the route files are under the `(en)`/`(ar)` route groups rather than `(public)`, because
+      W-SITE-01 put two root layouts there — one `<html>` per locale — and a registry document must be
+      served in both. The planned `tests/routes/therapists.spec.ts` is `apps/web/src/public-site.itest.ts`:
+      the repository has no `tests/` tree, and the suite shares one port band (and therefore one file and
+      one server) with W-SITE-08 and W-SITE-09.'
+    - 'NOTE: the Playwright assertion that the booking flow opens with the therapist pre-selected is a
+      plain fetch of `/book?therapist=<id>` asserting the chosen-therapist block and the staff reference
+      in the served markup, not a browser test. The claim is about server-rendered HTML — the booking
+      flow is a GET form set (B-UI-01) — so a browser adds nothing the fetch cannot see; a Playwright
+      pass over the whole five-step flow is deferred to W-SITE-11, which already starts a browser.'
   - id: W-SITE-08
     order: 146
     title: Sitemaps, hreflang, IndexNow and the publish propagation pipeline

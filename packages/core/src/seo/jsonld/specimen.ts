@@ -40,7 +40,8 @@
  * serves. Parsing means a field added to `factsSchema` fails every caller until the specimen declares it.
  */
 import { type Facts, factsSchema } from '@berelax/shared'
-import type { BreadcrumbStep, FaqEntry, TherapistCandidate } from './content.ts'
+import type { TherapistCandidate } from '../therapist-publishable.ts'
+import type { BreadcrumbStep, FaqEntry } from './content.ts'
 import type { StructuredDataInput } from './graph.ts'
 import type { LicenceClass } from './vocabulary.ts'
 
@@ -164,16 +165,29 @@ export function specimenFacts(overrides: Partial<Facts> = {}): Facts {
   return factsSchema.parse({ ...base, ...overrides })
 }
 
-/** A therapist who passes ADR 0020's guard, and one who fails it on both counts. */
+/**
+ * A therapist who passes ADR 0020's guard, and one who fails it on both counts.
+ *
+ * `retiredAt` is stated on both rather than left off, because W-SITE-06 made it a REQUIRED field of
+ * `TherapistCandidate`: a therapist who has left still has a name, a consent and an indexed URL, so the
+ * only thing that distinguishes "publish this page" from "redirect this page" is this field, and a
+ * specimen that omitted it would be a specimen of a therapist nobody had decided about.
+ */
 export const SPECIMEN_THERAPISTS: readonly TherapistCandidate[] = Object.freeze([
   {
     staffReference: 'Specimen 01',
     displayName: 'Specimen Therapist',
     photographyConsentRecordedAt: '2026-01-01T00:00:00.000Z',
+    retiredAt: null,
     skills: ['Asian style', 'Arabic style'],
     languages: ['en', 'ar'],
   },
-  { staffReference: 'Specimen 02', displayName: null, photographyConsentRecordedAt: null },
+  {
+    staffReference: 'Specimen 02',
+    displayName: null,
+    photographyConsentRecordedAt: null,
+    retiredAt: null,
+  },
 ])
 
 export const SPECIMEN_FAQ: readonly FaqEntry[] = Object.freeze([
