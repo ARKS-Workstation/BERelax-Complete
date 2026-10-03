@@ -22061,7 +22061,7 @@ units:
       from a single source of truth: per-file counts and totals against source, outstanding package liability,
       leave liability, dedup counts, every quarantined row, and a variance section that must be empty.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - H-MIG-03
@@ -22081,9 +22081,25 @@ units:
       a test
     files:
     - packages/migration/src/report/generate.ts
+    - packages/migration/src/report/generate.test.ts
     - packages/migration/src/report/render.ts
+    - packages/migration/src/report/render.test.ts
+    - packages/fixtures/src/migration-reconciliation.itest.ts
     - artifacts/migration/reconciliation-run-template.json
     - scripts/migrate-report.mjs
+    - docs/adr/0105-a-reconciliation-report-is-a-reading-and-a-variance-is-named-or-it-fails.md
+    notes:
+    - 'NOTE: no migration, no private SQLSTATE and no test port band. A reconciliation report is a reading
+      — it takes an Sql and never a UnitOfWork, writes nothing and starts no server — so migration 0152,
+      the band ZY721-ZY730 and the port band { start: 22_700, width: 300 } are RELEASED UNUSED and the
+      codes are deliberately unregistered (pnpm sqlstate refuses an entry for a code no migration raises).
+      SCHEMA_VERSION is untouched and no migration-ledger paragraph was added, there being no migration to
+      document. ADR 0105 records why.'
+    - 'NOTE: the zero-unexplained-variance claim is NOT asserted over the shared integration database.
+      The report reads the whole staging ledger, so it describes every other suite''s committed runs too,
+      and an assertion over the total would be an assertion about their fixtures. migration-reconciliation.itest.ts
+      asserts the figures of the sources it created and the planted discrepancy as a DELTA; the claim over
+      a database with nothing else in it is H-MIG-09''s, from a fresh database, three times.'
   - id: H-MIG-09
     order: 191
     title: Three dry runs, gated on zero unexplained variance

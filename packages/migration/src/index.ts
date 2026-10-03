@@ -62,3 +62,38 @@ export {
   migrationError,
 } from './refusals.ts'
 export { IMPORTERS, importerByName, importerNames } from './registry.ts'
+export {
+  type DedupReading,
+  generateReconciliationReport,
+  IMPORT_RECORDS,
+  LEAVE_LIABILITY_OPEN_QUESTION_ID,
+  type LiabilityReading,
+  QUARANTINE_RELATIONS,
+  type QuarantinedRow,
+  type QuarantineReconciliation,
+  type QuarantineRelation,
+  RECONCILIATION_REPORT_SCHEMA,
+  type ReconciliationReport,
+  type ReconciliationRun,
+  readMoney,
+  reconciliationExitStatus,
+  recordReconciliationRun,
+  reportContentBytes,
+  reportContentDigest,
+  SOURCE_TOTALS,
+  type SourceFileReconciliation,
+  unexplainedVarianceCount,
+  VARIANCE_CAUSES,
+  type Variance,
+  type VarianceCause,
+  type VarianceContribution,
+  type VarianceMeasure,
+  varianceOf,
+} from './report/generate.ts'
+export {
+  ABSENT,
+  type ReportFigure,
+  renderReconciliationReport,
+  renderReconciliationRun,
+  reportFigures,
+} from './report/render.ts'
