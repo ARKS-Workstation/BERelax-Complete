@@ -4,7 +4,7 @@
 
 # ADR index
 
-101 records, generated from the front matter of each one. Every column below is read
+102 records, generated from the front matter of each one. Every column below is read
 out of the record it describes, so a row cannot be wrong without the record being wrong — which is
 the whole reason this file is not maintained by hand. For the argument behind any of them, read
 [README.md](README.md) and then the record.
@@ -112,3 +112,4 @@ the whole reason this file is not maintained by hand. For the argument behind an
 | [0109](0109-a-journey-that-cannot-be-expressed-is-a-finding-and-a-birthday-has-no-year.md) | a journey the DSL cannot express is a FINDING, not a second DSL; and a birthday has no year | accepted | 2026-10-03 | C-AUTO-11 | docs/01 decisions — none; this is the mechanism behind docs/03 §5's stock journeys and |
 | [0110](0110-discreet-is-a-narrow-privacy-claim-and-the-mcc-gate-is-three-layers.md) | "discreet" is a NARROW privacy claim, and the MCC gate is three layers with no invented value | accepted | 2026-10-03 | Y-PAY-10 | docs/01 decisions — none; this is the go-live-shaped consequence of |
 | [0117](0117-the-portal-is-self-only-with-no-permission-that-widens-it-and-the-mask-is-the-absence-of-the-value.md) | the staff portal is SELF-ONLY with no permission that widens it, and the mask is the absence of the value | accepted | 2026-10-03 | P-HR-14 | docs/01 decisions — none; this is the staff-facing consequence of |
+| [0118](0118-an-offline-queue-for-a-money-movement-is-the-defect-and-the-paper-side-is-a-claim.md) | an offline queue for a money movement is the DEFECT, and the paper side is a claim somebody makes later | accepted | 2026-10-03 | H-HARD-08 | docs/01 decisions — none; this is the failure-shaped consequence of |

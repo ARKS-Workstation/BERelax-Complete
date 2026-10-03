@@ -21567,7 +21567,7 @@ units:
       records, that a partial write is impossible, and that the printed day sheet is a working fallback
       for the first fortnight.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-UI-01
@@ -21598,11 +21598,106 @@ units:
       byte-identical across two runs on the frozen seed
     - 'no transport or gateway failure path returns a bare success: a test enumerates every adapter and
       asserts each returns a typed failure or a diverted result, extending ADR 0005'
+    - 'NOTE: the PATHS and SHAPES this list got wrong. `checkout/offline.tsx` is `checkout/offline.ts` — a
+      FRAGMENT and not a component, because the checkout is a `route.ts` answering `text/html` and there is
+      no React on any admin screen (ADR 0013). `day-sheet/print/page.tsx` is `route.ts` plus `render.ts`
+      plus `view.ts`, for the correction every admin screen since P-HR-02 has recorded: `registry.ts` is in
+      bijection with the filesystem and requires every DOCUMENT to be served in both locales, which would
+      need an Arabic admin document nobody has built. `/day-sheet` was added to `ADMIN_GROUP_PREFIXES`,
+      which is what makes it noindex and session-guarded from the commit that creates it.
+      `packages/messaging/src/send-guard.test.ts` is NOT where the adapter enumeration went: that file is
+      about the staging guard alone, and the claim is about every adapter in three packages, so it is
+      `packages/fixtures/src/adapter-honesty.test.ts` — `packages/fixtures` being the only package that may
+      see messaging and payments at once.'
+    - 'NOTE: AN OFFLINE QUEUE IS THE DEFECT, which is the unit''s largest decision and the opposite of what
+      its title first reads as. A queued money movement is a promise this system cannot keep: the browser
+      closes, the device is swapped, the day is cashed up, and the queue drains into a locked period —
+      authorising a card for a customer who left two hours ago against an invoice somebody has voided. So
+      there is no queue, and `scripts/check-offline-money.mjs` (a new `pnpm offline-money` verify step,
+      registered in gate case 29 and in `.github/workflows/ci.yml` in the same commit) refuses a browser
+      store, an offline API, a deferred gateway call and a failure sentence that promises, over a declared
+      money path. The diff that would introduce one looks like resilience work and arrives with a
+      changelog entry about the wifi, which is why a review is not this check. ADR 0118.'
+    - 'NOTE: DEFERRED — the BROWSER half of acceptance line 1. `context.setOffline(true)` plus a submit
+      needs `next build`, and this container had 1.2 GB free with three other agents building; a build that
+      failed with ENOSPC would have broken their runs as well as this one, so it was not attempted (the
+      dispatch asks for this to be said rather than worked around). HANDED TO the integrator or to whoever
+      next runs `apps/web/src/checkout.itest.ts`, which already stands the application and a stand-in
+      gateway origin up under the `checkout` port band and is where the case belongs. What IS built and
+      proven instead is the stronger half: `apps/web/src/offline-checkout.itest.ts` replaces the gateway
+      with one whose `authorise` throws the way a closing socket throws, and asserts the error PROPAGATES
+      (so the route answers 503 and never renders a refusal the gateway did not make) with zero payment
+      intents and a zero delta on `invoice` and `journal_entry`. A browser going offline proves nothing
+      about the server, because the request never arrives; the dangerous case is the request that arrived
+      and whose answer did not, which is what is driven here.'
+    - 'NOTE: acceptance line 2 is partly B-AVAIL-06''s already, and the new half is named. Its
+      `booking-transaction.itest.ts` proves a REFUSAL leaves zero booking and zero appointment rows, and
+      writes neither the event nor the audit row. That is the application deciding not to proceed. This
+      unit''s premise is the other one — the connection dies at a moment nothing chose — so
+      `packages/fixtures/src/aborted-transaction.itest.ts` runs `createBooking` to completion and THROWS
+      from inside the unit of work, asserting booking, appointment and outbox absent in ONE statement, with
+      the committed control beside it and the idempotency claim asserted released so the retry is possible.'
+    - 'NOTE: the day sheet holds NO INSTANT, which is the only screen in this build that does not. Every
+      other admin screen prints the instant it was read at, deliberately; a "printed at" line here makes
+      two prints differ and the acceptance line is byte-identity, which is ADR 0105''s decision for the
+      reconciliation report. It reads `readCalendarDay` and adds NO reader: that query already joins
+      `appointment.trading_date` — the stored column that resolves the 01:30 case — and already orders by
+      `(starts_at, id)`, so a second reader would have re-derived where a trading day ends and a fallback
+      showing a different set from the screen it replaces is worse than no fallback. It NAMES NO CUSTOMER:
+      a list of who is coming, when, for what treatment is the most sensitive thing this business could
+      leave face-up, and the sheet is printed precisely so it is lying around. The "paid" column is blank,
+      because a figure this system filled in would be a claim it cannot make while the network is down and
+      the paper side is a named person''s claim (ADR 0107, which is also why this unit adds no table —
+      `parallel_run_paper_count` already models that claim).'
+    - 'NOTE: two findings from the adapter enumeration that READ as defects and are not, recorded so the
+      next reader does not "fix" them. The manual till''s `eventsSince` answers an EMPTY LIST rather than
+      throwing: `capabilities.emitsEvents` is false for cash, the behaviour matches the declared capability,
+      and a thrown refusal would make a reconciliation pass over every gateway fail on the one with nothing
+      to reconcile. And the SMS fake''s `UNDELIVERABLE_SUFFIX` makes the DELIVERY RECEIPT fail rather than
+      the send, which is also right — an absent subscriber is discovered by the network and not by the API —
+      so the probe for a typed transport failure is a promotional body from the transactional identity,
+      which the provider''s own sender-ID rule throws on (ADR 0016).'
+    - 'NOTE: a defect this unit shipped and the check that caught it. The deferred-send rule''s first
+      regular expression was `setTimeout\s*\([^)]*\b(?:authorise|capture|refund|charge)\b`, and the
+      character class excluding `)` stops at the arrow function''s own empty parameter list — so
+      `setTimeout(() => capture(), 60_000)`, which is the commonest spelling there is, read as clean. Gate
+      196c is the fixture that found it; the window is now bounded any-character and the trailing `\(`
+      requires a call rather than a mention. A second, smaller one: the day-sheet case counting
+      `data-after-midnight` matched the STYLESHEET''s own `tr[data-after-midnight="true"]` rule and
+      reported three rows for two, so it now matches the row''s opening tag.'
+    - 'NOTE: a SHARED FILE edited beyond this unit''s own code, declared.
+      `apps/web/app/(admin)/checkout/render.ts` (Y-PAY-03''s) gained one call to `renderTillOfflinePanel`
+      and one stylesheet constant, because the panel has to be on the document BEFORE a submission — after
+      a failed one there is no page, since `script-src ''none''` means nothing runs in that browser.
+      `apps/web/src/routes/registry.ts` gained the `/day-sheet` prefix and the route entry.
+      `scripts/test-gates.mjs` gained gate case 29''s `pnpm offline-money` line and block 196.'
+    - 'NOTE: allocations. NO MIGRATION: 0164 is RELEASED UNUSED, because the paper claim this unit needs is
+      `parallel_run_paper_count` (0153, ZY742/ZY743) and a second table for it would be a second statement
+      of ADR 0107''s decision. SQLSTATE ZY851 through ZY860 are RELEASED UNUSED and deliberately
+      unregistered — this unit adds no refusal to the database, and `pnpm sqlstate` refuses an entry for a
+      code no migration raises. ADR 0118 taken. Gate block `// 196a-196z` used. The port band
+      `{ start: 23_900, width: 300 }` is RELEASED UNUSED: the one suite that would have needed a server is
+      the deferred browser case, and `apps/web/src/checkout.itest.ts` already holds the `checkout` band it
+      belongs in — a declared but unused band fails `test-ports.test.ts`.'
     files:
-    - apps/web/app/(admin)/checkout/offline.tsx
-    - apps/web/app/(admin)/day-sheet/print/page.tsx
-    - packages/messaging/src/send-guard.test.ts
-    - apps/web/e2e/offline-checkout.spec.ts
+    - packages/core/src/checkout/honest-failure.ts
+    - packages/core/src/checkout/honest-failure.test.ts
+    - packages/core/src/checkout/index.ts
+    - scripts/check-offline-money.mjs
+    - scripts/test-gates.mjs
+    - package.json
+    - .github/workflows/ci.yml
+    - apps/web/app/(admin)/checkout/offline.ts
+    - apps/web/app/(admin)/checkout/render.ts
+    - apps/web/app/(admin)/day-sheet/print/route.ts
+    - apps/web/app/(admin)/day-sheet/print/render.ts
+    - apps/web/app/(admin)/day-sheet/print/view.ts
+    - apps/web/src/routes/registry.ts
+    - apps/web/src/day-sheet.itest.ts
+    - apps/web/src/offline-checkout.itest.ts
+    - packages/fixtures/src/aborted-transaction.itest.ts
+    - packages/fixtures/src/adapter-honesty.test.ts
+    - docs/adr/0118-an-offline-queue-for-a-money-movement-is-the-defect-and-the-paper-side-is-a-claim.md
   - id: H-HARD-10
     order: 181
     title: Pen-test intake, findings register and the remediation gate

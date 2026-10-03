@@ -61281,6 +61281,274 @@ export function chargebackNetEffectFils(`,
   )
 }
 
+// 196a-196z. (H-HARD-08) The till's honest failure: the no-queue scan shown to be able to go blind, the
+//            sentence vocabulary shown to be able to promise, the day sheet shown to be able to lose the
+//            treatments after midnight, and the rollback shown to be able to leave a row.
+//
+//            The unit's claim is that failure produces a NAMED error and zero phantom records, and that an
+//            offline tolerance which silently queues a money movement is the defect rather than the
+//            feature. Four things defend it — `scripts/check-offline-money.mjs`, the shipped sentence
+//            table, `readCalendarDay`'s join on the STORED trading date, and the transaction boundary —
+//            and each case here removes one and requires the check to say so BY NAME.
+//
+//            Every mutation leaves a system that WORKS, and three of them look like improvements: a
+//            scan narrowed to the files somebody thought mattered, a sentence that reassures the
+//            operator, a day sheet keyed on the calendar date the way every other report is.
+//
+//            196a to 196d are the scan and the vocabulary and are fast. 196e and 196f drive the
+//            integration suite.
+{
+  const OFFLINE_SCAN = 'scripts/check-offline-money.mjs'
+  const HONEST_FAILURE_TS = 'packages/core/src/checkout/honest-failure.ts'
+  const HONEST_FAILURE_TEST = 'packages/core/src/checkout/honest-failure.test.ts'
+  const DAY_SHEET_VIEW = 'apps/web/app/(admin)/day-sheet/print/view.ts'
+  const DAY_SHEET_ITEST = 'apps/web/src/day-sheet.itest.ts'
+  const OFFLINE_ITEST = 'apps/web/src/offline-checkout.itest.ts'
+  const ABORT_ITEST = 'packages/fixtures/src/aborted-transaction.itest.ts'
+  const CHECKOUT_PANEL = 'apps/web/app/(admin)/checkout/offline.ts'
+
+  const tillUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const tillIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // The control for the whole block. Every case asserts that a BROKEN tree is caught, and that says
+  // nothing unless the committed tree passes.
+  {
+    const clean = run('pnpm', ['offline-money'])
+    check(
+      'till: the money-path scan passes on the committed tree, which is the control for 196a to 196c',
+      !clean.failed,
+      `pnpm offline-money does not pass on the committed tree:\n${clean.output}`,
+    )
+    const sentences = run('pnpm', tillUnit(HONEST_FAILURE_TEST))
+    check(
+      'till: the committed honest-failure suite passes, which is the control for 196d',
+      !sentences.failed,
+      `the honest-failure suite does not pass on the committed tree:\n${sentences.output}`,
+    )
+  }
+
+  /*
+    196a. A browser store on the money path.
+
+    The defect the unit exists to refuse, in the shape it would really arrive in: the checkout remembers
+    the attempt so it can be sent when the connection comes back. Everything still works, the operator
+    sees a tick, and the charge lands an hour after the customer left — against an invoice somebody may
+    have voided, into a period that may be locked.
+  */
+  checkRejectedBy(
+    'till: 196a a payment held in localStorage is caught',
+    withFixture(
+      'apps/web/app/(admin)/checkout/__gate_fixture__offline-queue.ts',
+      [
+        'export function remember(attempt: string): void {',
+        "  window.localStorage.setItem('pendingPayments', attempt)",
+        '}',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', ['offline-money']),
+    ),
+    'money-path-holds-no-browser-store',
+  )
+
+  /*
+    196b. An offline API on the money path.
+
+    A service worker is the one that matters most, because it survives the tab: an operator who closes the
+    browser still has a payment queued somewhere they cannot see. `navigator.onLine` is the detection that
+    leads there, and it is what somebody adds first.
+  */
+  checkRejectedBy(
+    'till: 196b a service worker on the checkout is caught',
+    withFixture(
+      'apps/web/app/(admin)/checkout/__gate_fixture__offline-api.ts',
+      [
+        'export async function arm(): Promise<void> {',
+        '  if (!navigator.onLine) return',
+        "  await navigator.serviceWorker.register('/till-sync.js')",
+        '}',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', ['offline-money']),
+    ),
+    'money-path-reads-no-offline-api',
+  )
+
+  /*
+    196c. A deferred gateway call.
+
+    The server-side version of the same defect, and the one no browser rule would catch: a capture handed
+    to a timer. A gateway call is made while somebody is standing there or it is not made.
+  */
+  checkRejectedBy(
+    'till: 196c a capture handed to a timer is caught',
+    withFixture(
+      'packages/payments/src/__gate_fixture__deferred.ts',
+      [
+        'export function later(capture: () => void): void {',
+        '  setTimeout(() => capture(), 60_000)',
+        '}',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', ['offline-money']),
+    ),
+    'money-path-defers-no-send',
+  )
+
+  /*
+    196d. The path list narrowed to the files somebody thought mattered.
+
+    This is the mutation that makes the gate DECORATION rather than a check, and it is the one a reviewer
+    would wave through: the list is tidied and the scan still reports success. It passes for ever while
+    the invoice writer sits somewhere else. The vacuity guard is the rule that catches it, and it is why
+    the list is asserted to EXIST on disk rather than merely iterated.
+  */
+  checkRejectedBy(
+    'till: 196d a money-path list that names nothing is caught',
+    withEditedFile(
+      OFFLINE_SCAN,
+      (text) =>
+        replaceOnce(
+          text,
+          "  'packages/db/src/repositories/invoice.ts',",
+          "  'packages/db/src/repositories/__renamed_invoice__.ts',",
+        ),
+      () => runExpectingFailure('pnpm', ['offline-money']),
+    ),
+    'money-path-list-is-stale',
+  )
+
+  /*
+    196e. A till failure sentence that promises a retry.
+
+    The forbidden vocabulary, in the shape it would arrive in: somebody softens the hardest sentence on
+    the screen. *"We will send it when the connection is back"* is kinder to read and is a promise this
+    system cannot keep, and the operator who believes it does not take payment at all.
+  */
+  checkRejectedBy(
+    'till: 196e a failure sentence promising a retry is caught',
+    withEditedFile(
+      HONEST_FAILURE_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "    'The request left this terminal and no answer came back, so WHETHER THE PAYMENT WAS TAKEN IS NOT ' +",
+          "    'The request was saved offline and will be sent when the connection is back. ' +",
+        ),
+      () => runExpectingFailure('pnpm', ['offline-money']),
+    ),
+    'till-failure-sentence-claims-nothing-it-cannot-know',
+  )
+
+  /*
+    196f. The day sheet keyed on the CALENDAR date.
+
+    Trading runs 11:00-02:00, so a treatment at 01:30 has a calendar date of the next day and a trading
+    date of this one. The mutation is how every other report in this build would be written and it loses
+    exactly the two hours of each day with the fewest people on the floor and the most need for a printed
+    list. Nothing errors: the sheet is shorter, and a shorter sheet looks like a quiet night.
+  */
+  checkRejectedBy(
+    'till: 196f a day sheet that marks every row after midnight is caught',
+    withEditedFile(
+      DAY_SHEET_VIEW,
+      (text) =>
+        replaceOnce(
+          text,
+          '        afterMidnight: DUBAI_DATE.format(new Date(appointment.treatment.startsAt)) !== tradingDate,',
+          '        afterMidnight: true,',
+        ),
+      () => runExpectingFailure('pnpm', tillIntegration(DAY_SHEET_ITEST)),
+    ),
+    'marks the after-midnight treatment and ONLY that one',
+  )
+
+  /*
+    196g. A gateway error swallowed into a refusal.
+
+    `authoriseCheckout` already states the rule in a comment — *"swallowing everything here would turn a
+    lost connection into 'the ledger refused the write', which sends somebody to look at the wrong
+    thing"* — and this is the case that holds it. The mutation reports every error as `write_refused`,
+    which renders a refusal on the page: the operator reads that the payment was refused, when the truth
+    is that nobody knows. That is the one sentence the till must not say.
+  */
+  checkRejectedBy(
+    'till: 196g a lost connection reported as a refusal is caught',
+    withEditedFile(
+      'packages/payments/src/checkout.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          '    if (paymentIntentError(error) !== null) {',
+          '    if (true as boolean) {',
+        ),
+      () => runExpectingFailure('pnpm', tillIntegration(OFFLINE_ITEST)),
+    ),
+    'propagates rather than rendering a refusal the gateway never made',
+  )
+
+  /*
+    196h. The offline panel taken off the checkout document.
+
+    There is no code running in that browser, so the panel is the only thing the operator will have when
+    the network goes. Removing it leaves a checkout that works perfectly and tells somebody nothing at the
+    moment they need the reference written down.
+  */
+  checkRejectedBy(
+    'till: 196h a checkout with no honest-failure panel is caught',
+    withEditedFile(
+      'apps/web/app/(admin)/checkout/render.ts',
+      (text) => replaceOnce(text, '    renderTillOfflinePanel({', "    ((): string => '')({"),
+      () => runExpectingFailure('pnpm', tillIntegration(OFFLINE_ITEST)),
+    ),
+    'carries the standing offline panel and the attempt reference',
+  )
+
+  /*
+    196i. The panel given something to press.
+
+    The Google re-auth banner's argument in a second subject: a panel with a control is a panel that is not
+    there the one time it matters. Here it is worse than there, because no script runs on this document —
+    so the control could not work even if somebody pressed it, and the `data-dismissible` attribute is the
+    thing a stylesheet or a future script would target first.
+  */
+  checkRejectedBy(
+    'till: 196i a dismissible offline panel is caught',
+    withEditedFile(
+      CHECKOUT_PANEL,
+      (text) => replaceOnce(text, '\'data-dismissible="false" ', '\'data-dismissible="true" '),
+      () => runExpectingFailure('pnpm', tillIntegration(OFFLINE_ITEST)),
+    ),
+    'has nothing to press, because no script runs on this document',
+  )
+
+  /*
+    196j. The booking's unit of work replaced by a bare connection.
+
+    `withUnitOfWork` is the transaction, and without it `createBooking`'s writes land one at a time and
+    stay. The mutation is the shape a performance change takes — "the transaction is not needed here" —
+    and what it leaves behind after an interruption is a booking with no appointment, or an appointment
+    nothing announced. Caught by the abort case, which asserts all three tables at once.
+  */
+  checkRejectedBy(
+    'till: 196j an abort that leaves a booking row behind is caught',
+    withEditedFile(
+      ABORT_ITEST,
+      (text) =>
+        replaceOnce(
+          text,
+          "        throw new Error('the connection dropped here, after the writes and before the commit')",
+          '        return created',
+        ),
+      () => runExpectingFailure('pnpm', tillIntegration(ABORT_ITEST)),
+    ),
+    'rolls back the booking, the appointment AND the outbox event together',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -62130,6 +62398,10 @@ export function chargebackNetEffectFils(`,
     'pnpm cms',
     'pnpm chokepoint',
     'pnpm send-chokepoint',
+    // H-HARD-08's money-path scan, in the position `pnpm verify` runs it. Registered here because that is
+    // what makes dropping it from CI a failing build rather than the silent loss of the one check that
+    // says no payment is held in a browser to be tried later.
+    'pnpm offline-money',
     'pnpm private-documents',
     // A-MEAS-01's egress guard, in the position `pnpm verify` runs it. Registered here because that is what
     // makes dropping it from CI a failing build rather than the silent loss of the one check that says

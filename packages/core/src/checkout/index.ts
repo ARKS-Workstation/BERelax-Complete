@@ -14,6 +14,7 @@
 export * from './basket.ts'
 export * from './credit-note.ts'
 export * from './discount.ts'
+export * from './honest-failure.ts'
 export * from './line.ts'
 export * from './posting.ts'
 export * from './tip.ts'

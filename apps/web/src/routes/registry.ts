@@ -903,6 +903,35 @@ export const ROUTES = [
       'beside it arrive excluded rather than being indexed until somebody reads Search Console.',
   },
   {
+    id: 'day-sheet-print',
+    path: '/day-sheet/print',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'H-HARD-08s printable day sheet: the paper the floor works from when the network is gone. It reads ' +
+      'readCalendarDay and adds no reader of its own, which is the decision - that one statement already ' +
+      'joins on appointment.trading_date, the STORED column that resolves the 01:30 case, so an ' +
+      'after-midnight treatment is on the sheet; and it orders by (starts_at, id), so two prints of an ' +
+      'unchanged day are byte-identical. A second reader would have re-derived where a trading day ends, ' +
+      'and a fallback showing a different set from the screen it replaces is worse than no fallback. It ' +
+      'holds NO instant of its own, which is the one way it differs from every other admin screen: a ' +
+      '"printed at" line makes two prints differ, and ADR 0105 took the same decision for the ' +
+      'reconciliation report. It NAMES NO CUSTOMER - a list of who is coming, when, for what treatment is ' +
+      'the most sensitive thing this business could leave face-up, and this sheet is printed precisely so ' +
+      'it is lying around - so the columns are the time, the room, the therapists handle (ADR 0020), the ' +
+      'treatment and an eight-character appointment reference a till entry is reconciled against. The ' +
+      '"paid" column is deliberately BLANK: a figure this system filled in would be a claim it cannot ' +
+      'make while the network is down, and the paper side is a named persons claim (ADR 0107). A handler ' +
+      'answering text/html rather than a document, for the reason every admin screen since P-HR-02 gives: ' +
+      'a document must be served in both locales. Dynamic and never cached, because a cached day sheet is ' +
+      'yesterdays floor plan handed to todays shift. The /day-sheet prefix in ADMIN_GROUP_PREFIXES is ' +
+      'what makes it noindex, and authenticated since W-SYS-11.',
+  },
+  {
     id: 'private-document',
     path: '/documents/[id]',
     kind: 'handler',
@@ -1921,6 +1950,12 @@ export const ADMIN_GROUP_PREFIXES: readonly string[] = [
   '/clients',
   '/compliance',
   '/crm',
+  // H-HARD-08. `/day-sheet` holds one route today — the printable paper fallback — and it is a PREFIX
+  // rather than a bare path because what goes beside it is the screen that offers the print and whatever
+  // records the paper claim afterwards (ADR 0107's shape), and a sheet listing every treatment of a
+  // trading day is the floor plan of a licensed premises. A prefix added with the first route covers the
+  // second on the commit that creates it rather than on the commit that remembers to.
+  '/day-sheet',
   // W-SYS-14. `/documents` holds one route today — the signed private-document download — and it is a
   // prefix rather than an entry because what goes beside it is the screen that OFFERS the download, and a
   // screen listing which documents exist for a customer or an employee is the index of the filing cabinet.
