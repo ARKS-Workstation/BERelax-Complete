@@ -455,6 +455,21 @@ export {
   whatsappLinkFor,
 } from './premises-links.ts'
 export {
+  PROCESSOR_AGREEMENT_OPEN_QUESTION_ID,
+  PROCESSOR_CONFIG_KEYS,
+  PROCESSOR_DATA_CLASSES,
+  PROCESSOR_IDS,
+  PROCESSOR_PURPOSES,
+  PROCESSOR_REGISTER,
+  PROCESSOR_RESIDENCY_OPEN_QUESTION_ID,
+  type Processor,
+  type ProcessorDataClass,
+  type ProcessorPurpose,
+  processorById,
+  TRANSFER_BASES,
+  type TransferBasis,
+} from './processor-register.ts'
+export {
   addressSchema,
   catalogueSchema,
   FACTS_SCHEMA_VERSION,

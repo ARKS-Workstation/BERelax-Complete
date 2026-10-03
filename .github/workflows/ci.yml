@@ -134,6 +134,19 @@ jobs:
       - name: Alert registry, thresholds and runbook headings
         run: pnpm alerts
 
+      # The processor register against the external provider keys the config schema can switch on, and
+      # the secret inventory against every credential-carrying key it declares. A register nothing
+      # compares to the services actually wired up names eight providers while the build talks to nine,
+      # and the privacy policy generated from it then tells people about the wrong set.
+      - name: Processor register and environment inventory
+        run: pnpm processors
+
+      # The generated ADR index and the generated secret-inventory page, each refused while it is stale,
+      # and every relative link and anchor in docs/ followed. A documentation set is this build's
+      # bus-factor artefact, and a dead link in it is read by whoever is already having a bad night.
+      - name: Documentation set, generated pages and links
+        run: pnpm docs-set
+
       # Price, duration, bookability and VAT live in the catalogue and nowhere else. A `price` field on a
       # CMS collection is a second place the number can be wrong, and the one that is wrong is the one
       # nobody reconciles.

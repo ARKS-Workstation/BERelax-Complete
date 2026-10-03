@@ -124,6 +124,7 @@ export {
   type ProbeAxis,
   type ProbedColumnRow,
 } from './privacy-coverage.ts'
+export * from './processor-register.ts'
 export {
   type AlternativesOptions,
   type AlternativeTherapist,

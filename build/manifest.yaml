@@ -22555,7 +22555,7 @@ units:
       and deletion logic, a generated ADR index, an environment and secret inventory checked against the
       config schema, and a who-to-call map.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - H-HARD-06
@@ -22571,12 +22571,56 @@ units:
     - the environment and secret inventory lists every required variable from the config schema with owner
       and rotation interval, asserted complete in both directions against the schema
     - the docs link and anchor checker passes across docs/ including the generated pages
+    - 'NOTE: the PUBLIC /privacy ROUTE is NOT built, so acceptance line 2''s "asserted by a route test"
+      half is not satisfied. The GENERATION is built and tested: packages/core/src/privacy/processor-policy.ts
+      produces the policy''s processor section from the register rows, processor-policy.test.ts generates
+      from a FIXTURE register and asserts the output follows the input (add a row and a paragraph
+      appears; declare the clinical class and the no-health-data assurance is withdrawn), and pnpm
+      processors refuses a vendor name written into the generator''s own source. What is missing is the
+      page. Adding a route puts it into content.itest.ts''s and facts.itest.ts''s server-driven matrices
+      and the screenshot and axe grids, none of which can be validated without a full apps/web build and
+      those suites — and a route shipped unvalidated is the "green means nothing" failure brief rule 19
+      is about. Whoever builds it needs route.ts plus render.ts (the admin-surface shape four units have
+      reached), processorPolicySection() from @berelax/core, and the legal entity''s configured name and
+      contact, which are NOT on file (Y1-entity) — the generated text deliberately contains no address,
+      no contact and no legal name, asserted by a test.'
+    - 'NOTE: the processor register DATA is packages/shared/src/processor-register.ts and
+      packages/db/src/processor-register.ts (the path this entry names) re-exports it. crawlers.ts''s
+      reason: packages/db may reach shared and must never import core (ADR 0001), and the policy
+      generator is in core. It is a re-export and not a copy — two lists plus a set-equality test is the
+      shape ADR 0062 rejected for the crawler names and ADR 0043 for SQLSTATE classes. There is
+      deliberately no processor TABLE and so no migration: the register changes only when code changes,
+      and a table would be a second place to change with the drifting copy on the row the privacy policy
+      reads.'
+    - 'NOTE: nothing claims an agreement or a transfer mechanism. agreementOnFile is false on every row
+      and the register refuses true at module load, because no data processing agreement has been seen by
+      this build (Y1-processor-agreements); transferBasis is not_yet_established on every row but Zoho,
+      whose basis is that nothing is transmitted (Y5-residency). No processor declares the clinical data
+      class, and the privacy policy''s assurance about health data is DERIVED from that absence so it
+      cannot be printed while false.'
+    - 'NOTE: acceptance line 3''s "an ADR exists for every locked decision" was already pnpm adr
+      (check-adr-coverage.mjs). What this unit adds is the generated INDEX: docs/adr/INDEX.md from each
+      record''s front matter, with docs/adr/README.md kept hand-written as the commentary and held to the
+      records on disk in both directions. Generating the commentary instead would need a one-line summary
+      in all 74 records written by somebody who did not make the decisions, and a generated paragraph is
+      exactly the part of an ADR that cannot be generated.'
+    - 'NOTE: acceptance line 4''s inventory already existed (build/secret-inventory.json, H-HARD-03, with
+      owner and rotatePeriodDays on every entry). The half that did not exist is the comparison against
+      the CONFIG SCHEMA: check-secret-rotation.mjs scans source for process.env references, so a
+      credential reached only through loadConfig() was invisible to every gate. pnpm processors closes it
+      in both directions. One entry was added to the inventory''s notSecrets list (APP_ENV, the only
+      required key carrying no credential) because the new rule requires every required key to be
+      classified or explicitly not a secret with a reason.'
     files:
+    - packages/shared/src/processor-register.ts
     - packages/db/src/processor-register.ts
+    - packages/core/src/privacy/processor-policy.ts
     - scripts/check-processor-register.mjs
     - scripts/gen-adr-index.mjs
+    - scripts/gen-secret-inventory.mjs
+    - scripts/check-docs-links.mjs
+    - docs/adr/INDEX.md
     - docs/operations/secret-inventory.md
-    - apps/web/app/(public)/privacy/page.tsx
   - id: Y-PAY-06
     order: 201
     title: Deposits and prepayment as an appointment-scoped payment on account

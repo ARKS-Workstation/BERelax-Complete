@@ -52955,6 +52955,340 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   )
 }
 
+// 177a-177z. (H-HARD-09) The documentation set, machine-checked: the processor register held against
+//            the services actually wired up, the privacy policy shown to be GENERATED, the index shown
+//            to be generated, and every link in docs/ shown to be able to break.
+//
+//            The unit's whole subject is artefacts that survive the single builder, and the failure mode
+//            of every one of them is identical and silent: it is right on the day it is written. A
+//            processor register nothing compares to the provider keys names eight services while the
+//            build talks to nine. A privacy policy written beside the register says who had the data
+//            last year. An index maintained by hand loses the record somebody added in a hurry. A link
+//            goes dead and the sentence around it still reads perfectly.
+//
+//            So the deliverables here are four checks, and these cases are what make them checks rather
+//            than scripts that have never been seen to fail (ADR 0003). Each one breaks exactly what a
+//            future commit would break by accident.
+{
+  const REGISTER = 'packages/shared/src/processor-register.ts'
+  const POLICY = 'packages/core/src/privacy/processor-policy.ts'
+  const ENV_SCHEMA = 'packages/config/src/env.ts'
+  const INVENTORY = 'build/secret-inventory.json'
+  const ADR_README = 'docs/adr/README.md'
+  const processors = () => runExpectingFailure('pnpm', ['processors'])
+  const docsSet = () => runExpectingFailure('pnpm', ['docs-set'])
+
+  // The control for the whole block.
+  {
+    const clean = run('pnpm', ['processors'])
+    check(
+      'docs set: the committed tree passes pnpm processors, which is the control for 177a to 177g',
+      !clean.failed && `${clean.output}`.includes('provider keys in'),
+      `pnpm processors does not pass on the committed tree:\n${clean.output}`,
+    )
+  }
+
+  /*
+    177a. The acceptance line, verbatim: "adding a provider key without a register row fails the gate".
+
+    The fixture adds a provider-mode key to the config schema and nothing else, which is exactly the
+    commit that wires up a ninth external service. Note what makes this detectable: the gate derives the
+    provider set from the declaration's TYPE (`providerMode`) rather than from the key's NAME, so a
+    provider called anything at all is caught. A name-suffix scan would have missed `MEDIA_STORAGE`,
+    which is in the real set.
+  */
+  checkRejectedBy(
+    'docs set: 177a a provider key with no processor row is refused',
+    withEditedFile(
+      ENV_SCHEMA,
+      (text) =>
+        replaceOnce(
+          text,
+          "    LLM_PROVIDER: providerMode.default('fake'),",
+          "    LLM_PROVIDER: providerMode.default('fake'),\n    ANALYTICS_PROVIDER: providerMode.default('fake'),",
+        ),
+      processors,
+    ),
+    'provider-key-without-a-processor-row',
+  )
+
+  /*
+    177b. The other direction: a row naming a config key the schema does not declare.
+
+    This is the one that lets the register SHRINK, and it is the direction an allowlist always lacks: a
+    row describing a service nothing in the build can reach reads exactly like a live one, so it is
+    permission to believe the service is still in use — and the privacy policy keeps telling people
+    about it.
+  */
+  checkRejectedBy(
+    'docs set: 177b a processor row naming a config key the schema does not declare is refused',
+    withEditedFile(
+      REGISTER,
+      (text) =>
+        replaceOnce(text, "configKeys: ['MEDIA_STORAGE'],", "configKeys: ['MEDIA_BUCKET'],"),
+      processors,
+    ),
+    'processor-row-without-a-config-key',
+  )
+
+  /*
+    177c. A row that stops stating one of the four things acceptance line 2 names.
+
+    Retention is the one broken here because it is the only one of the four that is prose, so it is the
+    one a hurried commit can empty without a type error. "Unknown" is the plausible wrong value: it
+    reads like an answer and says nothing about whether the period is one this build controls.
+  */
+  checkRejectedBy(
+    'docs set: 177c a processor row with no real retention sentence is refused',
+    withEditedFile(
+      REGISTER,
+      (text) =>
+        replaceOnce(
+          text,
+          "    retention:\n      'Held until this build deletes the object.",
+          "    retention: 'Unknown.', // 177c\n    unusedRetention:\n      'Held until this build deletes the object.",
+        ),
+      processors,
+    ),
+    'processor-row-incomplete',
+  )
+
+  /*
+    177d. A claimed data processing agreement.
+
+    Brief rule 15 applied to a legal instrument: a register saying an agreement is on file, when none has
+    ever been seen, is indistinguishable from one that has been signed — and it is the field somebody
+    would flip to make a compliance page look finished. The register refuses it at module load and the
+    gate refuses it again, so this case asserts on the gate's rule name and 177e on the loader.
+  */
+  checkRejectedBy(
+    'docs set: 177d a register claiming an unsigned data processing agreement is refused',
+    withEditedFile(
+      REGISTER,
+      (text) =>
+        replaceOnce(
+          text,
+          "    agreementOnFile: false,\n    why:\n      'The only channel that reaches a client",
+          "    agreementOnFile: true,\n    why:\n      'The only channel that reaches a client",
+        ),
+      processors,
+    ),
+    'brief rule',
+  )
+
+  /*
+    177e. The privacy policy ceasing to be generated.
+
+    The failure this is about is the one that looks most like an improvement: somebody writes a vendor's
+    name into the policy generator, because the generated sentence read awkwardly. The policy is then a
+    second statement of who has the data, and the copy that drifts is the one a data subject reads. The
+    rule is that every processor name in the policy comes from the register at run time.
+  */
+  checkRejectedBy(
+    'docs set: 177e a vendor name written into the policy generator rather than read from the register is refused',
+    withEditedFile(
+      POLICY,
+      (text) =>
+        replaceOnce(
+          text,
+          "  transactional_messaging: 'to send you booking confirmations, reminders and receipts',",
+          "  transactional_messaging: 'to send you booking confirmations through SMSala',",
+        ),
+      processors,
+    ),
+    'privacy-policy-not-generated',
+  )
+
+  /*
+    177f. The secret inventory losing a key the config schema requires.
+
+    `pnpm rotation` already holds the inventory against secret-shaped names the CODE READS, and it cannot
+    see a key reached only through `loadConfig()` — there is no `process.env.FOO` for it to find. So a
+    credential added to the schema and never classified was invisible to every gate in the build. This
+    is that half, and the fixture is the commit that adds one.
+  */
+  checkRejectedBy(
+    'docs set: 177f a credential in the config schema that the inventory does not classify is refused',
+    withEditedFile(
+      ENV_SCHEMA,
+      (text) =>
+        replaceOnce(
+          text,
+          '    SENTRY_DSN: z.string().optional(),',
+          '    SENTRY_DSN: z.string().optional(),\n    ANALYTICS_INGEST_TOKEN: z.string().optional(),',
+        ),
+      processors,
+    ),
+    'secret-inventory-missing-a-schema-key',
+  )
+
+  /*
+    177g. An inventory entry with no owner.
+
+    Acceptance line 4 names the owner and the rotation interval, and the owner is the half that goes
+    first: a rotation procedure with no subject is a procedure that happens when somebody notices. It is
+    also the field a hurried entry omits, because the procedure feels like the substance.
+  */
+  checkRejectedBy(
+    'docs set: 177g an inventory entry with no owner is refused',
+    withEditedFile(
+      INVENTORY,
+      (text) => {
+        /*
+          Parsed and re-serialised rather than edited as text, and the first version was the text edit.
+          It deleted the `"owner"` line with a regex, left the trailing comma on the line before, and
+          the gate died in `JSON.parse` with a SyntaxError — which `checkRejectedBy` reported as "did
+          not report secret-inventory-entry-incomplete", because a crash is not a rule firing. A fixture
+          has to produce the state the rule is about, which here is VALID json with no owner.
+        */
+        const parsed = JSON.parse(text)
+        delete parsed.entries[0].owner
+        return `${JSON.stringify(parsed, null, 2)}\n`
+      },
+      processors,
+    ),
+    'secret-inventory-entry-incomplete',
+  )
+
+  // The control for the docs half.
+  {
+    const clean = run('pnpm', ['docs-set'])
+    check(
+      'docs set: the committed tree passes pnpm docs-set, which is the control for 177h to 177l',
+      !clean.failed && `${clean.output}`.includes('relative link'),
+      `pnpm docs-set does not pass on the committed tree:\n${clean.output}`,
+    )
+  }
+
+  /*
+    177h. A stale generated index.
+
+    The whole value of generating the index is that it cannot be wrong without the record being wrong,
+    and that holds only while something fails when the committed copy is behind. Editing a title in the
+    generated file is the shape of a well-meant hand edit.
+  */
+  checkRejectedBy(
+    'docs set: 177h a hand-edited generated ADR index is refused as stale',
+    withEditedFile(
+      'docs/adr/INDEX.md',
+      (text) => replaceOnce(text, '| [0002](', '| [0002x]('),
+      docsSet,
+    ),
+    'adr-index-stale',
+  )
+
+  /*
+    177i. A record the commentary does not link.
+
+    The direction that matters for a reader: a decision whose record exists and which nothing points at
+    is a decision the next person re-makes, having looked for it and not found it. The fixture removes
+    one row's link, which is what a merge conflict resolved the wrong way does.
+  */
+  checkRejectedBy(
+    'docs set: 177i an ADR the commentary does not link is refused',
+    withEditedFile(
+      ADR_README,
+      (text) =>
+        replaceOnce(
+          text,
+          '| [0003](0003-every-gate-needs-a-known-bad-fixture.md)',
+          '| 0003 (link removed by the fixture)',
+        ),
+      docsSet,
+    ),
+    'adr-not-in-the-commentary',
+  )
+
+  /*
+    177j. The commentary naming a record that is not there.
+
+    The shrinking direction, and the one an allowlist always lacks. A row describing a decision whose
+    record was renamed reads exactly like a live one — which is the defect this block's own subject
+    found in the committed tree: ADR 0072 linked `0014-customers-have-no-accounts-...md`, and the real
+    file is `0014-phone-first-customer-identity.md`. Nothing in the build noticed, because nothing
+    followed a link.
+  */
+  checkRejectedBy(
+    'docs set: 177j a commentary row naming a record that is not on disk is refused',
+    withEditedFile(
+      ADR_README,
+      (text) =>
+        replaceOnce(
+          text,
+          '| [0003](0003-every-gate-needs-a-known-bad-fixture.md)',
+          '| [0003](0003-every-gate-needs-a-known-bad-fixture-renamed.md)',
+        ),
+      docsSet,
+    ),
+    'adr-commentary-names-a-missing-record',
+  )
+
+  /*
+    177k. A dead relative link in the set.
+
+    The pre-existing defect this check found, reproduced deliberately. It is the failure mode of a
+    documentation set specifically: the links are the part that goes stale without anybody touching the
+    sentence around them, and the paragraph still reads correctly.
+  */
+  checkRejectedBy(
+    'docs set: 177k a relative link pointing at a file that does not exist is refused',
+    withEditedFile(
+      'docs/04-uae-compliance.md',
+      (text) =>
+        replaceOnce(
+          text,
+          '# UAE Compliance',
+          '# UAE Compliance\n\nSee [the procedure](runbooks/this-runbook-does-not-exist.md).',
+        ),
+      docsSet,
+    ),
+    'docs-link-target-missing',
+  )
+
+  /*
+    177l. An anchor that no heading produces.
+
+    Separate from 177k because it is the commoner failure and the harder one to see: the file is there,
+    the link resolves, and the reader lands at the top of a long runbook with no idea which part was
+    meant. A reworded heading does it, and nothing about the sentence changes.
+  */
+  checkRejectedBy(
+    'docs set: 177l a #fragment matching no heading in the target is refused',
+    withEditedFile(
+      'docs/04-uae-compliance.md',
+      (text) =>
+        replaceOnce(
+          text,
+          '# UAE Compliance',
+          '# UAE Compliance\n\nSee [the step](runbooks/alerting.md#a-heading-nobody-wrote).',
+        ),
+      docsSet,
+    ),
+    'docs-anchor-missing',
+  )
+
+  /*
+    177m. A generated page nothing links to.
+
+    A page kept perfectly current that nobody can reach from the set is not in the set, and the
+    generator keeping it fresh makes that worse rather than better: it looks maintained. The fixture
+    removes the one link to the inventory page.
+  */
+  checkRejectedBy(
+    'docs set: 177m a generated page nothing in docs/ links to is refused',
+    withEditedFile(
+      ADR_README,
+      // The INDEX.md link and not the secret-inventory one, which was the first version and passed
+      // nothing: the inventory page is reached from TWO places (here and
+      // `docs/05-external-dependencies.md`), so removing one leaves it reachable — correctly. Reading
+      // "nothing was rejected" and finding the rule was right is the better half of writing these.
+      (text) => replaceOnce(text, '[INDEX.md](INDEX.md)', 'INDEX.md'),
+      docsSet,
+    ),
+    'docs-generated-page-not-linked',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -53822,7 +54156,15 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     // the registry to the alerting path. Registered here because the completeness property in block 175
     // reads THIS array, so a CI step nobody registered fails the build.
     'pnpm alerts',
+    // H-HARD-09's documentation set, in the position `pnpm verify` runs it. `processors` holds the
+    // processor register against the provider keys in the config schema and the secret inventory
+    // against every credential-carrying key it declares; `docs-set` regenerates the ADR index and the
+    // secret-inventory page from their sources, fails while either is stale, and follows every
+    // relative link and anchor in docs/. Registered here because the completeness property in block
+    // 177 reads THIS array, so a CI step nobody registered fails the build.
+    'pnpm processors',
     'pnpm adr',
+    'pnpm docs-set',
     'pnpm progress:check',
     'pnpm media',
     'pnpm fixtures',
