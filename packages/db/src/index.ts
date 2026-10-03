@@ -1598,6 +1598,49 @@ export {
   upsertGscDailyRows,
 } from './repositories/seo-warehouse.ts'
 /*
+  Y-PAY-09's settlement side (0136). Reads and writes only: the reconciliation arithmetic is
+  `packages/core/src/payments/settlement.ts`'s and this package may not import it (ADR 0001).
+
+  `findSettlementBatchByContent` is read BEFORE an import opens a transaction, which is what makes a
+  re-import a no-op rather than a caught unique violation: the batch's own `audit_event` and
+  `journal_entry` writes would have happened inside the aborted transaction, so a retry loop would be
+  indistinguishable from a first import in the log. `isSettlementReimport` is the backstop for two
+  importers racing on one file, and it matches the CONSTRAINT NAME as well as the SQLSTATE — a bare
+  `23505` here could equally be `settlement_line_one_per_movement`, which is a defect in the file rather
+  than a re-import.
+
+  `readSettlementTies` reads every local figure in ONE query, for `readRefundablePosition`'s reason. The
+  tip's figure is DERIVED and the derivation names the case it cannot answer: `employee_tip` carries no
+  payment and no intent, so the tip on a capture is the excess of the card tender over the invoice it
+  settled - exact where the invoice has one tender, a measured nought where several tenders cover the
+  invoice gross exactly, and NULL where a tip exists among several tenders, because its apportionment is
+  recorded nowhere and a pro-rata split would be a policy decision disguised as a calculation (ADR 0070).
+
+  `recordSettlementBatch` DERIVES the state from the variances rather than taking it, so a caller cannot
+  ask for a posted batch while handing over an exception - and it takes a `UnitOfWork` because ZY443 and
+  ZY444 read the lines at COMMIT and ZY446 needs the quarantine's `audit_event` in the same transaction.
+*/
+export {
+  findSettlementBatchByContent,
+  isSettlementReimport,
+  isSettlementRule,
+  type RecordedSettlementBatch,
+  type RecordSettlementBatchInput,
+  readSettlementTies,
+  readSettlementVariances,
+  recordSettlementBatch,
+  SETTLEMENT_CONSTRAINT,
+  SETTLEMENT_SQLSTATE,
+  type SettlementBatchRow,
+  type SettlementLineInput,
+  type SettlementRule,
+  type SettlementTieRow,
+  type SettlementVarianceInput,
+  type SettlementVarianceRow,
+  settlementError,
+  settlementTieAccount,
+} from './repositories/settlement.ts'
+/*
   W-SYS-11's admin session (0090). `readStaffSession` is the only way a request learns who is reading, and
   it returns `role` as a `string`: `Role` and the matrix live in `packages/core`, which `packages/db` may
   not import, so `apps/web/src/session.ts` does the narrowing at the boundary where the matrix is in scope.
@@ -5033,4 +5076,47 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // ZY401-ZY403 of the band ZY401-ZY410 are used; ZY404-ZY410 are released UNUSED and deliberately
 // unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
 //
-export const SCHEMA_VERSION = 135 as const
+// 136 is 0136_settlement_batch.sql (Y-PAY-09) — the gateway payout, reconciled to the fils, where "to
+// the fils" is a REFUSAL and not a report.
+//
+// Three append-only tables (`settlement_batch`, `settlement_line`, `settlement_variance`), one function
+// that states a mapping (`settlement_tie_account`), and seven refusals. The reason the identity is stated
+// here as well as in `packages/core/src/payments/settlement.ts` is the specific error this process can
+// make: an importer that absorbs a difference produces an entry that BALANCES — the plug is on both
+// sides — and the evidence is a slowly growing balance on `1030 Gateway clearing` that ties to nothing.
+// `ZY442` is what makes the absorption impossible rather than discouraged, and
+// `packages/fixtures/src/settlement.itest.ts` holds the two statements equal in the same commit.
+//
+// **A batch is POSTED or QUARANTINED and never both (`ZY443`), in both directions.** The tempting shape
+// is one batch, an entry, and variance rows beside it — "posted with exceptions" — and it is refused: a
+// batch with an entry is one the bank reconciliation treats as answered, and a variance row beside it is
+// a note nobody is obliged to read. `ZY446` then requires a quarantined batch's `audit_event` to have
+// been written in the SAME transaction (0093 `ZZ004`'s argument), so a quarantine nobody was told about
+// cannot commit — which is the acceptance line "quarantined and ALERTED rather than force-matched".
+//
+// **`content_sha256` is of the BYTES and is unique.** Two files whose lines differ only in order are the
+// same settlement and must be the same no-op; two that differ by a line nobody parsed are not, and only
+// the bytes can tell them apart. The repository SELECTs on it first and answers `already_imported`, so
+// the ordinary re-import is a no-op and the unique violation is the backstop for two importers racing.
+//
+// **`settled_on` has no key to `business_day`, and that is the D+2 acceptance line.** A payout lands on
+// days the premises were shut, exactly as `journal_entry.entry_date` does (ADR 0064) — while
+// `chargeback.trading_date` DOES carry one, because a dispute notice belongs in a day's card totals and a
+// bank movement belongs to no session. Nothing in the file derives one date from the other and no
+// settlement delay is stated anywhere, so there is no mechanism by which a payout could move a sale
+// between business days: the entry touches `1020`, `1030`, `6080` and the reverse-charge pair and nothing
+// else, and `assertNoRevenueOrTipPosting` in `@berelax/core` refuses any line that reaches revenue.
+//
+// **The three signed columns are `bigint` rather than the `fils_nonneg` domain**, because an acquirer
+// BILLS the business in a period whose chargebacks exceed its captures. A non-negative column would have
+// made that batch unrecordable, or recordable with the sign dropped — which posts the same figure the
+// other way round and balances.
+//
+// Nothing here holds a fee rate, an interchange figure, an MCC, a gateway name or a settlement delay
+// (`Y7-gateway`, `Y7-mcc`, `Y7-card-fee`). The fee is whatever the file says it is; `ZY444` requires a
+// fee line to tie to NOTHING, because a local figure for one would be a rate this build invented.
+//
+// ZY441-ZY447 of the band ZY441-ZY450 are used; ZY448-ZY450 are RELEASED unused and deliberately
+// unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
+//
+export const SCHEMA_VERSION = 136 as const

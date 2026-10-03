@@ -451,3 +451,127 @@ export const chargeback = pgTable(
     index('chargeback_trading_date_idx').on(table.tradingDate, table.kind),
   ],
 )
+
+/**
+ * One imported gateway payout file. Mirrors `0136_settlement_batch.sql`.
+ *
+ * `declaredNetFils` and `linesNetFils` are SIGNED `bigint` rather than the `fils_nonneg` domain every
+ * other money column here uses, and the reason is a real state: an acquirer BILLS the business in a
+ * period whose chargebacks exceed its captures. A non-negative column would have made that batch
+ * unrecordable — or, worse, recordable with the sign dropped, which posts the same figure the other way
+ * round and balances.
+ *
+ * `settledOn` has no key to `business_day` on purpose. A payout lands on days the premises were shut,
+ * which is `journal_entry.entry_date`'s own decision (ADR 0064) — and it is deliberately not derived from
+ * any capture's trading date, because this build holds no settlement delay and may not invent one.
+ *
+ * The refusals that are triggers have no Drizzle expression: ZY441 (append-only on all three tables),
+ * ZY442 (a posted batch's declared net equals the signed sum of its lines, to the fils), ZY443 (posted
+ * and quarantined are exclusive, in both directions), ZY444 (a posted line ties exactly and a fee ties to
+ * nothing), ZY445 (a line's tie account is the one its kind declares), ZY446 (a quarantine wrote its
+ * `audit_event` in the same transaction) and ZY447 (a variance of nought fils is not a variance).
+ */
+export const settlementBatch = pgTable(
+  'settlement_batch',
+  {
+    id: uuid('id').primaryKey(),
+    /** The ACQUIRER's own reference. Free text: no gateway has been chosen. */
+    batchReference: text('batch_reference').notNull(),
+    /** The digest of the BYTES, not of the parsed lines. The whole of the re-import rule. */
+    contentSha256: text('content_sha256').notNull(),
+    settledOn: date('settled_on').notNull(),
+    declaredNetFils: bigint('declared_net_fils', { mode: 'bigint' }).notNull(),
+    linesNetFils: bigint('lines_net_fils', { mode: 'bigint' }).notNull(),
+    /** `posted` or `quarantined`, and ZY443 keeps them exclusive. */
+    state: text('state').notNull(),
+    /** Null exactly when the batch is quarantined. ZY443 is that biconditional. */
+    journalEntryId: text('journal_entry_id').references(() => journalEntry.entryId),
+    importedAt: timestamp('imported_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    unique('settlement_batch_one_per_file').on(table.contentSha256),
+    check('settlement_batch_state_known', sql`${table.state} in ('posted', 'quarantined')`),
+    check('settlement_batch_hash_is_sha256', sql`${table.contentSha256} ~ '^[0-9a-f]{64}$'`),
+    index('settlement_batch_settled_idx').on(table.settledOn.desc(), table.batchReference),
+    index('settlement_batch_state_idx').on(table.state, table.importedAt.desc()),
+  ],
+)
+
+/**
+ * One line of an imported payout file, with the local figure it was matched against.
+ *
+ * `amountFils` is POSITIVE and the direction is the KIND (`SETTLEMENT_LINE_PAYOUT_SIGN` in
+ * `@berelax/core`). `localFils` is NULL for "no local record", which is a different claim from a local
+ * nought and takes a different action — one alerts an operator to an unmatched payout line, the other
+ * says our own figure is wrong.
+ */
+export const settlementLine = pgTable(
+  'settlement_line',
+  {
+    id: uuid('id').primaryKey(),
+    batchId: uuid('batch_id')
+      .notNull()
+      .references(() => settlementBatch.id),
+    /** The line's position in the FILE, 1-based, so a variance can name it. */
+    lineNo: integer('line_no').notNull(),
+    /** `SETTLEMENT_LINE_KINDS` in `@berelax/core`. */
+    kind: text('kind').notNull(),
+    reference: text('reference').notNull(),
+    amountFils: bigint('amount_fils', { mode: 'bigint' }).notNull(),
+    /** Held to `settlement_tie_account(kind)` by ZY445. */
+    tieAccountCode: text('tie_account_code')
+      .notNull()
+      .references(() => account.code),
+    localFils: bigint('local_fils', { mode: 'bigint' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    unique('settlement_line_one_per_position').on(table.batchId, table.lineNo),
+    unique('settlement_line_one_per_movement').on(table.batchId, table.kind, table.reference),
+    check('settlement_line_amount_positive', sql`${table.amountFils} > 0`),
+    check('settlement_line_no_positive', sql`${table.lineNo} > 0`),
+    check(
+      'settlement_line_kind_known',
+      sql`${table.kind} in ('capture', 'refund', 'chargeback', 'tip', 'fee')`,
+    ),
+    index('settlement_line_batch_idx').on(table.batchId, table.lineNo),
+    index('settlement_line_reference_idx').on(table.kind, table.reference),
+  ],
+)
+
+/**
+ * The named alternative to a tie.
+ *
+ * Every settlement line either ties to a figure this build holds or has a row here, and a difference
+ * belonging to no line is the `unattributable` kind — which is a REFUSAL and never a zero (ADR 0070).
+ * `settlementLineId` is null exactly for that kind, which is the one fact about a batch rather than about
+ * a line.
+ */
+export const settlementVariance = pgTable(
+  'settlement_variance',
+  {
+    id: uuid('id').primaryKey(),
+    batchId: uuid('batch_id')
+      .notNull()
+      .references(() => settlementBatch.id),
+    settlementLineId: uuid('settlement_line_id').references(() => settlementLine.id),
+    kind: text('kind').notNull(),
+    fileFils: bigint('file_fils', { mode: 'bigint' }).notNull(),
+    localFils: bigint('local_fils', { mode: 'bigint' }),
+    /** Non-zero, and ZY447 says why: a variance of nought fils is not a variance. */
+    differenceFils: bigint('difference_fils', { mode: 'bigint' }).notNull(),
+    explanation: text('explanation').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    check(
+      'settlement_variance_kind_known',
+      sql`${table.kind} in ('amount_disagrees', 'no_local_record', 'duplicate_line', 'amount_malformed', 'unattributable')`,
+    ),
+    check(
+      'settlement_variance_line_only_for_a_line',
+      sql`(${table.settlementLineId} is null) = (${table.kind} = 'unattributable')`,
+    ),
+    index('settlement_variance_batch_idx').on(table.batchId, table.kind),
+  ],
+)

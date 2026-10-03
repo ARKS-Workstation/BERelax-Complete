@@ -54642,6 +54642,354 @@ export function chargebackNetEffectFils(`,
   }
 }
 
+// 168a-168z. Y-PAY-09 — reconciliation to the fils, where "to the fils" is an IDENTITY and not a report.
+//
+//            The failure every case here is against is the same one, and its distinguishing property is
+//            that it leaves a PERFECTLY BALANCED ledger behind. A settlement importer that absorbs a
+//            difference — a tolerance, a plug line, a zero substituted for a figure nobody could match —
+//            produces an entry whose debits equal its credits, because the plug is on both sides of it.
+//            The trial balance is clean, every report adds up, and the only evidence is a balance on
+//            `1030 Gateway clearing` that grows by a little every payout and ties to nothing.
+//
+//            So 168a to 168g widen, relax or remove exactly one part of the identity and require the
+//            suite to fail BY THE NAME of the rule (ADR 0003): a bare non-zero exit is satisfied by a
+//            syntax error.
+//
+//            168h and 168i are about the two accounts a settlement may never reach, and they are a pair
+//            on purpose. Admitting a revenue account is the D+2 acceptance line's defect — a payout that
+//            touches revenue moves a sale into whatever month the acquirer happened to pay in — and
+//            admitting `2040` is the tip's: the till already credited that liability, so a second credit
+//            records one obligation twice and is indistinguishable from a tip nobody posted.
+//
+//            168j is the fee's tax treatment, and it is the one case whose broken version looks most
+//            correct: defaulting an unknown treatment to domestic drops the reverse charge on every
+//            offshore batch, and the VAT return still BALANCES. docs/04 §4 calls that the obligation most
+//            commonly missed at this size, which is why the absence of a profile is a refusal (ADR 0088).
+//
+//            168k is the fee RATE, from the other direction: the broken version computes an expected fee
+//            from a rate, which is the figure brief rule 15 refuses. It is checked as a SCAN rather than
+//            by editing a module, because the claim is an absence.
+//
+//            168l to 168n are the gates this unit had to stay inside: the two directions of the SQLSTATE
+//            registry, and the migration ledger's documented run.
+//
+//            168p is the property suite's own vacuity floor. Narrowing the generator so no file can
+//            disagree makes six hundred cases pass over one shape, and the property then holds for a
+//            reconciler that accepts anything — brief rule 22's recorded failure.
+//
+//            168y and 168z are the controls: every case above is satisfied by something FAILING, so one
+//            has to be satisfied by the real tree passing.
+//
+//            Nothing here edits `packages/db/migrations/0136_settlement_batch.sql` in order to test a
+//            DATABASE rule, for blocks 134, 154, 166 and 167's reason. ZY441-ZY447 are proved against a
+//            real PostgreSQL by `packages/fixtures/src/settlement.itest.ts`, and four of them — ZY442,
+//            ZY443, ZY444 and ZY446 — are DEFERRED, so that file drives them through real transactions
+//            rather than savepoints: a rollback discards a pending constraint check and the probe never
+//            reaches it. What the migration IS edited for is 168m, where the checker reads the text.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const SETTLEMENT = 'packages/core/src/payments/settlement.ts'
+  const IMPORTER = 'apps/worker/src/jobs/settlement-import.ts'
+  const MIGRATION = 'packages/db/migrations/0136_settlement_batch.sql'
+  const REGISTRY = 'packages/db/src/sqlstate-registry.ts'
+
+  const UNIT_SUITE = 'packages/core/src/payments/settlement.test.ts'
+  const PROPERTY_SUITE = 'packages/core/src/payments/settlement.property.test.ts'
+
+  const pureSuites = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.config.ts',
+    UNIT_SUITE,
+    PROPERTY_SUITE,
+  ]
+  const propertySuite = () => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', PROPERTY_SUITE]
+
+  /**
+   * One anchored edit to a shipped module, then the suite that must fail because of it.
+   *
+   * Named for this block rather than reusing block 167's `breakReversal`, and the reason is mechanical
+   * rather than stylistic: two blocks defining a helper of the same shape is how git found the bodies as
+   * shared context and INTERLEAVED two blocks at a merge (block 133's note about its own helper).
+   */
+  const breakSettlement = (name, file, find, into, rule, args = pureSuites()) => {
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        file,
+        (source) => replaceOnce(source, find, into),
+        () => runExpectingFailure('pnpm', args),
+      ),
+      rule,
+    )
+  }
+
+  // ---- the identity ----------------------------------------------------------------------------
+
+  // 168a. THE case the unit is named for: a tolerance. Five fils is the figure somebody reaches for, and
+  //       it reconciles a rounding difference and a theft identically — on every batch, for ever.
+  breakSettlement(
+    'settlement: a five-fils tolerance on a line fails by name',
+    SETTLEMENT,
+    '    if (tie.localFils !== fileFils) {',
+    '    if (Math.abs(tie.localFils - fileFils) > 5) {',
+    'names a variance when a capture line is altered by one fils',
+  )
+
+  // 168b. The residue that belongs to no line, posted as a balancing figure instead of refusing. This is
+  //       ADR 0070's subject exactly: the difference exists either way, and only one of the two spellings
+  //       of it can be investigated afterwards.
+  breakSettlement(
+    'settlement: absorbing an unattributable residue fails by name',
+    SETTLEMENT,
+    '  const declaredVersusLines = file.declaredNetFils - signedTotal',
+    '  const declaredVersusLines = 0',
+    'refuses a residue that belongs to no line as unattributable',
+  )
+
+  // 168c. A line nothing answers to, read as a local NOUGHT rather than as an absence. The two take
+  //       different actions — one alerts an operator to an unmatched payout line, the other says our own
+  //       figure is wrong — and a reconciler that collapsed them would route both to the same queue.
+  breakSettlement(
+    'settlement: treating a missing local record as nought fails by name',
+    SETTLEMENT,
+    '    if (tie === undefined || tie.localFils === null) {',
+    '    if (false) {',
+    'quarantines a line nothing local answers to',
+  )
+
+  // 168d. `reconciled` reduced to the variance list alone. A file whose lines sum to its declared net can
+  //       still carry a capture that ties to nothing, and a quarantined line leaves every total intact —
+  //       so the two halves are different claims and neither implies the other.
+  breakSettlement(
+    'settlement: a reconciled flag that ignores the identities fails by name',
+    SETTLEMENT,
+    `    reconciled:
+      variances.length === 0 &&
+      identities.declaredVersusLinesFils === 0 &&
+      identities.linesVersusLocalFils === 0 &&
+      identities.quarantinedFils === 0 &&
+      identities.malformedFils === 0,`,
+    '    reconciled: identities.declaredVersusLinesFils === 0,',
+    'quarantines a line nothing local answers to',
+  )
+
+  // 168e. The precondition on posting, removed. "Zero variance or it refuses to post" becomes a check
+  //       somebody remembers to make, and the entry it posts is then evidence that the batch was accepted.
+  breakSettlement(
+    'settlement: posting a batch that carries a variance fails by name',
+    SETTLEMENT,
+    '  if (!reconciliation.reconciled) throw new SettlementVarianceRefusesToPost(reconciliation)',
+    '  if (false) throw new SettlementVarianceRefusesToPost(reconciliation)',
+    'refuses to post a batch that carries a variance',
+  )
+
+  // 168f. A duplicated line SUMMED rather than named. Two lines about one movement cannot both be
+  //       matched, and adding both doubles the amount while every other identity still holds.
+  breakSettlement(
+    'settlement: summing a duplicated line fails by name',
+    SETTLEMENT,
+    `    if (seen.has(key)) {
+      malformed += fileFils`,
+    `    if (false) {
+      malformed += fileFils`,
+    'names a duplicated line rather than summing both copies',
+  )
+
+  // 168g. The bank side always debited. An acquirer BILLS the business in a period whose chargebacks
+  //       exceed its captures, and a builder that assumed the sign posts that batch backwards — while
+  //       balancing perfectly, which is this block's whole subject.
+  breakSettlement(
+    'settlement: a bank side that assumes the payout is positive fails by name',
+    SETTLEMENT,
+    '  return [signedFils > 0 ? debit(account, amount, memo) : credit(account, amount, memo)]',
+    '  return [debit(account, amount, memo)]',
+    'credits the bank when the acquirer bills the business',
+  )
+
+  // ---- the two accounts a settlement may never reach -------------------------------------------
+
+  // 168h. Revenue admitted. This is the D+2 acceptance line's defect: a payout that touches revenue
+  //       moves a sale into whatever month the acquirer happened to pay in, and the sale's own tax point
+  //       says otherwise.
+  breakSettlement(
+    'settlement: admitting a revenue account to a payout entry fails by name',
+    SETTLEMENT,
+    "    if (account.type === 'revenue' || account.code === ACCOUNTS.tipsPayable) {",
+    '    if (account.code === ACCOUNTS.tipsPayable) {',
+    'refuses a line that reaches a revenue account',
+  )
+
+  // 168i. And `2040`. The till already credited it with the gratuity, so a settlement credit records one
+  //       obligation twice and the second copy is indistinguishable from a tip nobody posted.
+  breakSettlement(
+    'settlement: admitting tips payable to a payout entry fails by name',
+    SETTLEMENT,
+    "    if (account.type === 'revenue' || account.code === ACCOUNTS.tipsPayable) {",
+    "    if (account.type === 'revenue') {",
+    'refuses a line that reaches tips payable',
+  )
+
+  // ---- the fee, from both directions -----------------------------------------------------------
+
+  // 168j. The treatment defaulted to domestic. The most plausible-looking edit in the block: the return
+  //       still balances, nothing is owed, and the reverse charge is dropped on every offshore batch.
+  breakSettlement(
+    'settlement: defaulting a missing fee tax treatment fails by name',
+    SETTLEMENT,
+    '  if (feeFils > 0 && input.feeTax === undefined) throw new SettlementFeeHasNoTaxTreatment(feeFils)',
+    "  if (feeFils > 0 && input.feeTax === undefined) input = { ...input, feeTax: { treatment: 'domestic_uae' } }",
+    'refuses a fee with no tax treatment rather than defaulting to domestic',
+  )
+
+  // 168k. The fee RATE, as a scan. The claim is an ABSENCE — nothing in this unit holds a fee rate, an
+  //       interchange figure, an MCC or a settlement delay — so it cannot be proved by editing a module
+  //       and watching a test fail. What it can be is read: the two files are scanned for the arithmetic
+  //       an invented rate would arrive as, and for the words it would be named with.
+  {
+    // Comments are STRIPPED before the scan, and that is not a loosening. Both modules say in prose
+    // that they hold no interchange figure and no MCC — which is the claim — so a scan over the raw text
+    // reports the documentation as the violation. First run of this case did exactly that.
+    const withoutComments = (text) =>
+      text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ')
+    const sources = [SETTLEMENT, IMPORTER].map((file) => ({
+      file,
+      text: withoutComments(readFileSync(file).toString()),
+    }))
+    // A percentage applied to a fee, in any of the spellings a rate arrives as. `UAE_STANDARD_VAT_BP` is
+    // the authority's rate and is reached through `reverseChargeOn`, never restated, so it is not here.
+    const rateShapes = [
+      /\b0\.0[0-9]+\b/,
+      /\bbasisPoints\b/,
+      /\bfeeRate\b/,
+      /\binterchange\b/i,
+      /\bmcc\b/i,
+      /settlementDelay/i,
+      /\* *29 *\/ *1000/,
+    ]
+    const offenders = sources.flatMap(({ file, text }) =>
+      rateShapes.filter((shape) => shape.test(text)).map((shape) => `${file} matches ${shape}`),
+    )
+    check(
+      'settlement: nothing in the unit holds a fee rate, an interchange figure, an MCC or a settlement delay',
+      offenders.length === 0,
+      offenders.join('\n'),
+    )
+    // The control, which is what stops the scan being satisfied by two empty files: the patterns must
+    // fire on a source that DOES hold a rate.
+    const probe = withoutComments('const feeRate = 0.029\nconst mcc = 7230\n// no mcc here\n')
+    check(
+      'settlement: the fee-rate scan fires on a source that holds one',
+      rateShapes.filter((shape) => shape.test(probe)).length >= 2,
+      probe,
+    )
+  }
+
+  // ---- the gates this unit had to stay inside --------------------------------------------------
+
+  // 168l. The registry's forward direction: a code the migration raises and the registry does not list.
+  withEditedFile(
+    REGISTRY,
+    (source) => replaceOnce(source, "    code: 'ZY446',", "    code: 'ZY999',"),
+    () =>
+      checkRejectedBy(
+        'settlement: a raised code missing from the SQLSTATE registry is refused',
+        runExpectingFailure('pnpm', ['sqlstate']),
+        'ZY446',
+      ),
+  )
+
+  // 168m. And the migration's. The ledger's documented run has to reach 0136, and gate case 90a reads
+  //       the shape `// NNN is NNNN_file.sql` — a paragraph opening any other way ends the run early and
+  //       every later migration becomes undocumented.
+  {
+    const ledger = readFileSync('packages/db/src/index.ts').toString()
+    check(
+      'settlement: the migration ledger documents 0136 in the shape gate case 90a reads',
+      ledger.includes('// 136 is 0136_settlement_batch.sql (Y-PAY-09)'),
+      'the paragraph for 136 is absent or opens in another shape',
+    )
+    check(
+      'settlement: SCHEMA_VERSION is the newest migration on disk',
+      ledger.includes('export const SCHEMA_VERSION = 136 as const'),
+      'SCHEMA_VERSION does not name 136',
+    )
+    // The migration states the mapping `settlement_tie_account()` and `@berelax/core` both hold, and the
+    // pairing suite is what keeps them equal. A migration that dropped the function would make ZY445
+    // unenforceable while every pure test still passed.
+    const migration = readFileSync(MIGRATION).toString()
+    check(
+      'settlement: the migration states the tie-account mapping in SQL',
+      migration.includes('create function settlement_tie_account(p_kind text)') &&
+        migration.includes('tips_payable_account_code()') &&
+        migration.includes('disputed_card_receipts_account_code()'),
+      'settlement_tie_account is absent, or retypes an account code instead of calling for it',
+    )
+  }
+
+  // 168n. The band's unused codes must stay UNREGISTERED. An entry for a code no migration raises is
+  //       what direction 3 of ADR 0043's gate refuses, and ZY448-ZY450 are released.
+  {
+    const registry = readFileSync(REGISTRY).toString()
+    const claimed = ['ZY448', 'ZY449', 'ZY450'].filter((code) => registry.includes(code))
+    check(
+      'settlement: the released codes of the band are not registered',
+      claimed.length === 0,
+      `registered without being raised: ${claimed.join(', ')}`,
+    )
+  }
+
+  // ---- the property suite's own vacuity floor --------------------------------------------------
+
+  // 168p. Narrow the generator so no generated file can be perturbed, and the one-fils property holds
+  //       over six hundred cases of nothing. The floor is what fails, by name — which is the arrangement
+  //       brief rule 22 asks for, and the symptom it records is a gate reporting a rule as missing.
+  breakSettlement(
+    'settlement: a generator that cannot produce a perturbable file fails the vacuity floor',
+    PROPERTY_SUITE,
+    '      const target = file.lines.findIndex((row) => SETTLEMENT_LINE_TIES_LOCALLY[row.kind])',
+    '      const target = -1',
+    'the one-fils claim is vacuous',
+    propertySuite(),
+  )
+
+  // ---- the controls ----------------------------------------------------------------------------
+
+  // 168y. Every case above is satisfied by something FAILING, so this one is satisfied by the real tree:
+  //       the committed files pass both pure suites.
+  {
+    const pure = run('pnpm', pureSuites())
+    check(
+      'settlement: the committed identity, entry builder and property suite all pass',
+      !pure.failed,
+      pure.output,
+    )
+  }
+
+  // 168z. And the two database suites, which are where the claims a pure test cannot reach are proved:
+  //       the seven refusals, the mapping held equal across SQL and TypeScript, the no-op by content
+  //       hash, the quarantine with its alert in the same transaction, and the reverse-charge pair.
+  {
+    const pair = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      'packages/fixtures/src/settlement.itest.ts',
+      'apps/worker/src/jobs/settlement-import.itest.ts',
+    ])
+    check(
+      'settlement: the refusals, the pairing and the import pass against the real database',
+      !pair.failed,
+      pair.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

@@ -22903,7 +22903,7 @@ units:
       fees, and post the net bank receipt. Zero variance or it refuses to post. Fees from an offshore PSP
       generate the M-VAT reverse-charge pair.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - M-VAT-01
@@ -22932,6 +22932,34 @@ units:
       pair from M-VAT
     - re-importing the same settlement file is a no-op by content hash, and an unmatched line is quarantined
       and alerted rather than force-matched
+    - 'NOTE: the card tip is RECONCILED against 2040 Tips payable and is deliberately not POSTED there a
+      second time. The till already credits that liability with the gratuity and debits the clearing
+      account for the whole card tender (packages/core/src/checkout/posting.ts), so a settlement credit
+      would record one obligation twice and the second copy would be indistinguishable from a tip nobody
+      had posted. What the settlement adds is the proof: the figure the acquirer paid over for the
+      gratuity equals the figure the liability holds, to the fils, read from invoice_payable_fils() which
+      is already 0068''s own statement of that credit. The acceptance line''s "never to revenue" is held
+      structurally by assertNoRevenueOrTipPosting, which refuses any entry line reaching a revenue
+      account OR 2040 - the settlement entry touches 1020, 1030, 6080 and the reverse-charge pair only.
+      ADR 0090 states the deviation.'
+    - 'NOTE: where several tenders cover one ticket AND the ticket carries a gratuity, the apportionment
+      of the tip between the tenders is recorded nowhere in this schema, so the tip line is quarantined
+      rather than split pro rata (ADR 0070 refused the same arithmetic for a cost component). Exact for
+      the single-tender case and a measured nought where several tenders cover the invoice gross exactly.
+      A per-tender gratuity record would make it exact in every case and belongs to whichever unit next
+      touches employee_tip.'
+    - 'NOTE: DEFERRED to a later unit - apps/web/app/(admin)/money/settlement/page.tsx is NOT built. There
+      is no (admin)/money section in this tree, so the page would be a new admin area with its own
+      route-registry entry, guard and navigation, and none of the five acceptance lines needs a screen:
+      "the report names the offending line" is satisfied by settlement_variance, whose rows carry the line
+      number, both figures, the difference and the explanation an operator reads, and readSettlementVariances
+      in @berelax/db is the reader a page would call. The port band { start: 20_000, width: 300 } allocated
+      to this group is therefore claimed by Y-PAY-04''s webhook suite and not by a settlement screen.'
+    - 'NOTE: nothing in this unit holds a fee rate, an interchange figure, an MCC, a gateway name or a
+      settlement delay (Y7-gateway, Y7-mcc, Y7-card-fee). The fee is whatever the payout file states and
+      ZY444 requires a fee line to tie to NOTHING in both directions, because a local figure for one could
+      only have come from a rate this build invented. Gate case 168k scans both modules for the shapes an
+      invented rate arrives as, with a control that fires on a source holding one.'
     files:
     - packages/core/src/payments/settlement.ts
     - packages/db/migrations/00XX-settlement-batch.sql

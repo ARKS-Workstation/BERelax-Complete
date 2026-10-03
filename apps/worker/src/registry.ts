@@ -67,6 +67,7 @@ import {
   SCHEDULED_STEP_SWEEP_JOB,
   SEND_SCHEDULED_STEP_JOB,
 } from './jobs/send-scheduled-step.ts'
+import { SETTLEMENT_IMPORT_JOB_DEFINITION } from './jobs/settlement-import.ts'
 
 export type { JobContext, JobDefinition, JobHandler } from './job.ts'
 
@@ -441,6 +442,13 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
     expireInSeconds: 1800,
     handler: gscUrlInspectionHandler_,
   },
+  // Y-PAY-09's settlement import, and the third queue in this registry with no cron. A payout file is
+  // DELIVERED; a schedule here would be a poller looking for work whatever accepted the file already
+  // announced, and it would either run constantly doing nothing or leave a payout unimported until it next
+  // fired. So no `agent_definition` either — `assertRegistry` demands one only for a cron, because what
+  // G-AGT-01 watches is a schedule nobody is looking at. Y-PAY-05's reconciliation job is the one with a
+  // cron, and it brings its own agent row in its own migration.
+  SETTLEMENT_IMPORT_JOB_DEFINITION,
   // A queue with no cron, and therefore no agent. W-SYS-05: a derivative build is announced by the
   // upload that produced the original, so the thing being watched is the request that accepted the file.
   BUILD_DERIVATIVES_JOB,
