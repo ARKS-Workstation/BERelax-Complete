@@ -22344,13 +22344,20 @@ units:
       state.test.ts: the 6x6 table stated independently in the test and compared cell by cell, all 36 cells
       perturbed one at a time as the control, and every refused pair asserted to throw IntentTransitionRefused
       by class, name, message and details.eventId. Gate cases 134a-134d are its known-bad fixtures.'
-    - 'NOTE: deferred to Y-PAY-04 — webhook signature verification, the timestamp tolerance window and
+    - 'NOTE: deferred to Y-PAY-04 (DEFERRAL SATISFIED) — webhook signature verification, the timestamp window and
       exactly-once-per-handler delivery. The port declares no verify() method: this unit provides the event
       SHAPE (PaymentIntentEvent, GatewayEventDelivery, an opaque GatewayEventCursor) and eventsSince(cursor)
       with a conformance rule that a cursor must advance. Order-independent convergence is already
       discharged here rather than deferred — reduceIntent sorts by the gateway''s occurredAt before folding,
-      so a shuffled delivery converges by construction and Y-PAY-04 needs no buffer.'
-    - 'NOTE: deferred to Y-PAY-04 (RE-POINTED by Y-PAY-08) — the dispute/chargeback events.
+      so a shuffled delivery converges by construction and Y-PAY-04 needs no buffer. DEFERRAL SATISFIED by
+      Y-PAY-04: packages/payments/src/webhook/verify.ts is the signature and the timestamp window (this
+      build''s own five minutes, checked AFTER the MAC so a stale delivery is a REPLAY and not a forgery),
+      and 0147''s unique (webhook_event_id, handler) is exactly-once-per-handler. One correction to the
+      sentence above: order-independent convergence needed MORE than the sort. reduceIntent is strict, so a
+      capture delivered before its authorisation throws rather than converging - and Y-PAY-04 does need a
+      buffer, which is payment_webhook_event itself: the event is HELD with its amount and the delivery that
+      brings its predecessor folds every event on file. ADR 0100.'
+    - 'NOTE: deferred to Y-PAY-04 (RE-POINTED by Y-PAY-08; DEFERRAL SATISFIED) — the dispute events.
       PAYMENT_INTENT_EVENTS deliberately stops at six and carries no disputed event, and the H02 fake''s
       -DISPUTE reference marker therefore steers nothing in this adapter. Adding the event is a tsc failure
       until every row of INTENT_TRANSITIONS and every entry of INTENT_EVENT_CARRIES_AMOUNT answers for it,
@@ -22362,8 +22369,15 @@ units:
       would therefore be a lifecycle state nothing transitions into. RE-POINTED to Y-PAY-04, which owns the
       webhook ingest and is the unit that will actually receive a dispute notice: if the port needs a
       vocabulary for one, that is the unit that will find out, and `chargeback_position` plus
-      isChargebackRedelivery are what Y-PAY-08 left for it.'
-    - 'NOTE: deferred to Y-PAY-04 (RE-POINTED by Y-PAY-03) — the 3DS demo path. The fake exposes
+      isChargebackRedelivery are what Y-PAY-08 left for it. DEFERRAL SATISFIED by Y-PAY-04, and the finding
+      is that NO new vocabulary is needed: PAYMENT_INTENT_EVENTS still stops at six, and 0147''s
+      event_type check admits exactly those six, so a dispute notice is refused at the webhook boundary
+      rather than stored as an event nothing can fold. That is ADR 0089 holding: a chargeback is not a
+      gateway movement of the intent, it is a row with its own received_at and journal entry. What is still
+      open is the ROUTING - no handler puts a notice into the chargeback table, because no gateway has been
+      chosen and a notice''s format is unknown (Y7-gateway) - and that is deferred to Y-PAY-10, whose
+      subject is the payments go-live guard and the provider selection a format depends on.'
+    - 'NOTE: deferred to Y-PAY-04 (RE-POINTED by Y-PAY-03; DEFERRAL SATISFIED in part) — the 3DS path. The fake exposes
       completeCustomerAction as its stand-in for a customer returning from a challenge, and it is NOT on the
       port, so the conformance suite cannot reach it. packages/payments/src/index.ts re-exports the
       FakeCardGateway TYPE (a type-only edge, exempted by the registry-chokepoint rule the way SealedToken is
@@ -22373,7 +22387,14 @@ units:
       never been driven. Re-pointed at Y-PAY-04 because a customer returning from a challenge arrives the way a
       webhook does — as an event that must be believed only when a gateway transaction row names it (ADR 0056) —
       and Y-PAY-04 owns exactly that path. It is not the checkout screen''s to demo: the screen has no way to
-      make an intent move, by construction.'
+      make an intent move, by construction. DEFERRAL PARTLY SATISFIED by Y-PAY-04, and exactly which part
+      matters. The challenge ROUND TRIP is now driven end to end: packages/fixtures/src/payment-webhook.itest.ts
+      delivers an `action_required` event and then an `authorised` one through the real ingest, in separate
+      transactions and in shuffled order, so requires_customer_action is both entered and left by the only
+      path that can move an intent (ADR 0056). What is still true is the narrow half: nothing calls the
+      fake''s completeCustomerAction, because the webhook path does not need it - the fake''s event stream
+      is what a delivery is built from. A caller for that method would be a demo of the FAKE rather than of
+      the system, and it is deferred to Y-PAY-10 with the rest of the gateway-selection work.'
     - 'NOTE: no test port band was used. Nothing here starts a server: the port is pure and both adapters are
       in-memory, so every suite in this unit is a unit suite. The band 16_700 allocated to this unit is
       unused and unclaimed, which apps/web/src/test-ports.test.ts requires of a band nobody declares.'
@@ -22433,15 +22454,24 @@ units:
       from 1 per process, so the SECOND run of `payment-intent.itest.ts` against one database collided on ids
       the first run had stored, and because nothing here can be deleted no teardown could free them.
       Double-counting WITHIN one intent is still shut by `unique (payment_intent_id, gateway_event_id)`; two
-      local intents against one remote intent is deferred to Y-PAY-05, whose acceptance line already
-      quarantines an intent the gateway does not recognise.'
+      local intents against one remote intent is deferred to Y-PAY-10, which is still todo - RE-POINTED
+      there by Y-PAY-05, and with a finding. Y-PAY-05 DID build the half this note expected: an intent the
+      gateway does not recognise is quarantined and alerted (ZY683) and never deleted. That is the
+      OPPOSITE case. Two local intents against ONE remote intent has both of them recognised, so the pass
+      reconciles both to the same gateway state and records the second as a repair - which is not wrong
+      about either row and is silent about the duplication. Detecting it needs the column 0106 could not
+      add, because a gateway intent id is unique within a MERCHANT ACCOUNT and none has been chosen
+      (Y7-mcc); Y-PAY-10 is the unit whose subject is that selection. What Y-PAY-05 leaves for it is the
+      shape: `gateway_state_observation` already holds one row per (gateway, gateway_intent_id, instant),
+      so a second local intent naming one remote intent is a GROUP BY away once an account id exists.'
     - 'NOTE: the route is `apps/web/app/api/v1/payments/intent/` and not the `apps/web/app/api/payments/intent/`
       this entry listed. Every other endpoint in the app is under `/api/v1`, and each one''s registry entry
       argues the same three reasons for it; a fifth endpoint outside that prefix would leave the public API
       surface half-versioned. `handler.ts` beside `route.ts` is the split `app/api/v1/otp` uses, so the
       integration suite drives the same code with a frozen clock and the fake gateway.'
-    - 'NOTE: deferred to Y-PAY-04 (RE-POINTED by Y-PAY-03, then by Y-PAY-06, then by Y-PAY-08) —
-      authentication on the endpoint.
+    - 'NOTE: authentication on the endpoint. Handed in turn to Y-PAY-06, to Y-PAY-08 and to Y-PAY-04, and
+      DECLINED by each; it is now `Y7-intent-endpoint-auth` in docs/OPEN-QUESTIONS.md, which is what the
+      last paragraph of this note asked for rather than a sixth hop.
       The intent route''s audit actor is still `system` with the label `payments intent endpoint`. Y-PAY-03
       discharged the
       half it owns: the CHECKOUT path is authenticated, both of its transports are behind guardAdminRoute, and
@@ -22463,13 +22493,28 @@ units:
       here is the card-data refusal at the top of the handler — its own SAQ-A gate demanded it, because this
       endpoint takes two caller-chosen free-text fields and wrote both to a row and an audit payload with
       nothing refusing a card number. The opaque token half of this NOTE is SATISFIED: it is
-      AuthoriseRequest.instrumentToken, defined by Y-PAY-03, forwarded to the adapter and never stored.'
-    - 'NOTE: deferred to Y-PAY-04 — the webhook endpoint itself, signature verification and the timestamp
+      AuthoriseRequest.instrumentToken, defined by Y-PAY-03, forwarded to the adapter and never stored.
+      Y-PAY-04 DECLINES the authentication half and has done what this NOTE itself says to do rather than
+      making a fifth hop: it is now `Y7-intent-endpoint-auth` in docs/OPEN-QUESTIONS.md. The reason is
+      substantive rather than scoping - the route Y-PAY-04 owns is POST /api/webhooks/payments, which is
+      authenticated by a SIGNATURE and deliberately has no session at all (ADR 0100), so there is nothing
+      for it to reuse. And `guardAdminRoute` cannot simply be added here: a browser returning from a
+      hosted-fields checkout calls this endpoint with no staff session, so the answer is a customer-scoped
+      credential, a staff session, or both with the actor recorded per path - a decision that changes the
+      route, its handler''s actor and two suites, which is a unit rather than a hop.'
+    - 'NOTE: deferred to Y-PAY-04 (DEFERRAL SATISFIED) — the webhook endpoint, signature verification and the timestamp
       window. The STORAGE half of exactly-once is here: `unique (payment_intent_id, gateway_event_id)` plus
       ZY164 as a NAMED refusal, so a handler can answer 200 to a redelivery instead of 500 — a bare 23505
       cannot be told from the intent''s own idempotency-key violation, which means the opposite thing.
       `applyGatewayEvents` folds new deliveries together with the stored rows, so out-of-order and repeated
-      deliveries converge by construction.'
+      deliveries converge by construction. DEFERRAL SATISFIED by Y-PAY-04:
+      apps/web/app/api/webhooks/payments/route.ts is the endpoint, verify.ts is the signature and the
+      window, and 0147 carries the two claims this NOTE''s storage half could not make on its own - ZY672
+      refuses a DIFFERENT body under a reused event id, which the unique constraint cannot tell from a
+      redelivery, and unique (webhook_event_id, handler) is exactly-once per HANDLER rather than per event.
+      The sentence above about out-of-order convergence is right about the FOLD and wrong about the
+      deliveries: a capture whose authorisation has not arrived throws, so it is held on
+      payment_webhook_event until the set can be folded. ADR 0100.'
     - 'NOTE: no test port band was used. The band `17_000` allocated to this unit is unused and unclaimed,
       which `apps/web/src/test-ports.test.ts` requires of a band nobody declares. Nothing here starts a
       server: `payments-intent-route.itest.ts` calls the handler directly, which is `otp-route.itest.ts`''s
@@ -22693,7 +22738,7 @@ units:
       a timestamp tolerance window, and exactly-once-per-handler delivery keyed on (event_id, handler) per
       ADR 0008, with order-independent convergence.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F06
@@ -22709,6 +22754,28 @@ units:
       converges to the same terminal state as in-order delivery
     - 'an invoice is marked paid only by a webhook-confirmed capture: driving the client callback path alone
       leaves the invoice unpaid, asserted by test'
+    - 'NOTE: a delivery the lifecycle has no cell for YET - a capture before the authorisation it belongs
+      to - is HELD rather than refused, and answered 200. ADR 0056''s table is strict and a capture on an
+      unauthorised intent is a real defect, but a signed delivery is genuine and the gateway will not send
+      it again once it has a 200, so refusing it loses a money movement. The event is stored with its
+      amount and NO `intent` handler run is recorded, which is precisely "a retry comes back to this"; the
+      delivery that brings the predecessor folds every event on file for that intent in the gateway''s own
+      instant order. That is why payment_webhook_event.amount_fils is a column: re-folding needs the
+      instant and the amount, and the body is deliberately not kept (ADR 0067).'
+    - 'NOTE: an intent the gateway names and this build has never recorded is answered 202 and NOT stored.
+      A row in payment_webhook_event is evidence a signature verified, and one with no possible handler
+      run would read as processed. 202 rather than 404, because a 404 tells a gateway to stop retrying a
+      delivery reconciliation will need - which is Y-PAY-05''s own acceptance line about quarantining an
+      intent the gateway does not recognise.'
+    - 'NOTE: PAYMENT_WEBHOOK_SIGNING_SECRET is optional() and unset in every environment (Y7-gateway), and
+      its absence answers 503 rather than 401 - the truth is "we cannot check it", and a gateway retries a
+      503 while a 401 makes it give up. There is no fall-back to trusting the body on a machine where the
+      variable is missing, and a blank value counts as missing. The timestamp tolerance is this build''s
+      own five minutes, stated once in WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS; it is not a figure from any
+      vendor''s documentation, because there is no vendor.'
+    - 'NOTE: the migration is 0147_payment_webhook_event.sql, not the 00XX placeholder in `files`. The
+      ingest orchestration lives beside the route in apps/web/app/api/webhooks/payments/ingest.ts, so the
+      integration suite drives the same code the gateway reaches with a pinned clock.'
     files:
     - apps/web/app/api/webhooks/payments/route.ts
     - packages/payments/src/webhook/verify.ts
@@ -22721,7 +22788,7 @@ units:
       local intents, repairs divergence and reports every repair. Webhooks are at-least-once and sometimes
       zero-times; this is what makes the ledger eventually correct anyway.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - Y-PAY-04
@@ -22743,6 +22810,31 @@ units:
       an SLO shape with no target, and a threshold that is either a pointer at the figure a migration owns
       or a BOUNDED provisional F09 setting. The "quarantined and alerted" acceptance line above is the same
       obligation from the other side, so one entry discharges both.'
+    - 'NOTE: the 30% drop is in the DELIVERY loop and not inside the fake, and that is the shape of the
+      unit rather than a convenience. A lost webhook is an event the gateway SENT and nothing received,
+      so the gateway''s own stream still holds it - which is the only reason anything can be repaired. A
+      fake that dropped events from its own stream would be modelling an event that never happened, and
+      nothing could repair that. The fake emits every event TWICE deliberately, so the suite counts the
+      event IDS for which no copy arrived, which is what "consequential" means.'
+    - 'NOTE: each population in the job suite gets its own `payment_intent.gateway` value, because the
+      watermark is keyed on the gateway NAME and a fresh fake restarts its cursor sequence at
+      evt_00000001. Two populations sharing one name would have the second''s whole stream filtered out by
+      the first''s watermark. That is not a defect in the pass: in production there is one gateway and its
+      cursors are globally monotone, exactly as the port promises - so from the pass''s point of view two
+      populations ARE two gateways. The suite''s first run found this by reporting zero repairs for a
+      population it had just dropped events from.'
+    - 'NOTE: the pass posts NO journal entry, which is what makes the idempotence acceptance line
+      assertable at all. It moves an intent''s append-only rows; marking an invoice paid is Y-PAY-04''s
+      `invoice-settlement` handler, and a reconciliation that also tendered would be a second path to one
+      posting.'
+    - 'NOTE: `apps/worker` now depends on `@berelax/payments` - the pass needs applyGatewayEvents and the
+      diff, and both live there. `pnpm deps` and `pnpm boundaries` were run for that reason and are clean
+      (1,786 modules, 8,114 dependencies cruised).'
+    - 'NOTE: the migration is 0148_reconciliation_exception.sql, not the 00XX placeholder in `files`, and
+      it carries two tables the file list does not name: gateway_state_observation (the gateway''s side,
+      with the instant WE asked, without which the pass would be comparing our records with our records)
+      and payment_reconciliation_run (the durable watermark, as a row per pass rather than a mutable
+      cursor - see ADR 0101).'
     files:
     - apps/worker/src/jobs/payment-reconciliation.ts
     - packages/payments/src/reconcile.ts
@@ -22779,7 +22871,7 @@ units:
       on one account, and an overdue blocking obligation
     - every registry entry declares severity, threshold and a runbook id, and an entry naming an unknown
       runbook id fails a gate
-    - 'NOTE: the UNRECONCILED SETTLEMENT BATCH alert is deferred to Y-PAY-05 and is deliberately ABSENT
+    - 'NOTE: the UNRECONCILED SETTLEMENT BATCH alert is deferred to G-AGT-02, re-pointed by the integrator at the Y-PAY-09/04/05 merge. Y-PAY-05 was the original owner and shipped the rows the alert would read (settlement_variance, reconciliation_exception) but added no ALERT_REGISTRY entry and no ALERT_OBSERVERS observer, so the deferral is undischarged rather than satisfied - checked by grepping both files for a settlement entry before re-pointing. G-AGT-02 owns the console that reads alerts and is still todo, which is why it takes this and is deliberately ABSENT
       from ALERT_REGISTRY rather than present and unobservable. Nothing in this schema records a settlement
       batch or its reconciliation state — Y-PAY-05 owns reconciliation_exception and is todo — so an entry
       for it would have an observer that could only ever answer "nothing to see", which is exactly the
@@ -23144,12 +23236,19 @@ units:
     - refunding more than was captured, or refunding a voided intent, is refused with a named error
     - a chargeback received at 01:30 resolves to the previous trading date, asserted against the business_day
       primitive
-    - 'NOTE: the chargeback INGEST path is deferred to Y-PAY-04 (webhook ingest), which is still todo. A
+    - 'NOTE: the chargeback INGEST path is deferred to Y-PAY-10, which is still todo - RE-POINTED there by
+      Y-PAY-04, which owns the webhook ingest and is the unit this NOTE originally named. A
       dispute arrives by webhook, so nothing routes a notice into the chargeback table yet; what this unit
       ships is the table, the entries, the cap and the refusals, plus the two properties that handler will
       need — isChargebackRedelivery and the (dispute_ref, kind) unique constraint, so a redelivery is a
       named refusal it can answer 200 to rather than a bare 23505 it cannot tell from the intent''s own
-      idempotency key.'
+      idempotency key. Y-PAY-04 built the ingest and found that a notice cannot be routed yet for a reason
+      that is not about effort: 0147''s
+      event_type check admits only the six members of PAYMENT_INTENT_EVENTS, deliberately, so a notice is
+      refused at the boundary rather than stored as an event nothing can fold - and what a notice LOOKS
+      like is unknown until a gateway is chosen (Y7-gateway), which is Y-PAY-10''s subject. The two
+      properties this NOTE left are used and still stand: isWebhookRedelivery is modelled on
+      isChargebackRedelivery, matching the constraint NAME as well as the SQLSTATE.'
     - 'NOTE: the partial refund''s credit note is issued by M-TILL-08''s existing issueCreditNote and the
       refund row by 0068''s refund table, which already makes credit_note_id mandatory. This unit adds the
       CAP (three figures, not two) and the chargeback dimension, and does NOT re-derive the net/VAT split:
@@ -23167,7 +23266,7 @@ units:
       fees, and post the net bank receipt. Zero variance or it refuses to post. Fees from an offshore PSP
       generate the M-VAT reverse-charge pair.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - M-VAT-01
@@ -23196,6 +23295,34 @@ units:
       pair from M-VAT
     - re-importing the same settlement file is a no-op by content hash, and an unmatched line is quarantined
       and alerted rather than force-matched
+    - 'NOTE: the card tip is RECONCILED against 2040 Tips payable and is deliberately not POSTED there a
+      second time. The till already credits that liability with the gratuity and debits the clearing
+      account for the whole card tender (packages/core/src/checkout/posting.ts), so a settlement credit
+      would record one obligation twice and the second copy would be indistinguishable from a tip nobody
+      had posted. What the settlement adds is the proof: the figure the acquirer paid over for the
+      gratuity equals the figure the liability holds, to the fils, read from invoice_payable_fils() which
+      is already 0068''s own statement of that credit. The acceptance line''s "never to revenue" is held
+      structurally by assertNoRevenueOrTipPosting, which refuses any entry line reaching a revenue
+      account OR 2040 - the settlement entry touches 1020, 1030, 6080 and the reverse-charge pair only.
+      ADR 0090 states the deviation.'
+    - 'NOTE: where several tenders cover one ticket AND the ticket carries a gratuity, the apportionment
+      of the tip between the tenders is recorded nowhere in this schema, so the tip line is quarantined
+      rather than split pro rata (ADR 0070 refused the same arithmetic for a cost component). Exact for
+      the single-tender case and a measured nought where several tenders cover the invoice gross exactly.
+      A per-tender gratuity record would make it exact in every case and belongs to whichever unit next
+      touches employee_tip.'
+    - 'NOTE: DEFERRED to a later unit - apps/web/app/(admin)/money/settlement/page.tsx is NOT built. There
+      is no (admin)/money section in this tree, so the page would be a new admin area with its own
+      route-registry entry, guard and navigation, and none of the five acceptance lines needs a screen:
+      "the report names the offending line" is satisfied by settlement_variance, whose rows carry the line
+      number, both figures, the difference and the explanation an operator reads, and readSettlementVariances
+      in @berelax/db is the reader a page would call. The port band { start: 20_000, width: 300 } allocated
+      to this group is therefore claimed by Y-PAY-04''s webhook suite and not by a settlement screen.'
+    - 'NOTE: nothing in this unit holds a fee rate, an interchange figure, an MCC, a gateway name or a
+      settlement delay (Y7-gateway, Y7-mcc, Y7-card-fee). The fee is whatever the payout file states and
+      ZY444 requires a fee line to tie to NOTHING in both directions, because a local figure for one could
+      only have come from a rate this build invented. Gate case 168k scans both modules for the shapes an
+      invented rate arrives as, with a control that fires on a source holding one.'
     files:
     - packages/core/src/payments/settlement.ts
     - packages/db/migrations/00XX-settlement-batch.sql

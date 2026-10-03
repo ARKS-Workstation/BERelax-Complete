@@ -57483,6 +57483,996 @@ export function chargebackNetEffectFils(`,
   }
 }
 
+// 168a-168z. Y-PAY-09 — reconciliation to the fils, where "to the fils" is an IDENTITY and not a report.
+//
+//            The failure every case here is against is the same one, and its distinguishing property is
+//            that it leaves a PERFECTLY BALANCED ledger behind. A settlement importer that absorbs a
+//            difference — a tolerance, a plug line, a zero substituted for a figure nobody could match —
+//            produces an entry whose debits equal its credits, because the plug is on both sides of it.
+//            The trial balance is clean, every report adds up, and the only evidence is a balance on
+//            `1030 Gateway clearing` that grows by a little every payout and ties to nothing.
+//
+//            So 168a to 168g widen, relax or remove exactly one part of the identity and require the
+//            suite to fail BY THE NAME of the rule (ADR 0003): a bare non-zero exit is satisfied by a
+//            syntax error.
+//
+//            168h and 168i are about the two accounts a settlement may never reach, and they are a pair
+//            on purpose. Admitting a revenue account is the D+2 acceptance line's defect — a payout that
+//            touches revenue moves a sale into whatever month the acquirer happened to pay in — and
+//            admitting `2040` is the tip's: the till already credited that liability, so a second credit
+//            records one obligation twice and is indistinguishable from a tip nobody posted.
+//
+//            168j is the fee's tax treatment, and it is the one case whose broken version looks most
+//            correct: defaulting an unknown treatment to domestic drops the reverse charge on every
+//            offshore batch, and the VAT return still BALANCES. docs/04 §4 calls that the obligation most
+//            commonly missed at this size, which is why the absence of a profile is a refusal (ADR 0088).
+//
+//            168k is the fee RATE, from the other direction: the broken version computes an expected fee
+//            from a rate, which is the figure brief rule 15 refuses. It is checked as a SCAN rather than
+//            by editing a module, because the claim is an absence.
+//
+//            168l to 168n are the gates this unit had to stay inside: the two directions of the SQLSTATE
+//            registry, and the migration ledger's documented run.
+//
+//            168p is the property suite's own vacuity floor. Narrowing the generator so no file can
+//            disagree makes six hundred cases pass over one shape, and the property then holds for a
+//            reconciler that accepts anything — brief rule 22's recorded failure.
+//
+//            168y and 168z are the controls: every case above is satisfied by something FAILING, so one
+//            has to be satisfied by the real tree passing.
+//
+//            Nothing here edits `packages/db/migrations/0136_settlement_batch.sql` in order to test a
+//            DATABASE rule, for blocks 134, 154, 166 and 167's reason. ZY441-ZY447 are proved against a
+//            real PostgreSQL by `packages/fixtures/src/settlement.itest.ts`, and four of them — ZY442,
+//            ZY443, ZY444 and ZY446 — are DEFERRED, so that file drives them through real transactions
+//            rather than savepoints: a rollback discards a pending constraint check and the probe never
+//            reaches it. What the migration IS edited for is 168m, where the checker reads the text.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const SETTLEMENT = 'packages/core/src/payments/settlement.ts'
+  const IMPORTER = 'apps/worker/src/jobs/settlement-import.ts'
+  const MIGRATION = 'packages/db/migrations/0136_settlement_batch.sql'
+  const REGISTRY = 'packages/db/src/sqlstate-registry.ts'
+
+  const UNIT_SUITE = 'packages/core/src/payments/settlement.test.ts'
+  const PROPERTY_SUITE = 'packages/core/src/payments/settlement.property.test.ts'
+
+  const pureSuites = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.config.ts',
+    UNIT_SUITE,
+    PROPERTY_SUITE,
+  ]
+  const propertySuite = () => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', PROPERTY_SUITE]
+
+  /**
+   * One anchored edit to a shipped module, then the suite that must fail because of it.
+   *
+   * Named for this block rather than reusing block 167's `breakReversal`, and the reason is mechanical
+   * rather than stylistic: two blocks defining a helper of the same shape is how git found the bodies as
+   * shared context and INTERLEAVED two blocks at a merge (block 133's note about its own helper).
+   */
+  const breakSettlement = (name, file, find, into, rule, args = pureSuites()) => {
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        file,
+        (source) => replaceOnce(source, find, into),
+        () => runExpectingFailure('pnpm', args),
+      ),
+      rule,
+    )
+  }
+
+  // ---- the identity ----------------------------------------------------------------------------
+
+  // 168a. THE case the unit is named for: a tolerance. Five fils is the figure somebody reaches for, and
+  //       it reconciles a rounding difference and a theft identically — on every batch, for ever.
+  breakSettlement(
+    'settlement: a five-fils tolerance on a line fails by name',
+    SETTLEMENT,
+    '    if (tie.localFils !== fileFils) {',
+    '    if (Math.abs(tie.localFils - fileFils) > 5) {',
+    'names a variance when a capture line is altered by one fils',
+  )
+
+  // 168b. The residue that belongs to no line, posted as a balancing figure instead of refusing. This is
+  //       ADR 0070's subject exactly: the difference exists either way, and only one of the two spellings
+  //       of it can be investigated afterwards.
+  breakSettlement(
+    'settlement: absorbing an unattributable residue fails by name',
+    SETTLEMENT,
+    '  const declaredVersusLines = file.declaredNetFils - signedTotal',
+    '  const declaredVersusLines = 0',
+    'refuses a residue that belongs to no line as unattributable',
+  )
+
+  // 168c. A line nothing answers to, read as a local NOUGHT rather than as an absence. The two take
+  //       different actions — one alerts an operator to an unmatched payout line, the other says our own
+  //       figure is wrong — and a reconciler that collapsed them would route both to the same queue.
+  breakSettlement(
+    'settlement: treating a missing local record as nought fails by name',
+    SETTLEMENT,
+    '    if (tie === undefined || tie.localFils === null) {',
+    '    if (false) {',
+    'quarantines a line nothing local answers to',
+  )
+
+  // 168d. `reconciled` reduced to the variance list alone. A file whose lines sum to its declared net can
+  //       still carry a capture that ties to nothing, and a quarantined line leaves every total intact —
+  //       so the two halves are different claims and neither implies the other.
+  breakSettlement(
+    'settlement: a reconciled flag that ignores the identities fails by name',
+    SETTLEMENT,
+    `    reconciled:
+      variances.length === 0 &&
+      identities.declaredVersusLinesFils === 0 &&
+      identities.linesVersusLocalFils === 0 &&
+      identities.quarantinedFils === 0 &&
+      identities.malformedFils === 0,`,
+    '    reconciled: identities.declaredVersusLinesFils === 0,',
+    'quarantines a line nothing local answers to',
+  )
+
+  // 168e. The precondition on posting, removed. "Zero variance or it refuses to post" becomes a check
+  //       somebody remembers to make, and the entry it posts is then evidence that the batch was accepted.
+  breakSettlement(
+    'settlement: posting a batch that carries a variance fails by name',
+    SETTLEMENT,
+    '  if (!reconciliation.reconciled) throw new SettlementVarianceRefusesToPost(reconciliation)',
+    '  if (false) throw new SettlementVarianceRefusesToPost(reconciliation)',
+    'refuses to post a batch that carries a variance',
+  )
+
+  // 168f. A duplicated line SUMMED rather than named. Two lines about one movement cannot both be
+  //       matched, and adding both doubles the amount while every other identity still holds.
+  breakSettlement(
+    'settlement: summing a duplicated line fails by name',
+    SETTLEMENT,
+    `    if (seen.has(key)) {
+      malformed += fileFils`,
+    `    if (false) {
+      malformed += fileFils`,
+    'names a duplicated line rather than summing both copies',
+  )
+
+  // 168g. The bank side always debited. An acquirer BILLS the business in a period whose chargebacks
+  //       exceed its captures, and a builder that assumed the sign posts that batch backwards — while
+  //       balancing perfectly, which is this block's whole subject.
+  breakSettlement(
+    'settlement: a bank side that assumes the payout is positive fails by name',
+    SETTLEMENT,
+    '  return [signedFils > 0 ? debit(account, amount, memo) : credit(account, amount, memo)]',
+    '  return [debit(account, amount, memo)]',
+    'credits the bank when the acquirer bills the business',
+  )
+
+  // ---- the two accounts a settlement may never reach -------------------------------------------
+
+  // 168h. Revenue admitted. This is the D+2 acceptance line's defect: a payout that touches revenue
+  //       moves a sale into whatever month the acquirer happened to pay in, and the sale's own tax point
+  //       says otherwise.
+  breakSettlement(
+    'settlement: admitting a revenue account to a payout entry fails by name',
+    SETTLEMENT,
+    "    if (account.type === 'revenue' || account.code === ACCOUNTS.tipsPayable) {",
+    '    if (account.code === ACCOUNTS.tipsPayable) {',
+    'refuses a line that reaches a revenue account',
+  )
+
+  // 168i. And `2040`. The till already credited it with the gratuity, so a settlement credit records one
+  //       obligation twice and the second copy is indistinguishable from a tip nobody posted.
+  breakSettlement(
+    'settlement: admitting tips payable to a payout entry fails by name',
+    SETTLEMENT,
+    "    if (account.type === 'revenue' || account.code === ACCOUNTS.tipsPayable) {",
+    "    if (account.type === 'revenue') {",
+    'refuses a line that reaches tips payable',
+  )
+
+  // ---- the fee, from both directions -----------------------------------------------------------
+
+  // 168j. The treatment defaulted to domestic. The most plausible-looking edit in the block: the return
+  //       still balances, nothing is owed, and the reverse charge is dropped on every offshore batch.
+  breakSettlement(
+    'settlement: defaulting a missing fee tax treatment fails by name',
+    SETTLEMENT,
+    '  if (feeFils > 0 && input.feeTax === undefined) throw new SettlementFeeHasNoTaxTreatment(feeFils)',
+    "  if (feeFils > 0 && input.feeTax === undefined) input = { ...input, feeTax: { treatment: 'domestic_uae' } }",
+    'refuses a fee with no tax treatment rather than defaulting to domestic',
+  )
+
+  // 168k. The fee RATE, as a scan. The claim is an ABSENCE — nothing in this unit holds a fee rate, an
+  //       interchange figure, an MCC or a settlement delay — so it cannot be proved by editing a module
+  //       and watching a test fail. What it can be is read: the two files are scanned for the arithmetic
+  //       an invented rate would arrive as, and for the words it would be named with.
+  {
+    // Comments are STRIPPED before the scan, and that is not a loosening. Both modules say in prose
+    // that they hold no interchange figure and no MCC — which is the claim — so a scan over the raw text
+    // reports the documentation as the violation. First run of this case did exactly that.
+    const withoutComments = (text) =>
+      text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ')
+    const sources = [SETTLEMENT, IMPORTER].map((file) => ({
+      file,
+      text: withoutComments(readFileSync(file).toString()),
+    }))
+    // A percentage applied to a fee, in any of the spellings a rate arrives as. `UAE_STANDARD_VAT_BP` is
+    // the authority's rate and is reached through `reverseChargeOn`, never restated, so it is not here.
+    const rateShapes = [
+      /\b0\.0[0-9]+\b/,
+      /\bbasisPoints\b/,
+      /\bfeeRate\b/,
+      /\binterchange\b/i,
+      /\bmcc\b/i,
+      /settlementDelay/i,
+      /\* *29 *\/ *1000/,
+    ]
+    const offenders = sources.flatMap(({ file, text }) =>
+      rateShapes.filter((shape) => shape.test(text)).map((shape) => `${file} matches ${shape}`),
+    )
+    check(
+      'settlement: nothing in the unit holds a fee rate, an interchange figure, an MCC or a settlement delay',
+      offenders.length === 0,
+      offenders.join('\n'),
+    )
+    // The control, which is what stops the scan being satisfied by two empty files: the patterns must
+    // fire on a source that DOES hold a rate.
+    const probe = withoutComments('const feeRate = 0.029\nconst mcc = 7230\n// no mcc here\n')
+    check(
+      'settlement: the fee-rate scan fires on a source that holds one',
+      rateShapes.filter((shape) => shape.test(probe)).length >= 2,
+      probe,
+    )
+  }
+
+  // ---- the gates this unit had to stay inside --------------------------------------------------
+
+  // 168l. The registry's forward direction: a code the migration raises and the registry does not list.
+  withEditedFile(
+    REGISTRY,
+    (source) => replaceOnce(source, "    code: 'ZY446',", "    code: 'ZY999',"),
+    () =>
+      checkRejectedBy(
+        'settlement: a raised code missing from the SQLSTATE registry is refused',
+        runExpectingFailure('pnpm', ['sqlstate']),
+        'ZY446',
+      ),
+  )
+
+  // 168m. And the migration's. The ledger's documented run has to reach 0136, and gate case 90a reads
+  //       the shape `// NNN is NNNN_file.sql` — a paragraph opening any other way ends the run early and
+  //       every later migration becomes undocumented.
+  {
+    const ledger = readFileSync('packages/db/src/index.ts').toString()
+    check(
+      'settlement: the migration ledger documents 0136 in the shape gate case 90a reads',
+      ledger.includes('// 136 is 0136_settlement_batch.sql (Y-PAY-09)'),
+      'the paragraph for 136 is absent or opens in another shape',
+    )
+    check(
+      'settlement: SCHEMA_VERSION is the newest migration on disk',
+      ledger.includes('export const SCHEMA_VERSION = 136 as const'),
+      'SCHEMA_VERSION does not name 136',
+    )
+    // The migration states the mapping `settlement_tie_account()` and `@berelax/core` both hold, and the
+    // pairing suite is what keeps them equal. A migration that dropped the function would make ZY445
+    // unenforceable while every pure test still passed.
+    const migration = readFileSync(MIGRATION).toString()
+    check(
+      'settlement: the migration states the tie-account mapping in SQL',
+      migration.includes('create function settlement_tie_account(p_kind text)') &&
+        migration.includes('tips_payable_account_code()') &&
+        migration.includes('disputed_card_receipts_account_code()'),
+      'settlement_tie_account is absent, or retypes an account code instead of calling for it',
+    )
+  }
+
+  // 168n. The band's unused codes must stay UNREGISTERED. An entry for a code no migration raises is
+  //       what direction 3 of ADR 0043's gate refuses, and ZY448-ZY450 are released.
+  {
+    const registry = readFileSync(REGISTRY).toString()
+    const claimed = ['ZY448', 'ZY449', 'ZY450'].filter((code) => registry.includes(code))
+    check(
+      'settlement: the released codes of the band are not registered',
+      claimed.length === 0,
+      `registered without being raised: ${claimed.join(', ')}`,
+    )
+  }
+
+  // ---- the property suite's own vacuity floor --------------------------------------------------
+
+  // 168p. Narrow the generator so no generated file can be perturbed, and the one-fils property holds
+  //       over six hundred cases of nothing. The floor is what fails, by name — which is the arrangement
+  //       brief rule 22 asks for, and the symptom it records is a gate reporting a rule as missing.
+  breakSettlement(
+    'settlement: a generator that cannot produce a perturbable file fails the vacuity floor',
+    PROPERTY_SUITE,
+    '      const target = file.lines.findIndex((row) => SETTLEMENT_LINE_TIES_LOCALLY[row.kind])',
+    '      const target = -1',
+    'the one-fils claim is vacuous',
+    propertySuite(),
+  )
+
+  // ---- the controls ----------------------------------------------------------------------------
+
+  // 168y. Every case above is satisfied by something FAILING, so this one is satisfied by the real tree:
+  //       the committed files pass both pure suites.
+  {
+    const pure = run('pnpm', pureSuites())
+    check(
+      'settlement: the committed identity, entry builder and property suite all pass',
+      !pure.failed,
+      pure.output,
+    )
+  }
+
+  // 168z. And the two database suites, which are where the claims a pure test cannot reach are proved:
+  //       the seven refusals, the mapping held equal across SQL and TypeScript, the no-op by content
+  //       hash, the quarantine with its alert in the same transaction, and the reverse-charge pair.
+  {
+    const pair = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      'packages/fixtures/src/settlement.itest.ts',
+      'apps/worker/src/jobs/settlement-import.itest.ts',
+    ])
+    check(
+      'settlement: the refusals, the pairing and the import pass against the real database',
+      !pair.failed,
+      pair.output,
+    )
+  }
+}
+
+// 178a-178z. Y-PAY-04 — a webhook is an UNAUTHENTICATED REQUEST until its signature verifies.
+//
+//            Every case in this block breaks one step of an ORDER, and the order is the unit. The defect
+//            each one creates is invisible from the outside: the endpoint keeps answering, the gateway
+//            keeps being happy, and the only evidence is a payment that moved without a signature or a
+//            body in a log nobody meant to put it in.
+//
+//            178a to 178e are the verification itself: the fall-back to trusting the body when no secret
+//            is configured, the three refusals collapsed into one, and the tolerance checked BEFORE the
+//            MAC — which is the subtlest of them, because it still refuses the right requests and makes
+//            the two refusals indistinguishable in the log.
+//
+//            178f is the one worth reading twice: the refusal branch carrying the body. It is the shape
+//            every "add the payload to the error for debugging" change takes, it is one line, and under
+//            SAQ-A the body is the one place a misconfigured gateway could put a primary account number.
+//
+//            178g and 178h are the two database claims that are easy to confuse: replay protection (the
+//            same bytes twice land once, answered 200) and idempotency (a DIFFERENT body under a reused
+//            id is refused). Treating the second as the first accepts a forged payload silently and then
+//            ignores it silently, which is why 178h breaks exactly that.
+//
+//            178i is the route reading `request.json()` instead of `request.text()`. It makes every
+//            signature fail, which sounds loud and is not: it presents as a gateway integration that
+//            "cannot be made to work", and the only check that catches it is one that signs real bytes.
+//
+//            178j is holding. A capture arriving before its authorisation must be HELD rather than
+//            refused, because the gateway will not send it again once it has a 200 — so refusing it loses
+//            a money movement, and ADR 0056's table stays strict only because the waiting happens here.
+//
+//            178k is the acceptance line about the client callback, and it is checked as a SCAN: the
+//            claim is that one path cannot reach another, and an absence is not provable by a passing
+//            assertion.
+//
+//            178l and 178m are the gates this unit had to stay inside: the SQLSTATE registry in both
+//            directions, and the migration ledger's documented run.
+//
+//            178y and 178z are the controls: every case above is satisfied by something FAILING, so one
+//            has to be satisfied by the real tree passing.
+//
+//            Nothing here edits `packages/db/migrations/0147_payment_webhook_event.sql` in order to test a
+//            DATABASE rule, for blocks 134, 154, 166, 167 and 168's reason. ZY671-ZY674 are proved against
+//            a real PostgreSQL by `packages/fixtures/src/payment-webhook.itest.ts`, and two of them — ZY673
+//            and ZY674 — are DEFERRED, so that file drives them through real transactions rather than
+//            savepoints. What the migration IS edited for is 178m, where the checker reads the text.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const VERIFY = 'packages/payments/src/webhook/verify.ts'
+  const HANDLERS = 'packages/payments/src/webhook/handlers.ts'
+  const INGEST = 'apps/web/app/api/webhooks/payments/ingest.ts'
+  const INTENT = 'packages/payments/src/intent.ts'
+  const WEBHOOK_MIGRATION = 'packages/db/migrations/0147_payment_webhook_event.sql'
+  const WEBHOOK_REGISTRY = 'packages/db/src/sqlstate-registry.ts'
+
+  const VERIFY_SUITE = 'packages/payments/src/webhook/verify.test.ts'
+  const INGEST_SUITE = 'packages/fixtures/src/payment-webhook.itest.ts'
+  const SERVER_SUITE = 'apps/web/src/payments-webhook.itest.ts'
+
+  const verifySuite = () => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', VERIFY_SUITE]
+  const ingestSuite = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    INGEST_SUITE,
+  ]
+
+  /**
+   * One anchored edit to a shipped module, then the suite that must fail because of it.
+   *
+   * Named for this block rather than reusing block 168's `breakSettlement`, and the reason is mechanical
+   * rather than stylistic: two blocks defining a helper of the same shape is how git found the bodies as
+   * shared context and INTERLEAVED two blocks at a merge (block 133's note about its own helper).
+   */
+  const breakWebhook = (name, file, find, into, rule, args = verifySuite()) => {
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        file,
+        (source) => replaceOnce(source, find, into),
+        () => runExpectingFailure('pnpm', args),
+      ),
+      rule,
+    )
+  }
+
+  // ---- the verification ------------------------------------------------------------------------
+
+  // 178a. THE case the unit exists for: verify when a secret is configured, trust the body when one is
+  //       not. One line, works everywhere a secret is set, and the machine where it is not is production
+  //       on the day it is rotated.
+  breakWebhook(
+    'webhook: falling back to trusting the body with no secret configured fails by name',
+    VERIFY,
+    "  if (input.secret.kind === 'not_configured') {\n    return refuse('secret_not_configured', input.secret.missing)\n  }",
+    "  if (input.secret.kind === 'not_configured') {\n    return { kind: 'verified', body: input.rawBody, signedAtEpochSeconds: 0 }\n  }",
+    'refuses every delivery when it is absent',
+  )
+
+  // 178b. A blank secret treated as configured. `FOO=` is what a misconfigured deployment looks like, and
+  //       an empty string is a perfectly valid HMAC key that anybody can compute against.
+  breakWebhook(
+    'webhook: a blank signing secret read as configured fails by name',
+    VERIFY,
+    "  if (secret === undefined || secret.trim() === '') {",
+    '  if (secret === undefined) {',
+    'is absent by default, and a blank one is absent too',
+  )
+
+  // 178c. The three refusals collapsed into one. The acceptance line asks for absent, malformed and
+  //       wrong-key to be ANSWERED individually, because they have different remedies: a caller that is
+  //       not the gateway, a gateway whose format changed, and a key that does not match.
+  breakWebhook(
+    'webhook: collapsing absent and malformed into one refusal fails by name',
+    VERIFY,
+    "  if (signature === null || timestamp === null) return refuse('signature_malformed')",
+    "  if (signature === null || timestamp === null) return refuse('signature_absent')",
+    'refuses a MALFORMED signature',
+  )
+
+  // 178d. The shape check removed, which is what makes `timingSafeEqual` safe to call at all: it THROWS
+  //       on a length mismatch, so a forged signature of the wrong length becomes a 500.
+  breakWebhook(
+    'webhook: dropping the hex shape check fails by name',
+    VERIFY,
+    "  if (!SIGNATURE_SHAPE.test(signature) || !TIMESTAMP_SHAPE.test(timestamp)) {\n    return refuse('signature_malformed')\n  }",
+    "  if (false) {\n    return refuse('signature_malformed')\n  }",
+    'refuses a MALFORMED signature',
+  )
+
+  // 178e. The tolerance moved BEFORE the MAC. The subtlest edit in the block: it still refuses the right
+  //       requests, and it makes a forged stale body and the gateway's own retry answer the same thing —
+  //       so the log can no longer tell a replay from a forgery.
+  breakWebhook(
+    'webhook: checking the tolerance before the MAC fails by name',
+    VERIFY,
+    '  const expected = signWebhookPayload(input.secret.secret, timestamp, input.rawBody)',
+    "  if (Math.abs(Math.floor(input.now / 1000) - Number(timestamp)) > (input.toleranceSeconds ?? WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS)) return refuse('timestamp_outside_tolerance')\n  const expected = signWebhookPayload(input.secret.secret, timestamp, input.rawBody)",
+    'rejects a FORGED stale delivery as invalid, not as a replay',
+  )
+
+  // 178f. The refusal carrying the body. This is the shape every "put the payload in the error so we can
+  //       debug it" change takes, and under SAQ-A the body is the one place a misconfigured gateway could
+  //       put a primary account number (ADR 0067).
+  breakWebhook(
+    'webhook: a refusal that carries the body fails by name',
+    VERIFY,
+    "    return refuse('signature_invalid')",
+    "    return { ...refuse('signature_invalid'), body: input.rawBody } as never",
+    'returns only a reason, a status and the missing key names',
+  )
+
+  // ---- the two database claims -----------------------------------------------------------------
+
+  // 178g. A redelivery answered as a refusal. A gateway that gets a 4xx for an event it has already had
+  //       processed escalates an incident and retries harder.
+  breakWebhook(
+    'webhook: refusing a redelivery instead of answering it fails by name',
+    HANDLERS,
+    "    if (isWebhookRedelivery(error)) return { kind: 'redelivered', eventId: delivery.eventId }",
+    '    if (isWebhookRedelivery(error)) throw error',
+    'answers a redelivery without a second transition',
+    ingestSuite(),
+  )
+
+  // 178h. Idempotency treated as replay protection: a DIFFERENT body under a reused event id read as the
+  //       same event arriving twice. It accepts a forged payload silently and then ignores it silently,
+  //       which is the one failure here with no trace at all.
+  breakWebhook(
+    'webhook: treating a reused event id as a redelivery fails by name',
+    HANDLERS,
+    "    if (refusal !== null && refusal.details?.['rule'] === 'eventIdReused') {\n      return { kind: 'event_id_reused', eventId: delivery.eventId }\n    }",
+    "    if (refusal !== null && refusal.details?.['rule'] === 'eventIdReused') {\n      return { kind: 'redelivered', eventId: delivery.eventId }\n    }",
+    'refuses a DIFFERENT body under a reused event id',
+    ingestSuite(),
+  )
+
+  // 178i. The route parsing instead of reading bytes. It makes every signature fail, which presents as a
+  //       gateway integration that "cannot be made to work" rather than as a bug in this file — and the
+  //       only check that catches it is one that signs real bytes and POSTs them.
+  {
+    // Comments are STRIPPED first, and that is not a loosening: this file SAYS in prose that it does not
+    // call `request.json()`, which is the claim — so a scan over the raw text reports the documentation
+    // as the violation. Block 168k's first run made exactly that mistake.
+    const withoutComments = (text) =>
+      text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ')
+    const ingest = withoutComments(readFileSync(INGEST).toString())
+    check(
+      'webhook: the route reads the raw body and never request.json()',
+      ingest.includes('await request.text()') && !ingest.includes('request.json()'),
+      'the ingest path parses the request instead of reading its bytes',
+    )
+    // The control: the scan must be able to SEE a `request.json()`, or it is satisfied by any file.
+    check(
+      'webhook: the raw-body scan fires on a route that parses',
+      withoutComments(
+        readFileSync(INGEST).toString().replace('await request.text()', 'await request.json()'),
+      ).includes('request.json()'),
+      'the scan cannot detect the thing it forbids',
+    )
+  }
+
+  // 178j. Holding removed, so a capture arriving before its authorisation is refused. The gateway will
+  //       not send it again once it has a 200, so the movement is simply lost — and the endpoint reports
+  //       a 500 about an event that was perfectly valid.
+  breakWebhook(
+    'webhook: refusing an out-of-order delivery instead of holding it fails by name',
+    HANDLERS,
+    '    if (error instanceof IntentTransitionRefused) return null',
+    '    if (error instanceof IntentTransitionRefused) throw error',
+    'converges to the same terminal state however the six events arrive',
+    ingestSuite(),
+  )
+
+  // ---- the client callback, as a scan ----------------------------------------------------------
+
+  // 178k. "An invoice is marked paid only by a webhook-confirmed capture" is an ABSENCE: the client
+  //       callback path must not be able to reach the tender. An absence cannot be proved by a passing
+  //       assertion, so it is read — and the control fires on a source that does reach it.
+  {
+    const intent = readFileSync(INTENT).toString()
+    const callback = intent.slice(intent.indexOf('export async function recordClientCallback'))
+    const forbidden = ['tenderWebhookCapture', 'insert into payment', 'update payment_intent']
+    const reached = forbidden.filter((needle) => callback.includes(needle))
+    check(
+      'webhook: the client callback path cannot reach the tender or move an intent',
+      reached.length === 0,
+      `recordClientCallback mentions: ${reached.join(', ')}`,
+    )
+    check(
+      'webhook: the client-callback scan fires on a path that does reach it',
+      forbidden.filter((needle) => `${callback}\ntenderWebhookCapture(uow, {})`.includes(needle))
+        .length === 1,
+      'the scan cannot detect the thing it forbids',
+    )
+  }
+
+  // ---- the gates this unit had to stay inside --------------------------------------------------
+
+  // 178l. The registry's forward direction: a code the migration raises and the registry does not list.
+  withEditedFile(
+    WEBHOOK_REGISTRY,
+    (source) => replaceOnce(source, "    code: 'ZY673',", "    code: 'ZY998',"),
+    () =>
+      checkRejectedBy(
+        'webhook: a raised code missing from the SQLSTATE registry is refused',
+        runExpectingFailure('pnpm', ['sqlstate']),
+        'ZY673',
+      ),
+  )
+
+  // 178m. And the ledger's documented run, which gate case 90a reads by the shape of the opening line.
+  {
+    const ledger = readFileSync('packages/db/src/index.ts').toString()
+    check(
+      'webhook: the migration ledger documents 0147 in the shape gate case 90a reads',
+      ledger.includes('// 147 is 0147_payment_webhook_event.sql (Y-PAY-04)'),
+      'the paragraph for 147 is absent or opens in another shape',
+    )
+    check(
+      'webhook: SCHEMA_VERSION is the newest migration on disk',
+      ledger.includes('export const SCHEMA_VERSION = 147 as const'),
+      'SCHEMA_VERSION does not name 147',
+    )
+    const migration = readFileSync(WEBHOOK_MIGRATION).toString()
+    // The amount is a COLUMN, because a held event is re-folded from its row and the body is not kept.
+    check(
+      'webhook: the event row carries the two figures a re-fold needs, and not the body',
+      migration.includes('amount_fils        bigint') &&
+        migration.includes('occurred_at        timestamptz not null') &&
+        !migration.includes('payload            text'),
+      'the event row cannot be re-folded, or it stores the body',
+    )
+    // The released codes of the band must stay UNREGISTERED (ADR 0043 direction 3).
+    const registry = readFileSync(WEBHOOK_REGISTRY).toString()
+    const claimed = ['ZY675', 'ZY676', 'ZY677', 'ZY678', 'ZY679', 'ZY680'].filter((code) =>
+      registry.includes(code),
+    )
+    check(
+      'webhook: the released codes of the band are not registered',
+      claimed.length === 0,
+      `registered without being raised: ${claimed.join(', ')}`,
+    )
+  }
+
+  // ---- the controls ----------------------------------------------------------------------------
+
+  // 178y. The committed verification suite passes, which is what makes every case above a claim about an
+  //       edit rather than about a suite that fails anyway.
+  {
+    const pure = run('pnpm', verifySuite())
+    check('webhook: the committed verification suite passes', !pure.failed, pure.output)
+  }
+
+  // 178z. And the two database suites, which are where the claims a pure test cannot reach are proved:
+  //       the four refusals, the handler set held equal across SQL and TypeScript, ten concurrent
+  //       deliveries producing one transition and one entry, the shuffled six-event convergence, and the
+  //       statuses the application actually serves.
+  {
+    const pair = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      INGEST_SUITE,
+      SERVER_SUITE,
+    ])
+    check(
+      'webhook: the refusals, the races and the served statuses pass against the real database',
+      !pair.failed,
+      pair.output,
+    )
+  }
+}
+
+// 179a-179z. Y-PAY-05 — a repair is an APPLIED EVENT, and the watermark is the last FINISHED run.
+//
+//            This unit's subject is the quietest failure in the payments estate: a capture nobody
+//            recorded. The money is at the acquirer, the invoice reads unpaid, the customer is chased for
+//            it, and nothing anywhere is wrong. So every case here breaks one of the three things that
+//            make the pass able to see it at all — and each broken version still RUNS, still reports
+//            success, and still leaves a clean-looking database.
+//
+//            179a is the one worth reading first: a pass that reads only our own table. It is the shape a
+//            reasonable person writes, it is simpler, it is faster, and it can never find a lost event —
+//            which is the only thing it was built for. The case is a SCAN, because "this module reads the
+//            gateway" is a claim about what the code does rather than about an output.
+//
+//            179b to 179d are the repair: overwriting instead of folding, trusting the gateway's own
+//            `state` field instead of the lifecycle table, and recording a repair with no evidence.
+//
+//            179e and 179f are the quarantine. Correcting an unattributable divergence is the
+//            safe-looking edit that loses the information, and it is ADR 0070's subject for the third
+//            time in this batch.
+//
+//            179g to 179i are the watermark, and 179g is the acceptance line about a kill mid-run: a
+//            watermark that counts UNFINISHED runs advances past a window whose repairs never committed,
+//            and those events are then never read again and nothing says so.
+//
+//            179j is the suite's own vacuity floor. A fuzz run that dropped nothing would hold for a pass
+//            that did nothing at all (brief rule 22).
+//
+//            179k is the cron's agent, which is the one rule in this block that is not about money: a
+//            scheduled pass whose output in the healthy case is NOTHING is invisible unless something
+//            watches for the absence of a success.
+//
+//            179l and 179m are the gates this unit had to stay inside: the SQLSTATE registry in both
+//            directions, and the migration ledger's documented run.
+//
+//            179y and 179z are the controls: every case above is satisfied by something FAILING, so one
+//            has to be satisfied by the real tree passing.
+//
+//            Nothing here edits `packages/db/migrations/0148_reconciliation_exception.sql` in order to
+//            test a DATABASE rule, for blocks 134, 154, 166, 167, 168 and 178's reason. ZY681-ZY684 are
+//            proved against a real PostgreSQL by `packages/fixtures/src/payment-reconciliation.itest.ts`,
+//            and ZY683 is DEFERRED so that file drives it through real transactions. What the migration
+//            IS edited for is 179m, where the checker reads the text.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const RECONCILE = 'packages/payments/src/reconcile.ts'
+  const PASS = 'apps/worker/src/jobs/payment-reconciliation.ts'
+  const RECON_MIGRATION = 'packages/db/migrations/0148_reconciliation_exception.sql'
+  const RECON_REGISTRY = 'packages/db/src/sqlstate-registry.ts'
+  const RECON_REPO = 'packages/db/src/repositories/reconciliation.ts'
+
+  const DIFF_SUITE = 'packages/payments/src/reconcile.test.ts'
+  const PASS_SUITE = 'apps/worker/src/jobs/payment-reconciliation.itest.ts'
+  const REFUSAL_SUITE = 'packages/fixtures/src/payment-reconciliation.itest.ts'
+
+  const diffSuite = () => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', DIFF_SUITE]
+  const passSuite = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    PASS_SUITE,
+  ]
+
+  /**
+   * One anchored edit to a shipped module, then the suite that must fail because of it.
+   *
+   * Named for this block rather than reusing block 168's or 178's helper, and the reason is mechanical
+   * rather than stylistic: two blocks defining a helper of the same shape is how git found the bodies as
+   * shared context and INTERLEAVED two blocks at a merge (block 133's note about its own helper).
+   */
+  const breakReconcile = (name, file, find, into, rule, args = diffSuite()) => {
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        file,
+        (source) => replaceOnce(source, find, into),
+        () => runExpectingFailure('pnpm', args),
+      ),
+      rule,
+    )
+  }
+
+  // ---- both sides on file ----------------------------------------------------------------------
+
+  // 179a. THE case the unit exists for, and it is a SCAN because the claim is about what the module
+  //       reads. A pass that never asks the gateway reports every intent as in step, which is the one
+  //       failure mode this unit was built to remove — and it is simpler, faster and perfectly green.
+  {
+    const withoutComments = (text) =>
+      text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ')
+    const pass = withoutComments(readFileSync(PASS).toString())
+    const required = ['eventsSince(', 'fetchIntent(', 'recordGatewayObservation(']
+    const absent = required.filter((needle) => !pass.includes(needle))
+    check(
+      'reconciliation: the pass reads the gateway and puts its answer on file',
+      absent.length === 0,
+      `the pass does not call: ${absent.join(', ')} — it would report every intent as in step`,
+    )
+    // The control: the scan must be able to SEE the absence, or it is satisfied by any file.
+    check(
+      'reconciliation: the both-sides scan fires on a pass that reads only our own table',
+      required.filter((needle) => !pass.replace('fetchIntent(', 'noop(').includes(needle))
+        .length === 1,
+      'the scan cannot detect the thing it requires',
+    )
+  }
+
+  // ---- the repair ------------------------------------------------------------------------------
+
+  // 179b. The gateway's own `state` field believed instead of the fold. It works for every gateway that
+  //       agrees with our table and silently accepts an un-capture from one that does not — the cell ADR
+  //       0056's table has a comment about.
+  breakReconcile(
+    'reconciliation: trusting the gateway state instead of folding fails by name',
+    RECONCILE,
+    '    afterState = reduceIntent([...input.stored, ...missed]).state',
+    '    afterState = input.gateway.state',
+    'computes the after-state by FOLDING',
+  )
+
+  // 179c. A one-fils difference absorbed. Y-PAY-09's argument, one subject along: a few fils between two
+  //       ledgers is either a missed event or money that went somewhere, and those are the same number.
+  breakReconcile(
+    'reconciliation: a tolerance on the figures fails by name',
+    RECONCILE,
+    "    if (field === 'captured') return local.capturedFils !== gateway.capturedFils",
+    "    if (field === 'captured') return Math.abs(local.capturedFils - gateway.capturedFils) > 5",
+    'names a one-fils difference, because there is no tolerance',
+  )
+
+  // 179d. Two different intents compared. It produces a divergence in every field and a repair that
+  //       applies one intent's events to another, and nothing downstream could tell.
+  breakReconcile(
+    'reconciliation: comparing two different intents fails by name',
+    RECONCILE,
+    '  if (local.gatewayIntentId !== gateway.gatewayIntentId) {',
+    '  if (false) {',
+    'refuses to compare two different intents',
+  )
+
+  // ---- the quarantine --------------------------------------------------------------------------
+
+  // 179e. An unattributable divergence REPAIRED instead of quarantined. The safe-looking edit, and the
+  //       one that loses the information: the figure moves, the row says it was repaired, and the event
+  //       that would have justified it never existed.
+  breakReconcile(
+    'reconciliation: repairing an unattributable divergence fails by name',
+    RECONCILE,
+    "      action: 'quarantine',\n      missed: [],\n      before,\n      afterState: null,",
+    "      action: 'none',\n      missed: [],\n      before,\n      afterState: null,",
+    'QUARANTINES a divergence nothing explains',
+  )
+
+  // 179f. A gateway stream that cannot be folded, applied anyway. Half of an internally impossible
+  //       sequence leaves a position neither side holds — and the pass would report it as repaired.
+  breakReconcile(
+    'reconciliation: applying an unfoldable stream fails by name',
+    RECONCILE,
+    "      action: 'quarantine',\n      missed,\n      before,\n      afterState: null,",
+    "      action: 'apply_missed_events',\n      missed,\n      before,\n      afterState: 'captured',",
+    'quarantines a stream that cannot be folded',
+  )
+
+  // ---- the watermark ---------------------------------------------------------------------------
+
+  // 179g. THE kill-mid-run case. A watermark that counts UNFINISHED runs advances past a window whose
+  //       repairs never committed, and those events are never read again — a lost payment with no trace.
+  {
+    const migration = readFileSync(RECON_MIGRATION).toString()
+    const view = migration.slice(migration.indexOf('create view payment_reconciliation_watermark'))
+    check(
+      'reconciliation: the watermark counts only finished runs',
+      view.includes('where r.finished_at is not null'),
+      'the watermark view admits a run still in flight, so an interrupted pass would skip its window',
+    )
+    // And the pass must not close a run it did not finish: the close is the only thing that advances it.
+    const repo = readFileSync(RECON_REPO).toString()
+    check(
+      'reconciliation: a run closes once, and only while it is open',
+      repo.includes('where id = ${input.runId}::uuid and finished_at is null'),
+      'closeReconciliationRun can close a run twice, which moves the watermark on counted evidence',
+    )
+  }
+
+  // 179h. The cursor taken as the LAST delivery rather than the largest. A gateway answering out of order
+  //       would move the watermark backwards, and `ZY684` would then refuse the close — so the symptom is
+  //       a pass that cannot complete, which is better than a silent skip and is still a defect.
+  {
+    const pass = readFileSync(PASS).toString()
+    check(
+      'reconciliation: the cursor is the largest seen, not the last',
+      pass.includes(
+        'if (cursorTo === null || delivery.cursor > cursorTo) cursorTo = delivery.cursor',
+      ),
+      'the pass takes the last cursor rather than the greatest',
+    )
+  }
+
+  // 179i. One transaction per PASS instead of per intent. An interruption then rolls back every repair,
+  //       so "killed mid-run reaches the same end state" is satisfied by a pass that did nothing — which
+  //       is brief rule 3's vacuous assertion with a database attached.
+  {
+    const withoutComments = (text) =>
+      text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ')
+    const pass = withoutComments(readFileSync(PASS).toString())
+    // `withUnitOfWork` is opened inside the per-intent function and nowhere else, so the grain is
+    // structural: a pass-level transaction would have to wrap the loop.
+    check(
+      'reconciliation: the transaction grain is one intent',
+      (pass.match(/withUnitOfWork\(/g) ?? []).length === 1 &&
+        pass.indexOf('withUnitOfWork(') > pass.indexOf('async function reconcileOneIntent'),
+      'the pass opens a transaction outside the per-intent function',
+    )
+  }
+
+  // ---- the suite's own floors ------------------------------------------------------------------
+
+  // 179j. A fuzz run that dropped nothing holds for a pass that does nothing at all. The floor is what
+  //       fails, by name — brief rule 22's arrangement.
+  breakReconcile(
+    'reconciliation: a fuzz run with nothing dropped fails the vacuity floor',
+    PASS_SUITE,
+    'const DROP_RATE = 0.3',
+    'const DROP_RATE = 0',
+    'nothing was dropped: the fuzz run proves nothing',
+    passSuite(),
+  )
+
+  // ---- the cron's agent ------------------------------------------------------------------------
+
+  // 179k. A cron with no agent. `pnpm jobs` refuses it statically, and that is the check — because a
+  //       scheduled pass whose output in the healthy case is NOTHING is invisible unless something
+  //       watches for the absence of a success.
+  withEditedFile(
+    PASS,
+    (source) =>
+      replaceOnce(source, '  agent: PAYMENT_RECONCILIATION_AGENT,', '  // agent: removed'),
+    () =>
+      checkRejectedBy(
+        'reconciliation: a cron with no agent_definition is refused',
+        runExpectingFailure('pnpm', ['jobs']),
+        'must name the agent_definition',
+      ),
+  )
+
+  // ---- the gates this unit had to stay inside --------------------------------------------------
+
+  // 179l. The registry's forward direction: a code the migration raises and the registry does not list.
+  withEditedFile(
+    RECON_REGISTRY,
+    (source) => replaceOnce(source, "    code: 'ZY684',", "    code: 'ZY997',"),
+    () =>
+      checkRejectedBy(
+        'reconciliation: a raised code missing from the SQLSTATE registry is refused',
+        runExpectingFailure('pnpm', ['sqlstate']),
+        'ZY684',
+      ),
+  )
+
+  // 179m. The ledger's documented run, the agent pair, and the released codes.
+  {
+    const ledger = readFileSync('packages/db/src/index.ts').toString()
+    check(
+      'reconciliation: the migration ledger documents 0148 in the shape gate case 90a reads',
+      ledger.includes('// 148 is 0148_reconciliation_exception.sql (Y-PAY-05)'),
+      'the paragraph for 148 is absent or opens in another shape',
+    )
+    check(
+      'reconciliation: SCHEMA_VERSION is the newest migration on disk',
+      ledger.includes('export const SCHEMA_VERSION = 148 as const'),
+      'SCHEMA_VERSION does not name 148',
+    )
+    const migration = readFileSync(RECON_MIGRATION).toString()
+    // The agent AND its heartbeat, in the migration that created the cron. 0031's convention: a new agent
+    // brings its own, because `agentsWithHeartbeat` INNER JOINs the two.
+    check(
+      'reconciliation: the migration brings the agent and its heartbeat row',
+      migration.includes('insert into agent_definition') &&
+        migration.includes('insert into agent_heartbeat') &&
+        migration.includes("'payment_reconciliation'"),
+      'the cron has no agent row, no heartbeat row, or names another agent',
+    )
+    const registry = readFileSync(RECON_REGISTRY).toString()
+    const claimed = ['ZY685', 'ZY686', 'ZY687', 'ZY688', 'ZY689', 'ZY690'].filter((code) =>
+      registry.includes(code),
+    )
+    check(
+      'reconciliation: the released codes of the band are not registered',
+      claimed.length === 0,
+      `registered without being raised: ${claimed.join(', ')}`,
+    )
+  }
+
+  // ---- the controls ----------------------------------------------------------------------------
+
+  // 179y. The committed diff suite passes, which is what makes every case above a claim about an edit
+  //       rather than about a suite that fails anyway.
+  {
+    const pure = run('pnpm', diffSuite())
+    check('reconciliation: the committed diff suite passes', !pure.failed, pure.output)
+  }
+
+  // 179z. And the two database suites, which are where the claims a pure test cannot reach are proved:
+  //       the four refusals, the five-hundred-intent fuzz run, the idempotence, the interruption
+  //       checksum and the quarantine with its alert in the same transaction.
+  {
+    const pair = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      REFUSAL_SUITE,
+      PASS_SUITE,
+    ])
+    check(
+      'reconciliation: the refusals, the fuzz run and the interruption pass against the real database',
+      !pair.failed,
+      pair.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

@@ -1264,6 +1264,49 @@ export {
   recordGatewayIntentId,
 } from './repositories/payment-intent.ts'
 /*
+  Y-PAY-04's webhook side (0147). Reads and writes only; the signature is `@berelax/payments`' and happens
+  strictly before any of this.
+
+  Two claims that are often confused and are not the same: `isWebhookRedelivery` is REPLAY PROTECTION — the
+  same bytes again, answered 200 — and it matches the CONSTRAINT NAME as well as the SQLSTATE, because a
+  bare 23505 in the same transaction could equally be `payment_webhook_handler_run_once` or the intent's
+  own idempotency key. `eventIdReused` (ZY672) is IDEMPOTENCY: a DIFFERENT body under a known event id,
+  refused and never applied. `recordPaymentWebhookEvent` takes a `UnitOfWork` because ZY673 reads the
+  `payment_intent_transaction` rows at COMMIT — an event row committed separately from its application
+  would let a crash between the two leave a run claiming a movement that never happened, and the run row is
+  what stops a retry.
+
+  `tenderWebhookCapture` is the ONLY path that writes a `card_online` `payment` row for a gateway capture,
+  which is the acceptance line "an invoice is marked paid only by a webhook-confirmed capture":
+  `recordClientCallback` contains no UPDATE and never reaches it. `findInvoiceForIntentReference` is a
+  LOOKUP that may legitimately answer nothing, because 0106 refused a key from `payment_intent` to
+  `invoice` — an intent is authorised before there is a document.
+*/
+export {
+  declaredWebhookHandlers,
+  findInvoiceForIntentReference,
+  findPaymentWebhookEvent,
+  isPaymentWebhookRule,
+  isWebhookHandlerAlreadyRun,
+  isWebhookRedelivery,
+  PAYMENT_WEBHOOK_CONSTRAINT,
+  PAYMENT_WEBHOOK_SQLSTATE,
+  type PaymentWebhookEventRow,
+  type PaymentWebhookRule,
+  paymentWebhookError,
+  type RecordHandlerRunInput,
+  type RecordPaymentWebhookEventInput,
+  readPaymentIntentByGatewayIntentId,
+  readWebhookEventsForIntent,
+  readWebhookHandlerRuns,
+  recordPaymentWebhookEvent,
+  recordWebhookHandlerRun,
+  tenderWebhookCapture,
+  type WebhookEventForIntentRow,
+  type WebhookHandlerRunRow,
+  type WebhookIntentRow,
+} from './repositories/payment-webhook.ts'
+/*
   P-HR-12's payroll side (0104). Reads and writes only: the arithmetic is
   `packages/core/src/hr/payroll.ts`'s and the WPS layout is `packages/core/src/hr/wps-sif.ts`'s, this
   package may not import either, and `packages/hr` is where the halves meet.
@@ -1447,6 +1490,43 @@ export {
   reassignmentRefusalOf,
   resolveReassignmentFlag,
 } from './repositories/reassignment.ts'
+/*
+  Y-PAY-05's reconciliation side (0148). Reads and writes only; the diff is
+  `packages/payments/src/reconcile.ts`'s and this package may not import it.
+
+  `readReconciliationWatermark` reads the cursor of the last FINISHED run, which is the whole of the
+  interrupted-run property: a single mutable cursor row fails in exactly that case - it advances, the
+  process dies before the repairs commit, and the events in between are never read again and nothing says
+  so. `closeReconciliationRun` is the ONE legal UPDATE on the table and ZY681 refuses every other, so a
+  run cannot be re-attributed, re-dated or closed twice.
+
+  `recordGatewayObservation` is the gateway's side on file with the instant WE asked - without it the pass
+  would be comparing our records with our records, and the one thing it could never find is the event that
+  never arrived. `recordReconciliationException` writes the quarantine's `audit_event` in the SAME
+  transaction, because ZY683 reads it at COMMIT: an alert written afterwards can fail while the quarantine
+  commits, and the only evidence that an intent went unexplained would be the intent.
+
+  `readIntentPositions` reads every position in ONE query, because 500 intents is 500 round trips
+  otherwise - and because the positions have to be consistent with each other: read one at a time, a
+  webhook landing between the tenth and the eleventh produces a snapshot that was never true.
+*/
+export {
+  closeReconciliationRun,
+  type IntentPositionRow,
+  isReconciliationRule,
+  openReconciliationRun,
+  RECONCILIATION_SQLSTATE,
+  type ReconciliationExceptionRow,
+  type ReconciliationRule,
+  type RecordExceptionInput,
+  type RecordObservationInput,
+  readIntentPositions,
+  readReconciliationExceptions,
+  readReconciliationWatermark,
+  reconciliationError,
+  recordGatewayObservation,
+  recordReconciliationException,
+} from './repositories/reconciliation.ts'
 export {
   RESCHEDULE_REFUSALS,
   type RescheduleDeps,
@@ -1651,6 +1731,49 @@ export {
   registerInspectionCandidates,
   upsertGscDailyRows,
 } from './repositories/seo-warehouse.ts'
+/*
+  Y-PAY-09's settlement side (0136). Reads and writes only: the reconciliation arithmetic is
+  `packages/core/src/payments/settlement.ts`'s and this package may not import it (ADR 0001).
+
+  `findSettlementBatchByContent` is read BEFORE an import opens a transaction, which is what makes a
+  re-import a no-op rather than a caught unique violation: the batch's own `audit_event` and
+  `journal_entry` writes would have happened inside the aborted transaction, so a retry loop would be
+  indistinguishable from a first import in the log. `isSettlementReimport` is the backstop for two
+  importers racing on one file, and it matches the CONSTRAINT NAME as well as the SQLSTATE — a bare
+  `23505` here could equally be `settlement_line_one_per_movement`, which is a defect in the file rather
+  than a re-import.
+
+  `readSettlementTies` reads every local figure in ONE query, for `readRefundablePosition`'s reason. The
+  tip's figure is DERIVED and the derivation names the case it cannot answer: `employee_tip` carries no
+  payment and no intent, so the tip on a capture is the excess of the card tender over the invoice it
+  settled - exact where the invoice has one tender, a measured nought where several tenders cover the
+  invoice gross exactly, and NULL where a tip exists among several tenders, because its apportionment is
+  recorded nowhere and a pro-rata split would be a policy decision disguised as a calculation (ADR 0070).
+
+  `recordSettlementBatch` DERIVES the state from the variances rather than taking it, so a caller cannot
+  ask for a posted batch while handing over an exception - and it takes a `UnitOfWork` because ZY443 and
+  ZY444 read the lines at COMMIT and ZY446 needs the quarantine's `audit_event` in the same transaction.
+*/
+export {
+  findSettlementBatchByContent,
+  isSettlementReimport,
+  isSettlementRule,
+  type RecordedSettlementBatch,
+  type RecordSettlementBatchInput,
+  readSettlementTies,
+  readSettlementVariances,
+  recordSettlementBatch,
+  SETTLEMENT_CONSTRAINT,
+  SETTLEMENT_SQLSTATE,
+  type SettlementBatchRow,
+  type SettlementLineInput,
+  type SettlementRule,
+  type SettlementTieRow,
+  type SettlementVarianceInput,
+  type SettlementVarianceRow,
+  settlementError,
+  settlementTieAccount,
+} from './repositories/settlement.ts'
 /*
   W-SYS-11's admin session (0090). `readStaffSession` is the only way a request learns who is reading, and
   it returns `role` as a `string`: `Role` and the matrix live in `packages/core`, which `packages/db` may
@@ -5272,4 +5395,131 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // The ZY661-ZY670 band allocated to this unit is released UNUSED and deliberately unregistered, because
 // `pnpm sqlstate` refuses an entry for a code no migration raises.
 //
-export const SCHEMA_VERSION = 145 as const
+// 136 is 0136_settlement_batch.sql (Y-PAY-09) — the gateway payout, reconciled to the fils, where "to
+// the fils" is a REFUSAL and not a report.
+//
+// Three append-only tables (`settlement_batch`, `settlement_line`, `settlement_variance`), one function
+// that states a mapping (`settlement_tie_account`), and seven refusals. The reason the identity is stated
+// here as well as in `packages/core/src/payments/settlement.ts` is the specific error this process can
+// make: an importer that absorbs a difference produces an entry that BALANCES — the plug is on both
+// sides — and the evidence is a slowly growing balance on `1030 Gateway clearing` that ties to nothing.
+// `ZY442` is what makes the absorption impossible rather than discouraged, and
+// `packages/fixtures/src/settlement.itest.ts` holds the two statements equal in the same commit.
+//
+// **A batch is POSTED or QUARANTINED and never both (`ZY443`), in both directions.** The tempting shape
+// is one batch, an entry, and variance rows beside it — "posted with exceptions" — and it is refused: a
+// batch with an entry is one the bank reconciliation treats as answered, and a variance row beside it is
+// a note nobody is obliged to read. `ZY446` then requires a quarantined batch's `audit_event` to have
+// been written in the SAME transaction (0093 `ZZ004`'s argument), so a quarantine nobody was told about
+// cannot commit — which is the acceptance line "quarantined and ALERTED rather than force-matched".
+//
+// **`content_sha256` is of the BYTES and is unique.** Two files whose lines differ only in order are the
+// same settlement and must be the same no-op; two that differ by a line nobody parsed are not, and only
+// the bytes can tell them apart. The repository SELECTs on it first and answers `already_imported`, so
+// the ordinary re-import is a no-op and the unique violation is the backstop for two importers racing.
+//
+// **`settled_on` has no key to `business_day`, and that is the D+2 acceptance line.** A payout lands on
+// days the premises were shut, exactly as `journal_entry.entry_date` does (ADR 0064) — while
+// `chargeback.trading_date` DOES carry one, because a dispute notice belongs in a day's card totals and a
+// bank movement belongs to no session. Nothing in the file derives one date from the other and no
+// settlement delay is stated anywhere, so there is no mechanism by which a payout could move a sale
+// between business days: the entry touches `1020`, `1030`, `6080` and the reverse-charge pair and nothing
+// else, and `assertNoRevenueOrTipPosting` in `@berelax/core` refuses any line that reaches revenue.
+//
+// **The three signed columns are `bigint` rather than the `fils_nonneg` domain**, because an acquirer
+// BILLS the business in a period whose chargebacks exceed its captures. A non-negative column would have
+// made that batch unrecordable, or recordable with the sign dropped — which posts the same figure the
+// other way round and balances.
+//
+// Nothing here holds a fee rate, an interchange figure, an MCC, a gateway name or a settlement delay
+// (`Y7-gateway`, `Y7-mcc`, `Y7-card-fee`). The fee is whatever the file says it is; `ZY444` requires a
+// fee line to tie to NOTHING, because a local figure for one would be a rate this build invented.
+//
+// ZY441-ZY447 of the band ZY441-ZY450 are used; ZY448-ZY450 are RELEASED unused and deliberately
+// unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
+//
+// 147 is 0147_payment_webhook_event.sql (Y-PAY-04) — the webhook event, where replay protection and
+// idempotency are TWO claims and both live in the database because the worker restarts.
+//
+// Two append-only tables, one function that states a set (`payment_webhook_handlers()`), and four
+// refusals. The reason none of it can be a `Set` in a handler is mechanical: the web process restarts on
+// every release and the worker on every crash, at which point the memory of what has been seen is empty
+// and the gateway is still retrying every delivery it has not had a 200 for.
+//
+// **The two claims, and why one unique constraint is not both.** `unique (gateway, event_id)` is REPLAY
+// PROTECTION: the same event twice lands once, and the second delivery is answered 200 — a gateway that
+// gets a 4xx for a redelivery escalates an incident about an event it processed correctly. `ZY672` is
+// IDEMPOTENCY: a DIFFERENT body under a reused id is refused, audited and never applied, because it is
+// either a gateway defect that would double-count money or somebody who holds the signing secret and is
+// editing the payload. The constraint cannot tell them apart — both are a second row with the same id —
+// so `payload_sha256` is stored and compared, and the trigger deliberately does NOT raise for a matching
+// digest: that case falls through to the unique violation the caller answers 200 to.
+//
+// **Why a second table rather than a `handled` boolean.** One delivery legitimately has more than one
+// handler — a capture moves the intent AND settles the document it paid for, and those can fail
+// independently — so a boolean would mean "something was done", which is not a claim anybody can retry
+// against. `unique (webhook_event_id, handler)` is ADR 0008's exactly-once-per-handler, and `ZY674` holds
+// the handler name to `payment_webhook_handlers()` because a TYPO is a new slot in that constraint rather
+// than an error: the event would be processed twice while the constraint reported success. The set is
+// stated twice, here and as `WEBHOOK_HANDLERS` in `@berelax/payments`, with the pairing check in
+// `packages/fixtures/src/payment-webhook.itest.ts`.
+//
+// **`ZY673` is what makes "applied" mean something.** A run recorded as `applied` for the `intent`
+// handler must have its `payment_intent_transaction` row, at COMMIT. Without it the row says the event was
+// applied and nothing moved — and because the run row exists, no retry will ever look at that event again.
+// That is a LOST money movement the system believes it has processed, which is the worst failure available
+// to a webhook endpoint, and it is the other half of ADR 0056.
+//
+// **A row here is EVIDENCE THAT A SIGNATURE VERIFIED**, which is why there is no `verified` column: an
+// unverified delivery writes nothing at all, so a row for one cannot exist. The three refusals the
+// acceptance names — absent, malformed and wrong-key — are `audit_event` rows and nothing else, because
+// an unauthenticated request must not be able to fill a table.
+//
+// No signing secret, no key version, no endpoint URL and no tolerance window are stored.
+// `PAYMENT_WEBHOOK_SIGNING_SECRET` is absent by default in every environment (`Y7-gateway`) and its
+// absence answers 503 rather than 401 — 401 says "your signature is wrong" and the truth is "we cannot
+// check it", and a gateway retries a 503 while a 401 makes it give up. The tolerance is
+// `WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS` beside the verification, where it belongs; a column for it would
+// be a second answer.
+//
+// ZY671-ZY674 of the band ZY671-ZY680 are used; ZY675-ZY680 are RELEASED unused and deliberately
+// unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
+//
+// 148 is 0148_reconciliation_exception.sql (Y-PAY-05) — the missed-event reconciliation, with BOTH
+// sides on file and each carrying its own instant.
+//
+// Three append-only tables, one view and four refusals, plus the `payment_reconciliation` agent and its
+// `agent_heartbeat` row. The reason the gateway's side is a TABLE is the whole unit: Y-PAY-04 makes a
+// delivered event land exactly once and can do nothing about one that never arrived, and from inside this
+// system a lost webhook is indistinguishable from an event that never happened. A job reading only
+// `payment_intent` would be comparing our records with our records, so `gateway_state_observation` holds
+// what the gateway said with the instant WE asked at — which is what makes "repaired from a snapshot
+// taken at 04:15" a fact rather than a reconstruction.
+//
+// **A repair is an APPLIED EVENT and never an overwrite.** The three figures are a projection of
+// append-only transaction rows held equal to them at commit (`ZY163`, ADR 0056), so there is no UPDATE
+// that could write them without fabricating a gateway event — a lie about a third party in the one table
+// a dispute is answered from. `ZY682` is what makes a recorded repair say WHICH events justified it, in
+// both directions: a `repaired` row naming no event is a figure that changed overnight, and a
+// `quarantined` row carrying no divergence is a quarantine nobody can act on.
+//
+// **The watermark is a row per RUN, not a mutable cursor**, and `payment_reconciliation_watermark` reads
+// only FINISHED runs. The obvious single-row design fails in exactly the interrupted case: the cursor
+// advances, the process dies before the repairs commit, and the events between the old cursor and the new
+// one are never read again and nothing says so. `ZY684` then refuses a finished run that closes behind
+// the watermark — not because of double-counting, which the transaction table's own unique constraint
+// makes harmless, but because the watermark would stop saying what has been read.
+//
+// **`ZY683` is the "alerted" half of "quarantined and alerted, never silently deleted"**: the
+// `audit_event` must be in the SAME transaction (0093 `ZZ004`'s argument). Nothing in this unit deletes
+// anything, and `ZY161` already makes an intent that touched money undeletable; what 0148 adds is that
+// the state is VISIBLE rather than merely safe.
+//
+// `payment_reconciliation_run` is the one table in this file with a legal UPDATE, and it is narrow: the
+// CLOSE, written once while `finished_at` was null. Everything else raises `ZY681`, so a run cannot be
+// re-attributed to another gateway or re-dated.
+//
+// ZY681-ZY684 of the band ZY681-ZY690 are used; ZY685-ZY690 are RELEASED unused and deliberately
+// unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
+//
+export const SCHEMA_VERSION = 148 as const

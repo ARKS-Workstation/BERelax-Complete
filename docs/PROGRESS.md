@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**181 / 211 units complete.**
+**184 / 211 units complete.**
 
 ## Next up
 
@@ -214,15 +214,15 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 193 | `Y-PAY-01` | Payment gateway port, adapter conformance suite and provider registry | `F03`, `H02`, `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13` | — | — |
 | [x] | 194 | `Y-PAY-02` | payment_intent, idempotency and the capture/refund state machine | `F06`, `Y-PAY-01` | — | — |
 | [x] | 195 | `Y-PAY-03` | SAQ-A hosted-fields checkout and the PAN-never-touched gate | `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13`, `Y-PAY-02` | — | — |
-| [ ] | 196 | `Y-PAY-04` | Webhook ingest: signature verification, replay protection, idempotent handlers | `F06`, `Y-PAY-02` | — | — |
-| [ ] | 197 | `Y-PAY-05` | Missed-event reconciliation job | `Y-PAY-04` | — | — |
+| [x] | 196 | `Y-PAY-04` | Webhook ingest: signature verification, replay protection, idempotent handlers | `F06`, `Y-PAY-02` | — | — |
+| [x] | 197 | `Y-PAY-05` | Missed-event reconciliation job | `Y-PAY-04` | — | — |
 | [x] | 198 | `H-HARD-05` | Alert registry, SLOs and the insider-threat export alarm | `F06`, `H-HARD-01`, `R-REP-01`, `R-REP-02`, `R-REP-03`, `R-REP-04`, `R-REP-05`, `R-REP-06`, `R-REP-07`, `R-REP-08`, `Y-PAY-05` | — | — |
 | [ ] | 199 | `H-HARD-06` | Runbook set, machine-checked | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `G-CONN-01`, `G-CONN-02`, `G-CONN-03`, `G-CONN-04`, `G-CONN-05`, `G-CONN-06`, `G-CONN-07`, `G-CONN-08`, `G-CONN-09`, `H-HARD-04`, `H-HARD-05` | — | — |
 | [x] | 200 | `H-HARD-09` | Documentation set, processor register and bus-factor artefacts | `H-HARD-06`, `H-HARD-07`, `H01` | — | — |
 | [x] | 201 | `Y-PAY-06` | Deposits and prepayment as an appointment-scoped payment on account | `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13`, `Y-PAY-02` | — | Y9-windows |
 | [x] | 202 | `Y-PAY-07` | Card-on-file mandates and the no-show / late-cancellation fee path | `Y-PAY-06` | — | Y9-windows |
 | [x] | 203 | `Y-PAY-08` | Refunds, partial refunds and chargebacks in the append-only journal | `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13`, `Y-PAY-04` | — | — |
-| [ ] | 204 | `Y-PAY-09` | Settlement import and reconciliation to the fils | `M-VAT-01`, `M-VAT-02`, `M-VAT-03`, `M-VAT-04`, `M-VAT-05`, `M-VAT-06`, `M-VAT-07`, `M-VAT-08`, `M-VAT-09`, `M-VAT-10`, `M-VAT-11`, `M-VAT-12`, `M-VAT-13`, `Y-PAY-08` | — | — |
+| [x] | 204 | `Y-PAY-09` | Settlement import and reconciliation to the fils | `M-VAT-01`, `M-VAT-02`, `M-VAT-03`, `M-VAT-04`, `M-VAT-05`, `M-VAT-06`, `M-VAT-07`, `M-VAT-08`, `M-VAT-09`, `M-VAT-10`, `M-VAT-11`, `M-VAT-12`, `M-VAT-13`, `Y-PAY-08` | — | — |
 | [ ] | 205 | `Y-PAY-10` | Discreet statement descriptor, MCC gate and the payments go-live guard | `F09`, `W-SITE-01`, `W-SITE-02`, `W-SITE-03`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07`, `W-SITE-08`, `W-SITE-09`, `W-SITE-10`, `W-SITE-11`, `Y-PAY-09` | — | Y7-mcc |
 | [ ] | 206 | `H-MIG-11` | Freeze, go/no-go check and the cutover runbook with rollback | `H-HARD-06`, `H-HARD-09`, `H-HARD-10`, `H-MIG-10`, `Y-PAY-10` | — | Y13-pentest, Y11-tax-agent, Y10-consent, Y6-sender-ids, Y7-mcc |
 

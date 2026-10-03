@@ -19,6 +19,7 @@
     "@berelax/google": "workspace:*",
     "@berelax/media": "workspace:*",
     "@berelax/messaging": "workspace:*",
+    "@berelax/payments": "workspace:*",
     "@berelax/providers": "workspace:*",
     "@berelax/shared": "workspace:*",
     "pg-boss": "12.33.1"
