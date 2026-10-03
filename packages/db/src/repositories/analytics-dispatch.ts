@@ -54,6 +54,8 @@ import type { Sql } from '../connection.ts'
 export const ANALYTICS_DISPATCH_SQLSTATE = {
   transmissionIsFrozen: 'ZY451',
   attemptsAreMonotonic: 'ZY452',
+  /** 0151: the row IS the record that a conversion was permanently not delivered (A-MEAS-06). */
+  deadLetterIsNotDeletable: 'ZY711',
 } as const
 
 /** A dispatch the consumer may act on, with everything it needs and nothing it does not. */
@@ -225,10 +227,34 @@ export async function recordDispatchAttempt(
     readonly error: string | null
     /** Whether a `failed` row may be tried again. Ignored for the other outcomes. */
     readonly retryable: boolean
+    /**
+     * Whether this attempt was the LAST one the retry budget allows (A-MEAS-06).
+     *
+     * Separate from `retryable`, because the two answer different questions and only one of them is
+     * terminal: a refusal can be non-retryable for its KIND — a malformed payload the far end will refuse
+     * identically next time — and still be inside its budget, in which case the row stays `failed` and a
+     * later pass tries again. `dead_letter` is reached only by exhausting the budget, which is the one
+     * condition under which nothing will ever pick the row up again.
+     */
+    readonly budgetExhausted?: boolean
   },
 ): Promise<{ readonly state: string; readonly attempts: number }> {
   const terminal = input.outcome === 'sent' || input.outcome === 'diverted'
-  const nextState = terminal ? 'sent' : input.retryable ? 'queued' : 'failed'
+  /*
+   * Giving up is a STATE and not an attempt count a reader has to compare against a ladder.
+   *
+   * Before 0151 a dispatch gave up by its counter passing the end of the backoff ladder, and the row then
+   * said `failed` — exactly like a row due for retry in four minutes. The only way to tell them apart was
+   * to compare `attempts` against a ladder that lives in `@berelax/analytics`, which a console cannot do,
+   * a `where` clause cannot do and an operator reading the table certainly cannot.
+   */
+  const nextState = terminal
+    ? 'sent'
+    : input.retryable
+      ? 'queued'
+      : input.budgetExhausted === true
+        ? 'dead_letter'
+        : 'failed'
   if (!terminal && input.error === null) {
     throw new AppError(
       'invariant_violated',
@@ -247,7 +273,12 @@ export async function recordDispatchAttempt(
            -- to queued so a retried row cannot keep an instant from an attempt that did not land.
            transmitted_at = case when ${nextState} = 'sent' then ${input.atIso}::timestamptz end,
            -- A queued retry carries no reason, because the table's bijection says a live row has none.
-           reason         = case when ${nextState} = 'failed' then 'transport_failed' end,
+           -- dead_letter carries transport_failed too: a dispatch nobody was permitted to send and
+           -- one the far end refused until the budget ran out are the same KIND of refusal, and the
+           -- state is what says which of the two it became.
+           reason         = case
+                              when ${nextState} in ('failed', 'dead_letter') then 'transport_failed'
+                            end,
            last_error     = ${input.error}
      where dispatch_id = ${input.dispatchId}::uuid
     returning state::text as state, attempts
@@ -262,6 +293,70 @@ export async function recordDispatchAttempt(
     )
   }
   return row
+}
+
+/**
+ * The dispatches that have given up, newest first — what the agent console shows (A-MEAS-06).
+ *
+ * A dead-letter queue nothing reads is the same defect one level down from a watchdog nothing watches:
+ * the row exists, the failure is recorded, and nobody is told. This is the reader, and
+ * `apps/web/app/(admin)/agents/queries.ts` is the screen's call site.
+ *
+ * It carries the last provider error, because that is the only record of WHY the conversion will never go
+ * out — and the table's own CHECK makes it non-null for this state.
+ */
+export interface DeadLetteredDispatch {
+  readonly dispatchId: string
+  readonly destination: string
+  readonly funnelStage: string
+  readonly eventId: string
+  readonly attempts: number
+  readonly lastError: string
+  readonly decidedAtIso: string
+  readonly occurredAtIso: string
+}
+
+export async function deadLetteredDispatches(
+  sql: Sql,
+  query: { readonly limit: number } = { limit: 50 },
+): Promise<readonly DeadLetteredDispatch[]> {
+  if (!Number.isInteger(query.limit) || query.limit < 1) {
+    throw new AppError(
+      'invariant_violated',
+      `The dead-letter queue was read with a limit of ${query.limit}. A limit of zero shows an empty ` +
+        "console and reports a clean pipeline, which is ADR 0002's failure in the place it matters most.",
+      { details: { limit: query.limit } },
+    )
+  }
+  const rows = await sql<
+    {
+      dispatch_id: string
+      destination: string
+      funnel_stage: string
+      event_id: string
+      attempts: number
+      last_error: string
+      decided_at: Date
+      occurred_at: Date
+    }[]
+  >`
+    select dispatch_id, destination, funnel_stage::text as funnel_stage, event_id, attempts,
+           last_error, decided_at, occurred_at
+      from analytics_dispatch
+     where state = 'dead_letter'
+     order by decided_at desc
+     limit ${query.limit}
+  `
+  return rows.map((row) => ({
+    dispatchId: row.dispatch_id,
+    destination: row.destination,
+    funnelStage: row.funnel_stage,
+    eventId: row.event_id,
+    attempts: row.attempts,
+    lastError: row.last_error,
+    decidedAtIso: row.decided_at.toISOString(),
+    occurredAtIso: row.occurred_at.toISOString(),
+  }))
 }
 
 /** How many dispatches are in each state. The consumer's log line and the watchdog's evidence. */

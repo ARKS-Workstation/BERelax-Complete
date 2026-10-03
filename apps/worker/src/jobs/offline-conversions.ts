@@ -72,8 +72,15 @@ import type { JobContext, JobDefinition } from '../job.ts'
 
 export const OFFLINE_CONVERSIONS_JOB = 'analytics.offline-conversions'
 
-/** The `agent_definition` row 0137's sibling pass shares. Spelled once and read by the registry. */
-export const OFFLINE_CONVERSIONS_AGENT = 'analytics_dispatch'
+/**
+ * This pass's OWN agent, from migration 0151 (A-MEAS-06).
+ *
+ * It shared `analytics_dispatch`' agent until then, and A-MEAS-05 recorded why that was a limit rather
+ * than a choice: the consumer writes a heartbeat every five minutes, so the shared row was never more
+ * than five minutes old however long this daily upload had been broken, and a per-agent watchdog could
+ * not see it. 0033's argument, restated by 0110 and by the two analytics partition jobs.
+ */
+export const OFFLINE_CONVERSIONS_AGENT = 'offline_conversions'
 
 /**
  * Which analytics session a conversion belongs to, or why it cannot be said.
@@ -380,14 +387,14 @@ async function offlineConversionsHandler(_data: never, context: JobContext): Pro
  * nothing to say about the evening's, and a conversion is not a figure that can be topped up — it is a new
  * statement with its own id, so an incomplete day would be uploaded as a correction to itself.
  *
- * It shares `analytics_dispatch`' agent rather than declaring a second one, and the LIMIT of that is worth
- * stating rather than defending. The two passes are one pipeline — this one produces the rows that one
- * drains — so a watchdog asking "did the analytics dispatch pipeline run" gets a true answer. But the
- * consumer writes a heartbeat every five minutes, so this pass failing for a week is invisible to a
- * per-agent watchdog: the half that is working reports health for the half that is not. A second agent
- * needs an `agent_definition` and an `agent_heartbeat` row in a migration (0031's convention, restated by
- * 0110 and 0122), and this unit was allocated no migration number. Handed to A-MEAS-06, whose subject is
- * the heartbeat, the watchdog and the dead letter for exactly this dispatcher, by a NOTE on the manifest.
+ * It has its OWN agent, `offline_conversions`, from migration 0151 — and the reason that matters is the
+ * one this comment used to state as a limit. It shared `analytics_dispatch`' agent until then, because the
+ * two passes are one pipeline and this one produces the rows that one drains; but the consumer writes a
+ * heartbeat every five minutes, so this pass failing for a week was invisible to a per-agent watchdog —
+ * the half that was working reported health for the half that was not. A second agent needed an
+ * `agent_definition` and an `agent_heartbeat` row in a migration (0031's convention, restated by 0110 and
+ * 0122), and A-MEAS-05 was allocated no migration number, so it was handed to A-MEAS-06 by a NOTE on the
+ * manifest. 86400 seconds is this cron's own interval, held equal to it by `pnpm jobs`.
  */
 export const OFFLINE_CONVERSIONS_JOB_DEFINITION: JobDefinition<never> = {
   name: OFFLINE_CONVERSIONS_JOB,

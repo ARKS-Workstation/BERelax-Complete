@@ -104,6 +104,14 @@ export interface DispatchPassResult {
   readonly sent: number
   readonly requeued: number
   readonly failed: number
+  /**
+   * Dispatches whose retry budget ran out on this pass, and which are now in `dead_letter` (A-MEAS-06).
+   *
+   * Counted separately from `failed`, because they are different things to go and do: a failed row will
+   * be tried again on its own and a dead letter will not be tried again by anybody. The log line carries
+   * it, the agent console lists the rows, and ZY711 refuses deleting one.
+   */
+  readonly deadLettered: number
   /** Dispatches left alone because their action source could not be resolved. Counted, never guessed. */
   readonly refusedForActionSource: number
   /** Dispatches left alone because no adapter serves their destination. */
@@ -169,6 +177,8 @@ async function attemptOne(
       readonly outcome: DispatchAttemptOutcome
       readonly error: string | null
       readonly retryable: boolean
+      /** Whether that was the last attempt the budget allows. `dead_letter` when it was. */
+      readonly budgetExhausted: boolean
     }
   | {
       readonly kind: 'refused'
@@ -229,17 +239,30 @@ async function attemptOne(
       outcome: accepted.transmitted ? 'sent' : 'diverted',
       error: null,
       retryable: false,
+      budgetExhausted: false,
     }
   } catch (error) {
     const refusal = transportRefusalOf(error)
     if (refusal === null) throw error
-    const retryable =
-      TRANSPORT_REFUSAL_IS_RETRYABLE[refusal] && dispatch.attempts + 1 < ANALYTICS_MAX_ATTEMPTS
+    /*
+     * Two different questions, and only one of them is terminal (A-MEAS-06).
+     *
+     * `budgetExhausted` is about the LADDER: this was the last attempt the budget allows, so nothing will
+     * ever pick the row up again and the state is `dead_letter`. `retryable` is about the KIND of
+     * refusal: a malformed payload is refused identically next time, and such a row stays `failed` inside
+     * its budget — which is 0137's behaviour and is left alone.
+     *
+     * Before this, giving up was the attempt counter passing the end of the ladder, and the row said
+     * `failed` either way. A console cannot compare an attempt count against a ladder in TypeScript.
+     */
+    const budgetExhausted = dispatch.attempts + 1 >= ANALYTICS_MAX_ATTEMPTS
+    const retryable = TRANSPORT_REFUSAL_IS_RETRYABLE[refusal] && !budgetExhausted
     return {
       kind: 'outcome',
       outcome: 'failed',
       error: `${refusal} at ${nowIso} (attempt ${dispatch.attempts + 1} of ${ANALYTICS_MAX_ATTEMPTS})`,
       retryable,
+      budgetExhausted,
     }
   }
 }
@@ -265,6 +288,7 @@ export async function runAnalyticsDispatchPass(
   let sent = 0
   let requeued = 0
   let failed = 0
+  let deadLettered = 0
   let refusedForActionSource = 0
   let refusedForDestination = 0
 
@@ -289,9 +313,11 @@ export async function runAnalyticsDispatchPass(
       atIso: nowIso,
       error: attempt.error,
       retryable: attempt.retryable,
+      budgetExhausted: attempt.budgetExhausted,
     })
     if (recorded.state === 'sent') sent += 1
     else if (recorded.state === 'queued') requeued += 1
+    else if (recorded.state === 'dead_letter') deadLettered += 1
     else failed += 1
   }
 
@@ -300,6 +326,7 @@ export async function runAnalyticsDispatchPass(
     sent,
     requeued,
     failed,
+    deadLettered,
     refusedForActionSource,
     refusedForDestination,
   }
@@ -319,7 +346,7 @@ export function describeDispatchPass(result: DispatchPassResult): string {
   const refusals = refused.length === 0 ? '' : ` REFUSED: ${refused.join(', ')}`
   return (
     `claimed ${result.claimed}, sent ${result.sent}, requeued ${result.requeued}, ` +
-    `failed ${result.failed}${refusals}`
+    `failed ${result.failed}, dead-lettered ${result.deadLettered}${refusals}`
   )
 }
 

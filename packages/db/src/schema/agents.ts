@@ -108,6 +108,14 @@ export const agentHeartbeat = pgTable('agent_heartbeat', {
   lastError: text('last_error'),
   lastOutcome: text('last_outcome'),
   consecutiveFailures: integer('consecutive_failures').notNull(),
+  /**
+   * When the next run is expected: `lastRunAt` plus the agent's own `expectedIntervalSeconds` (0151).
+   *
+   * Paired to `lastRunAt` by a CHECK in both directions, which is what makes "every agent writes all
+   * four fields on every run" a property of the schema rather than of each writer's memory: an attempt
+   * recorded without the next run's instant is refused, for every role.
+   */
+  nextRunAt: timestamp('next_run_at', { withTimezone: true }),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
 })
 

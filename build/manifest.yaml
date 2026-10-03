@@ -14415,7 +14415,10 @@ units:
       (ADR 0050), so writing a document in this unit''s suite would mean leaving one behind for ever. All
       three reads ARE asserted to run against the real schema, to filter by trading date and to refuse an
       instant where a date belongs, and the no-show read has a real walk-in fixture.'
-    - 'NOTE: handed to A-MEAS-06 — a second agent_definition and agent_heartbeat row for this pass. It
+    - 'NOTE: handed to A-MEAS-06 — DEFERRAL SATISFIED: migration 0151 brings `offline_conversions`, its
+      agent_definition and its agent_heartbeat row, with an interval of 86400 seconds rather than the
+      consumer''s 300, and this pass now reports to it. The handover as it stood: a second
+      agent_definition and agent_heartbeat row for this pass. It
       reports to analytics_dispatch'' agent because the two passes are one pipeline, and the limit is that
       the consumer writes a heartbeat every five minutes, so this pass failing for a week is invisible to a
       per-agent watchdog. A second agent needs a migration number this unit was allocated none of.'
@@ -14437,7 +14440,7 @@ units:
       alerts when an enabled agent has had no success within twice its expected interval; and a permanently
       failed dispatch lands in a visible dead-letter state rather than disappearing.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - A-FIRST-09
@@ -14455,11 +14458,55 @@ units:
       and appears in the agent-console query; a test asserts the row is never deleted
     - the alert routes through the messaging compliance gate as transactional class and cannot be sent under
       the AD- promotional sender id, asserted by test
+    - 'NOTE: the three frozen-clock claims were ALREADY proved against the real table, by G-AGT-01''s
+      cases in apps/worker/src/jobs/agent-watchdog.itest.ts, and against `nightly_rollups` — one of the
+      two agents this entry names. Restating them for the second agent would be one claim asserted
+      twice, so what this unit added beside them is the half that was genuinely new: that BOTH analytics
+      agents are in the set the watchdog evaluates, and that all four fields are written on the success
+      path and the failure path for each. Through withAgentRun and not recordHeartbeat, because the
+      acceptance is about a RUN — a test calling the writer directly would prove nothing about the
+      wrapper that is supposed to call it either way.'
+    - 'NOTE: the schema half of "writes all four fields on every run" is a CHECK pairing next_run_at to
+      last_run_at in BOTH directions. A claim about a writer is a thing somebody forgets, so an attempt
+      recorded without the next run''s instant is refused — for the two analytics agents, for the other
+      eleven and for a psql session. Its value is the agent''s own expected_interval_seconds, the same
+      figure the watchdog doubles; a cron expression is deliberately not consulted because pnpm jobs
+      already holds the registry''s expression and that interval equal. The cost is paid by two fixtures:
+      agent-watchdog.itest.ts and google-connection-health.itest.ts set a heartbeat directly and now
+      write the field the schema requires, which is the small cost ADR 0066 records for a fixture that
+      has to be consistent with its schema. ADR 0104.'
+    - 'NOTE: a ZY712 was written, applied to a database and REMOVED, and the removal is recorded rather
+      than hidden. It would have refused a heartbeat whose last_success_at moved BACKWARDS, by ZY452''s
+      argument about the attempt counter. Sixteen cases of the existing watchdog suite failed the moment
+      it applied, because every one of them simulates silence by moving that column back — and that is
+      not a test problem: agent_heartbeat is the CURRENT state of an agent rather than a ledger, and an
+      earlier instant moves the answer towards OVERDUE, which is the safe direction. So ONE code is used
+      of the band and ZY712 through ZY720 are released unregistered.'
+    - 'NOTE: three files beyond the declared list. packages/db/src/agent-heartbeat.test.ts reads 0151 and
+      asserts its structural claims, for the reason analytics-dispatch.test.ts exists for 0137.
+      apps/web/src/agent-console.itest.ts proves the console query against a real database, and it is on
+      the WEB side because apps/worker does not import from apps/web — send-scheduled-step.itest.ts
+      records the same separation from the other direction. apps/web/app/(admin)/agents/queries.ts is a
+      query MODULE and not a route, which is A-MEAS-07''s recorded precedent: routes/registry.ts is in
+      exact bijection with the filesystem and requires every document in both locales, and there is no
+      agent console document yet.'
+    - 'NOTE: the alert is not SENT to anybody in this build, and the class is declared anyway. There is
+      no on-call contact on file (Y13-oncall) and an alert is an agent_alert row plus an outbox event, so
+      what is asserted is the two things that decide the outcome when a send path arrives:
+      AGENT_ALERT_MESSAGE_CLASS is transactional, and agentAlertSenderIdentity reads it from that
+      constant with no parameter for a class — so the AD- identity is unreachable for this traffic by
+      construction. assertSenderIdRegistry refuses a transactional slot carrying the prefix, and
+      resolveSenderIdentity does not fall back to the other slot, which is what sender-identity.ts
+      exists to prevent. Nothing new was invented: no sender id, no recipient and no provider.'
+    - 'NOTE: no test port band was needed; the allocated band is released unused for this unit as for the
+      other two. See A-FIRST-08''s note.'
     files:
-    - packages/db/migrations/NNNN_agent_heartbeat.sql
+    - packages/db/migrations/0151_agent_heartbeat.sql
     - apps/worker/src/jobs/agent-watchdog.ts
-    - apps/web/app/(admin)/agents/queries.ts
     - apps/worker/src/jobs/agent-watchdog.itest.ts
+    - apps/web/app/(admin)/agents/queries.ts
+    - apps/web/src/agent-console.itest.ts
+    - packages/db/src/agent-heartbeat.test.ts
   - id: A-MEAS-07
     order: 120
     title: 'Dispatch reconciliation: internal truth versus what was pushed'

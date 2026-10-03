@@ -2585,6 +2585,30 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['analytics.assert_rolled_up_day_has_closed'],
     translators: ['packages/db/src/repositories/analytics-rollup.ts'],
   },
+  // ZY711 is A-MEAS-06's, of the band ZY711-ZY720; ZY712 through ZY720 are left free and deliberately
+  // absent, because an entry for a code no migration raises is direction 3.
+  //
+  // The row IS the record that a conversion was permanently not delivered. A-MEAS-07 reconciles internal
+  // truth against what was PUSHED, so a deleted dead letter makes a conversion the platform never heard
+  // about indistinguishable from one nobody enqueued — and the day then reconciles while the money is
+  // short. A trigger rather than a revoke, because it has to hold for the owner too, and scoped to the
+  // STATE rather than the table: a `failed` row is still deletable, which is what makes this a claim about
+  // a permanent failure rather than about `analytics_dispatch`.
+  //
+  // ZY712 was written, applied and REMOVED before this entry was taken, and the removal is worth the
+  // sentence: it would have refused a heartbeat whose `last_success_at` moved BACKWARDS, by ZY452's
+  // argument about the attempt counter. Sixteen cases of the existing watchdog suite failed immediately,
+  // because every one of them simulates silence by moving that column back — and that is not a test
+  // problem. `agent_heartbeat` is the CURRENT state of an agent rather than a ledger, and an earlier
+  // instant moves the answer towards OVERDUE, which is the safe direction and the one that makes somebody
+  // look.
+  {
+    code: 'ZY711',
+    rule: 'A dead-lettered analytics dispatch may not be deleted.',
+    migration: '0151',
+    raisedBy: ['refuse_dead_letter_delete'],
+    translators: ['packages/db/src/repositories/analytics-dispatch.ts'],
+  },
   {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',

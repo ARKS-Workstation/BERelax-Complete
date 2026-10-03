@@ -475,10 +475,12 @@ export {
 export {
   ANALYTICS_DISPATCH_SQLSTATE,
   analyticsDispatchStateCounts,
+  type DeadLetteredDispatch,
   DISPATCH_ATTEMPT_OUTCOMES,
   type DispatchAttemptOutcome,
   type DueDispatch,
   type DueDispatchQuery,
+  deadLetteredDispatches,
   dueAnalyticsDispatches,
   recordDispatchAttempt,
 } from './repositories/analytics-dispatch.ts'
@@ -5373,4 +5375,51 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // calendar one table over; it reads `clock_timestamp()` and not `now()`, because `now()` is the
 // TRANSACTION's start and a long backfill would judge every day against the instant it began.
 //
-export const SCHEMA_VERSION = 150 as const
+// 151 is 0151_agent_heartbeat.sql (A-MEAS-06) — the fourth heartbeat field, the dead-letter state, and
+// the agent A-MEAS-05 was handed no migration number for. Mirrored in `packages/db/src/schema/agents.ts`
+// and `packages/db/src/schema/analytics-dispatch.ts`, so `pnpm db:drift` compares the two.
+//
+// **`next_run_at` is paired to `last_run_at` by a CHECK in both directions, and that is the point.**
+// "Both analytics agents write all four heartbeat fields on every run" is a claim about a WRITER, and a
+// claim about a writer is a thing somebody forgets — so an attempt recorded without the next run's instant
+// is refused, for the two analytics agents, for the other eleven and for a psql session. The value is the
+// agent's own `expected_interval_seconds`, which is the same figure the watchdog doubles; a cron
+// expression is deliberately not consulted, because `pnpm jobs` already holds the registry's expression
+// and that interval equal and a third derivation would be a third answer.
+//
+// **`dead_letter` exists because 0137's way of giving up was invisible.** A dispatch gave up when its
+// attempt counter passed the end of the retry ladder, and the row still said `failed` — exactly like a row
+// due for retry in four minutes. The only way to tell them apart was to compare `attempts` against a
+// ladder that lives in `@berelax/analytics`, which a console cannot do, a `where` clause cannot do and an
+// operator reading the table certainly cannot. So giving up is a STATE: terminal in the sense `sent` is,
+// with the reason and the provider's last words on the row. It can still be RE-QUEUED, deliberately — the
+// ZY312 gate fires on the UPDATE back to `queued` (ADR 0091), so an operator who fixes a destination is
+// re-judged against the visitor's consent as it stands then, and a state that could not be re-opened would
+// make the only remedy a second row, which the unique `(event_id, destination)` index refuses.
+//
+// It is reached by exhausting the BUDGET and not by the kind of refusal, and those are different
+// questions: a malformed payload is refused identically next time and stays `failed` inside its budget,
+// where a later pass tries again. 0125's bijection stays total — `dead_letter` joins the refused side of
+// `analytics_dispatch_reason_iff_refused` rather than becoming an exception to it — and a fourth narrow
+// sibling requires the error, for 0137's stated reason that three narrow rules fail by name.
+//
+// **Two readers are named in the migration itself, because a dead-letter queue nothing reads is the same
+// defect one level down from a watchdog nothing watches.** `apps/web/app/(admin)/agents/queries.ts` lists
+// the rows and the watchdog puts the COUNT on every alert it raises, so somebody woken about a silent
+// dispatcher is told in the same breath how many conversions have given up.
+//
+// ZY711 is used of the band ZY711-ZY720; ZY712 through ZY720 are released UNUSED and deliberately
+// unregistered. ZY711 refuses deleting a dead letter, for every role including the owner, because the row
+// is the record A-MEAS-07 reconciles against. ZY712 was written, applied and REMOVED: it would have
+// refused a `last_success_at` that moved backwards, by ZY452's argument, and sixteen cases of the existing
+// watchdog suite failed at once because every one of them simulates silence by moving that column back.
+// `agent_heartbeat` is the CURRENT state of an agent rather than a ledger, and an earlier instant moves the
+// answer towards OVERDUE — the safe direction.
+//
+// It also brings `offline_conversions`, its `agent_definition` and its `agent_heartbeat` row, which
+// A-MEAS-05 handed here by NOTE: that pass shared the consumer's agent, and the consumer beats every five
+// minutes, so the shared row was never more than five minutes old however long the daily upload had been
+// broken. 0033's argument, restated by 0110 and by the two analytics partition jobs. 86400 seconds is the
+// pass's own cron, held equal to it by `pnpm jobs`.
+//
+export const SCHEMA_VERSION = 151 as const

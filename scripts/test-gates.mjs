@@ -57011,6 +57011,236 @@ export function chargebackNetEffectFils(`,
   }
 }
 
+// 182a-182z. (A-MEAS-06) The heartbeat, the dead letter and the alert's sender: every way a failure could
+//            come to look like health, and every way a permanent failure could come to disappear.
+//
+// This unit's whole subject is the shape of failure docs/10 §6 names — *a pg-boss job failure is not
+// evidence anybody has seen* — so every defect here is a thing that errors NOWHERE.
+//
+// A heartbeat without `next_run_at` reads as healthy for an agent that has stopped, because "last run two
+// minutes ago" is true of an agent whose next run was due an hour ago. A dispatch that gives up by its
+// attempt counter passing a ladder reads as a row due for retry. A dead letter that can be deleted makes
+// A-MEAS-07 reconcile a day whose money is short. An alert declared promotional would leave under the
+// `AD-` identity, which is suspended by marketing mistakes — so an incident notification would stop
+// arriving because somebody sent one blast too many. None of the four raises anything.
+{
+  const MIGRATION = 'packages/db/migrations/0151_agent_heartbeat.sql'
+  const HEARTBEAT = 'packages/db/src/repositories/agents.ts'
+  const DISPATCH = 'packages/db/src/repositories/analytics-dispatch.ts'
+  const CONSUMER = 'apps/worker/src/jobs/analytics-dispatch.ts'
+  const WATCHDOG = 'apps/worker/src/jobs/agent-watchdog.ts'
+  const CONSOLE = 'apps/web/app/(admin)/agents/queries.ts'
+  const STATIC_SUITE = 'packages/db/src/agent-heartbeat.test.ts'
+
+  const unitFails = (...files) =>
+    runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const brokenUnit = (file, find, into, ...suites) =>
+    withEditedFile(
+      file,
+      (source) => replaceOnce(source, find, into),
+      () => unitFails(...suites),
+    )
+
+  // 182a. The pairing made one-sided, which is the direction a writer actually forgets: an attempt
+  //       recorded with no next run. The console then cannot tell a slow agent from a stopped one, and
+  //       nothing says so.
+  checkRejectedBy(
+    'heartbeat: a next_run_at that need not accompany a run is caught',
+    brokenUnit(
+      MIGRATION,
+      'check ((last_run_at is null) = (next_run_at is null))',
+      'check (next_run_at is null or last_run_at is not null)',
+      STATIC_SUITE,
+    ),
+    'BOTH directions',
+  )
+
+  // 182b. `next_run_at` derived from somewhere other than the agent's own declared interval. A third
+  //       statement of when the next run is due is the one a console shows while the watchdog doubles a
+  //       different number.
+  checkRejectedBy(
+    'heartbeat: a next run derived from anything but the declared interval is caught',
+    brokenUnit(
+      HEARTBEAT,
+      '              select d.expected_interval_seconds from agent_definition d',
+      '              select 900',
+      STATIC_SUITE,
+    ),
+    'derived from the agent’s own declared interval',
+  )
+
+  // 182c. The two written by separate statements, so one can land without the other. The CHECK refuses
+  //       the pair being broken, which means the SECOND statement fails — a heartbeat that is not written
+  //       at all, on the path that exists to record that something happened.
+  checkRejectedBy(
+    'heartbeat: a next run written by a second statement is caught',
+    brokenUnit(
+      HEARTBEAT,
+      '        next_run_at = ${atIso}::timestamptz',
+      '        last_failure_at = last_failure_at',
+      STATIC_SUITE,
+    ),
+    'next_run_at = ',
+  )
+
+  // 182d. The dead-letter state removed from 0125's bijection, so a refused row can carry no reason —
+  //       and "did we send anything we should not have" becomes unanswerable for exactly the rows that
+  //       never went.
+  checkRejectedBy(
+    'dead letter: a state outside the reason bijection is caught',
+    brokenUnit(
+      MIGRATION,
+      "check ((state in ('suppressed', 'cancelled_consent_withdrawn', 'failed', 'dead_letter'))\n         = (reason is not null))",
+      "check ((state in ('suppressed', 'cancelled_consent_withdrawn', 'failed'))\n         = (reason is not null))",
+      STATIC_SUITE,
+    ),
+    'keep 0125’s bijection total',
+  )
+
+  // 182e. A dead letter permitted with no provider error. The only record of WHY a conversion will never
+  //       go out, and without it the row is indistinguishable from a consumer that stopped running.
+  checkRejectedBy(
+    'dead letter: one that carries no provider error is caught',
+    brokenUnit(
+      MIGRATION,
+      "alter table analytics_dispatch add constraint analytics_dispatch_dead_letter_carries_its_error\n  check ((state = 'dead_letter') <= (last_error is not null));",
+      '-- no error required',
+      STATIC_SUITE,
+    ),
+    'keep 0125’s bijection total',
+  )
+
+  // 182f. ZY711 removed. A-MEAS-07 then reconciles a day whose money is short as agreeing, because a
+  //       conversion the platform never heard about has become a conversion nobody enqueued.
+  checkRejectedBy(
+    'dead letter: one that can be deleted is caught',
+    brokenUnit(
+      MIGRATION,
+      'create trigger analytics_dispatch_dead_letter_is_not_deletable\n  before delete on analytics_dispatch',
+      'create trigger analytics_dispatch_dead_letter_is_not_deletable\n  before update on analytics_dispatch',
+      STATIC_SUITE,
+    ),
+    'before delete on analytics_dispatch',
+  )
+
+  // 182g. ZY711 widened from the STATE to the TABLE. It would then refuse every delete, including the
+  //       ones a retention purge and a fixture rely on — a rule that fires on everything is a rule
+  //       somebody removes.
+  checkRejectedBy(
+    'dead letter: a refusal scoped to the table rather than the state is caught',
+    brokenUnit(MIGRATION, "  if old.state <> 'dead_letter' then", '  if false then', STATIC_SUITE),
+    "if old.state <> 'dead_letter' then",
+  )
+
+  // 182h. `dead_letter` reached by the KIND of refusal rather than by the budget. A malformed payload
+  //       would then dead-letter on its first attempt, inside a budget that had four tries left — and the
+  //       conversion is abandoned for a reason the far end might have fixed in the meantime.
+  checkRejectedBy(
+    'dead letter: a state reached by the kind of refusal rather than the budget is caught',
+    brokenUnit(
+      CONSUMER,
+      'const budgetExhausted = dispatch.attempts + 1 >= ANALYTICS_MAX_ATTEMPTS',
+      'const budgetExhausted = !TRANSPORT_REFUSAL_IS_RETRYABLE[refusal]',
+      STATIC_SUITE,
+    ),
+    'exhausting the BUDGET and not by the kind of refusal',
+  )
+
+  // 182i. The writer's own branch removed, so an exhausted budget leaves the row `failed` again — 0137's
+  //       invisible give-up, restored with a state that exists and is never written.
+  checkRejectedBy(
+    'dead letter: a writer that never reaches the state is caught',
+    brokenUnit(DISPATCH, "        ? 'dead_letter'", "        ? 'failed'", STATIC_SUITE),
+    'exhausting the BUDGET',
+  )
+
+  // 182j. The console's reader removed. The rows are still written, ZY711 still protects them, and
+  //       nobody is told — which is the defect one level down from a watchdog nothing watches, and the
+  //       reason the state exists at all.
+  checkRejectedBy(
+    'dead letter: a queue the console no longer reads is caught',
+    brokenUnit(
+      CONSOLE,
+      '  const deadLetters = await deadLetteredDispatches(sql, {',
+      '  const deadLetters = await Promise.resolve([] as never[]).then((rows) => ({ rows, _: {',
+      STATIC_SUITE,
+    ),
+    'two named readers',
+  )
+
+  // 182k. The count removed from the alert. Somebody woken about a silent dispatcher is then told nothing
+  //       about the conversions that have permanently given out, which is the half of the incident that
+  //       needs a different action.
+  checkRejectedBy(
+    'dead letter: a count missing from the alert detail is caught',
+    brokenUnit(
+      WATCHDOG,
+      '        deadLetteredDispatches: deadLetters.length,',
+      '        deadLetteredCount: deadLetters.length,',
+      STATIC_SUITE,
+    ),
+    'two named readers',
+  )
+
+  // 182l. The alert declared promotional. It would then leave under the `AD-` identity, which is the one
+  //       a marketing mistake suspends — so incident notifications would stop arriving because somebody
+  //       sent one blast too many, which is exactly the coupling ADR 0016 exists to break.
+  checkRejectedBy(
+    'alert: a promotional agent alert is caught',
+    brokenUnit(
+      WATCHDOG,
+      "export const AGENT_ALERT_MESSAGE_CLASS: MessageClass = 'transactional'",
+      "export const AGENT_ALERT_MESSAGE_CLASS: MessageClass = 'promotional'",
+      STATIC_SUITE,
+    ),
+    'declared once as transactional',
+  )
+
+  // 182m. The class made a parameter. The constant then documents an intention instead of deciding
+  //       anything, and the first call site in a hurry chooses.
+  checkRejectedBy(
+    'alert: a sender resolution that takes the class as a parameter is caught',
+    brokenUnit(
+      WATCHDOG,
+      '    messageClass: AGENT_ALERT_MESSAGE_CLASS,',
+      "    messageClass: 'promotional',",
+      STATIC_SUITE,
+    ),
+    'no parameter for a caller’s preference',
+  )
+
+  // 182n. The second agent's heartbeat row dropped. `agentsWithHeartbeat` INNER JOINS, so the agent
+  //       becomes one the watchdog cannot see at all — 0107's defect, which nothing static caught until
+  //       a suite read the table.
+  checkRejectedBy(
+    'agent: a definition with no heartbeat row is caught',
+    brokenUnit(
+      MIGRATION,
+      "insert into agent_heartbeat (agent_key)\nvalues ('offline_conversions')",
+      "insert into agent_run (agent_key, outcome)\nvalues ('offline_conversions', 'succeeded')",
+      STATIC_SUITE,
+    ),
+    'arrives with both rows',
+  )
+
+  // 182o. The second agent given the consumer's five-minute interval. The watchdog's 2x window is then
+  //       twenty minutes for a pass that runs once a day, so it alerts every morning — and an alert that
+  //       fires every morning is one somebody switches off.
+  checkRejectedBy(
+    'agent: a daily pass declared at the consumer’s interval is caught',
+    brokenUnit(MIGRATION, '   86400, 0)', '   300, 0)', STATIC_SUITE),
+    'OWN daily interval',
+  )
+
+  // 182p. The control the whole block rests on. Every case above breaks something and demands a named
+  //       failure; this one demands that the unbroken tree PASSES, so a suite that had come to fail for
+  //       its own reasons could not make the other fifteen report success.
+  {
+    const unit = run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', STATIC_SUITE])
+    check('agent heartbeat: and the suite passes on the real tree', !unit.failed, unit.output)
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
