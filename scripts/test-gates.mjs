@@ -60948,6 +60948,868 @@ export function chargebackNetEffectFils(`,
   )
 }
 
+// 189a-189z. (W-SITE-06) The therapist publishing guard shown to be able to stop refusing: every one of
+//            the three facts it reads removed in turn, the second-guard scan shown to be able to pass with
+//            a second guard in the tree, and the ADR 0021 trap — a STYLE where a SKILL belongs — shown to
+//            resolve nothing rather than half-matching.
+//
+//            A therapist page names a real person, shows their photograph and claims what they are trained
+//            in. So every mutation below leaves a system that WORKS: a page that renders, a card that
+//            links, a sitemap entry, a `Person` node. What changes is WHOSE name is on it. That is why
+//            these are gates rather than tests of a happy path — the defect is invisible in the output and
+//            visible only in whether a refusal still fires.
+{
+  const GUARD = 'packages/core/src/seo/therapist-publishable.ts'
+  const GUARD_TEST = 'packages/core/src/seo/therapist-publishable.test.ts'
+  const GUARD_SCAN = 'apps/web/src/therapist-guard.test.ts'
+  const SITEMAP = 'apps/web/src/therapists/sitemap.ts'
+  const CONTENT = 'apps/web/src/therapists/content.ts'
+  const CONTENT_TEST = 'apps/web/src/therapists/content.test.ts'
+  const REGISTRY = 'apps/web/src/routes/registry.ts'
+  const REGISTRY_TEST = 'apps/web/src/routes/registry.test.ts'
+  const PATHS_TEST = 'apps/web/src/therapists/paths.test.ts'
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+
+  // The control for the whole block. Every case asserts that a BROKEN tree is caught, and that says
+  // nothing unless the committed tree passes.
+  {
+    const guard = run('pnpm', unit(GUARD_TEST))
+    check(
+      'therapists: the committed guard suite passes, which is the control for 189a to 189d',
+      !guard.failed,
+      `the guard suite does not pass on the committed tree:\n${guard.output}`,
+    )
+    const scan = run('pnpm', unit(GUARD_SCAN))
+    check(
+      'therapists: the committed tree passes the one-guard scan, the control for 189e to 189g',
+      !scan.failed,
+      `the one-guard scan does not pass on the committed tree:\n${scan.output}`,
+    )
+    const content = run('pnpm', unit(CONTENT_TEST))
+    check(
+      'therapists: the committed card decisions pass, which is the control for 189h',
+      !content.failed,
+      `the card suite does not pass on the committed tree:\n${content.output}`,
+    )
+  }
+
+  /*
+    189a. Retirement dropped from the guard.
+
+    The mutation that reads as a simplification: `isTherapistPublishable` becomes "has a name and a
+    consent", which is what the generated column says and what everybody expects. The page of a therapist
+    who has left then answers 200 again, with their name, their photograph and a "Book with" action —
+    docs/09 §2's departure clause reversed, and nothing in the output says so.
+  */
+  checkRejectedBy(
+    'therapists: 189a a guard that publishes a therapist who has left is caught',
+    withEditedFile(
+      GUARD,
+      (text) =>
+        replaceOnce(
+          text,
+          '  return candidate.retiredAt === null && therapistPublishingRefusals(candidate).length === 0',
+          '  return therapistPublishingRefusals(candidate).length === 0',
+        ),
+      () => runExpectingFailure('pnpm', unit(GUARD_TEST)),
+    ),
+    'a retired therapist who was publishable is retired, not unpublished',
+  )
+
+  /*
+    189b. The portrait's alt-text refusal removed.
+
+    An alt-less portrait of an identifiable person is the one failure that cannot be repaired after
+    publication: the page is indexed, the image is indexed with it, and a screen reader has announced an
+    unlabelled photograph of somebody who consented to a labelled one. The mutation leaves every other
+    refusal firing and the page rendering.
+  */
+  checkRejectedBy(
+    'therapists: 189b a guard that publishes a portrait with no alt text is caught',
+    withEditedFile(
+      GUARD,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (candidate.portraitUrl !== undefined && (candidate.portraitAlt ?? '').trim() === '') {\n    refusals.push('portrait_without_alt')\n  }\n",
+          '',
+        ),
+      () => runExpectingFailure('pnpm', unit(GUARD_TEST)),
+    ),
+    'a portrait with no alt text refuses the page',
+  )
+
+  /*
+    189c. The empty-slug throw removed.
+
+    A display name of punctuation alone reduces to the empty slug, which is `/therapists/` — the index. So
+    the therapist's page would silently BE the index, the sitemap would carry the index twice, and
+    `employee_public_slug_shape` would refuse the row afterwards with a message about a regular expression
+    rather than about a name.
+  */
+  checkRejectedBy(
+    'therapists: 189c a slug function that returns the empty string is caught',
+    withEditedFile(
+      GUARD,
+      (text) => replaceOnce(text, "  if (slug === '') {", '  if (false) {'),
+      () => runExpectingFailure('pnpm', unit(GUARD_TEST)),
+    ),
+    'refuses a name that reduces to nothing',
+  )
+
+  /*
+    189d. The ADR 0021 trap: a STYLE compared where a SKILL belongs.
+
+    `service.style` is `asian` and `employee_skill.skill` is `asian_style`, and the relation between them
+    is a row in `service_skill` rather than a suffix. The mutation is the spelling that looks obviously
+    equivalent, and under it `knowsAbout` resolves nothing for anybody — so every therapist page refuses
+    with a message about an archived service, which is the wrong diagnosis for the right failure.
+  */
+  checkRejectedBy(
+    'therapists: 189d a specialism resolved against the treatment style rather than the skill is caught',
+    withEditedFile(
+      GUARD,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const matched = live.filter((service) => service.requiredSkill === specialism)',
+          '  const matched = live.filter((service) => `${service.requiredSkill}` === `${specialism}_style`)',
+        ),
+      () => runExpectingFailure('pnpm', unit(GUARD_TEST)),
+    ),
+    'maps a specialism to every live service of that style',
+  )
+
+  /*
+    189e. The sitemap builder filtering on the generated column instead of the guard.
+
+    `row.isPublishable && row.retiredAt === null` is the second guard this unit exists to make impossible.
+    It is right today and wrong the first time a condition is added to the real one — a portrait with no
+    alt text is already such a condition — and the divergence is silent: the sitemap and the structured
+    data would then describe different staff, with every behavioural test green because each half is
+    internally consistent. `therapist-guard.test.ts` is the scan that refuses it by name.
+  */
+  checkRejectedBy(
+    'therapists: 189e a sitemap that re-derives the guard from the generated column is caught',
+    withEditedFile(
+      SITEMAP,
+      (text) =>
+        replaceOnce(
+          text,
+          '    if (!isTherapistPublishable(candidateFor(row))) continue',
+          '    if (!(row.isPublishable && row.retiredAt === null)) continue',
+        ),
+      () => runExpectingFailure('pnpm', unit(GUARD_SCAN)),
+    ),
+    'has no second implementation spelled as the conjunction the generated column uses',
+  )
+
+  /*
+    189f. A second definition of the guard.
+
+    The scan's first claim is that `isTherapistPublishable` is defined in exactly ONE file. A second
+    definition is not a wrong answer: it is a right answer in two places that will stop agreeing, and the
+    day they disagree the route and the sitemap publish different people.
+  */
+  checkRejectedBy(
+    'therapists: 189f a second definition of the guard is caught',
+    withEditedFile(
+      CONTENT,
+      (text) =>
+        `${text}\n/** A second guard, which is the defect 189f is about. */\nexport function isTherapistPublishable(): boolean {\n  return true\n}\n`,
+      () => runExpectingFailure('pnpm', unit(GUARD_SCAN)),
+    ),
+    'is defined in exactly one file',
+  )
+
+  /*
+    189g. A second writer of the publication columns.
+
+    0157 deliberately has NO deferred trigger forcing a display-name rename to leave a 301, where 0029 has
+    one for a service slug — and the migration's header says the reason in so many words: nothing but
+    `publishTherapist` writes a display name. That claim is load-bearing and is only true while this scan
+    passes, so a second `update employee set display_name = …` anywhere is the defect, not an alternative.
+  */
+  checkRejectedBy(
+    'therapists: 189g a second writer of employee.display_name is caught',
+    withEditedFile(
+      SITEMAP,
+      (text) =>
+        `${text}\n// A second writer, which is the defect 189g is about.\n// update employee set display_name = 'x'\nconst SECOND_WRITER = \`update employee set display_name = $1\`\nvoid SECOND_WRITER\n`,
+      () => runExpectingFailure('pnpm', unit(GUARD_SCAN)),
+    ),
+    'nothing else writes any of the three columns',
+  )
+
+  /*
+    189h. An index card linked for a therapist who may not be published.
+
+    The card is where ADR 0020 is visible, and the mutation is the one a reader of the component would make
+    on purpose: link every card, because a card that does not link looks broken. Eighteen of nineteen links
+    would then 404, the link graph would report eighteen dead internal links, and the page would look fine.
+  */
+  checkRejectedBy(
+    'therapists: 189h an index card that links an unpublishable therapist is caught',
+    withEditedFile(
+      CONTENT,
+      (text) =>
+        replaceOnce(
+          text,
+          '      ...(publishable && row.publicSlug !== null\n        ? { href: therapistPath(locale, row.publicSlug) }\n        : {}),',
+          '      ...(row.publicSlug !== null ? { href: therapistPath(locale, row.publicSlug) } : {}),',
+        ),
+      () => runExpectingFailure('pnpm', unit(CONTENT_TEST)),
+    ),
+    'gives a NAMED therapist with no consent a slug and still no href',
+  )
+
+  /*
+    189i. The declared absence of a sample path replaced by a sample path.
+
+    `/therapists/[slug]` has no URL that answers 200, because no therapist is publishable and this build
+    may not invent one. `noSamplePath` says so in a sentence; `sampleParams` would hand the normalisation
+    walk, the `hreflang` assertions and the screenshot matrix a 404 to assert everything against — which
+    passes, because a 404 has a canonical link and a robots header like any other document.
+  */
+  checkRejectedBy(
+    'therapists: 189i a sample path claimed for a route that has none is caught',
+    withEditedFile(
+      REGISTRY,
+      (text) =>
+        replaceOnce(
+          text,
+          "    noSamplePath:\n      'No therapist is publishable, so no slug answers 200.",
+          "    sampleParams: { slug: 'nobody' },\n    noSamplePathWas:\n      'No therapist is publishable, so no slug answers 200.",
+        ),
+      () => runExpectingFailure('pnpm', unit(REGISTRY_TEST)),
+    ),
+    'the sampleable documents are the documents minus the ones that declare no sample path',
+  )
+
+  /*
+    189j. The `/therapists` prefix spelled twice, differently.
+
+    `packages/db` spells it to write a `redirect_map` row and the registry spells it because it IS the URL
+    space. A disagreement is not a 500: it is a redirect that silently stops matching and an archival whose
+    301 lands on a 404 — 0029's own "a 404 with extra steps". `paths.test.ts` is the check that holds the
+    two equal, which the brief requires in the same commit as the second statement.
+  */
+  checkRejectedBy(
+    'therapists: 189j two different spellings of the /therapists prefix are caught',
+    withEditedFile(
+      'packages/db/src/queries/therapist-pages.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          "export const THERAPIST_INDEX_PATH = '/therapists'",
+          "export const THERAPIST_INDEX_PATH = '/therapist'",
+        ),
+      () => runExpectingFailure('pnpm', unit(PATHS_TEST)),
+    ),
+    'the index path is the registry entry',
+  )
+}
+
+// 190a-190z. (W-SITE-08) The publish loop shown to be able to stop closing: the reciprocity rule shown to
+//            be able to ignore a lopsided hreflang set, the empty-section refusal shown to be able to
+//            publish one, the IndexNow key shown to be able to accept a marker, the idempotency shown to
+//            be able to ping twice, and the interconnection map shown to be able to over-purge.
+//
+//            Every mutation below leaves a system that WORKS: a sitemap that parses, a ping that returns
+//            success, a cache that is emptier than it needed to be. What changes is whether anybody is
+//            told. A lopsided `hreflang` set is not partially honoured — Google discards the language
+//            signal for every page in the group — and a ping reported as sent against an unverified key
+//            reaches nobody for as long as nobody checks Bing.
+{
+  const SITEMAP = 'packages/core/src/seo/sitemap.ts'
+  const SITEMAP_TEST = 'packages/core/src/seo/sitemap.test.ts'
+  const INDEXNOW = 'packages/providers/src/seo/fake-indexnow.ts'
+  const INDEXNOW_TEST = 'packages/providers/src/seo/fake-indexnow.test.ts'
+  const PURGE = 'packages/media/src/purge/fake-purge.ts'
+  const PURGE_TEST = 'packages/media/src/purge/fake-purge.test.ts'
+  const MAP = 'apps/web/src/revalidate/interconnection.ts'
+  const MAP_TEST = 'apps/web/src/revalidate/interconnection.test.ts'
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  for (const [name, test] of [
+    ['sitemap', SITEMAP_TEST],
+    ['indexnow', INDEXNOW_TEST],
+    ['purge', PURGE_TEST],
+    ['interconnection map', MAP_TEST],
+  ]) {
+    const result = run('pnpm', unit(test))
+    check(
+      `publish-loop: the committed ${name} suite passes, which is this block's control`,
+      !result.failed,
+      `${test} does not pass on the committed tree:\n${result.output}`,
+    )
+  }
+
+  /*
+    190a. The reciprocity rule stops noticing a set that does not list itself.
+
+    Google's rule is that every page in an `hreflang` set lists every page INCLUDING itself, and a set
+    that does not is **ignored entirely** — so the whole group loses its language signal rather than the
+    one entry. The mutation reads as a tidy-up: of course a page does not need to list itself.
+  */
+  checkRejectedBy(
+    'publish-loop: 190a a reciprocity rule that accepts a non-self-referential set is caught',
+    withEditedFile(
+      SITEMAP,
+      (text) => replaceOnce(text, '    if (!hrefs.includes(url.loc)) {', '    if (false) {'),
+      () => runExpectingFailure('pnpm', unit(SITEMAP_TEST)),
+    ),
+    'catches a set that does not list itself',
+  )
+
+  /*
+    190b. An alternate naming a URL the sitemap does not contain stops being a finding.
+
+    The rule that catches the realistic defect — the other document stopped being published (an archived
+    treatment, a withdrawn photography consent) and the surviving half still points at it. Dropping it
+    leaves every other rule firing and the sitemap serving a set Google discards.
+  */
+  checkRejectedBy(
+    'publish-loop: 190b an alternate pointing at an absent URL ceasing to be a finding is caught',
+    withEditedFile(
+      SITEMAP,
+      (text) =>
+        replaceOnce(
+          text,
+          "      if (other === undefined) {\n        findings.push({\n          rule: 'alternate_names_an_absent_url',",
+          "      if (false) {\n        findings.push({\n          rule: 'alternate_names_an_absent_url',",
+        ),
+      () => runExpectingFailure('pnpm', unit(SITEMAP_TEST)),
+    ),
+    'catches an alternate naming a URL the sitemap does not contain',
+  )
+
+  /*
+    190c. `sitemapXml` serves a document whose reciprocity is broken instead of refusing it.
+
+    The mutation that looks like robustness: report the findings and serve anyway. It is wrong in exactly
+    one direction — a lopsided set makes Google discard the language signal for every page in the group,
+    so serving it is worse than serving nothing while somebody fixes it, and a 500 on
+    `/sitemaps/treatments` is noticed the same day where a silently-ignored set is noticed in a quarterly
+    ranking report.
+  */
+  checkRejectedBy(
+    'publish-loop: 190c a sitemap served despite a broken hreflang graph is caught',
+    withEditedFile(
+      SITEMAP,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const findings = reciprocityFindings(urls)\n  if (findings.length > 0) {',
+          '  const findings = reciprocityFindings(urls)\n  if (findings.length > 1000) {',
+        ),
+      () => runExpectingFailure('pnpm', unit(SITEMAP_TEST)),
+    ),
+    'refuses to serve a sitemap whose reciprocity is broken',
+  )
+
+  /*
+    190d. The index lists a section with no URLs.
+
+    An empty `<urlset>` is not "no information": it is a positive statement that there are no pages of
+    this kind, and a crawler acts on it by dropping the ones it already knows about. Two of the four
+    sections are legitimately empty today, so this is the live case rather than a hypothetical one.
+  */
+  checkRejectedBy(
+    'publish-loop: 190d an index listing an empty section is caught',
+    withEditedFile(
+      SITEMAP,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const empty = sections.filter((section) => section.urlCount === 0)',
+          '  const empty = sections.filter((section) => section.urlCount < 0)',
+        ),
+      () => runExpectingFailure('pnpm', unit(SITEMAP_TEST)),
+    ),
+    'refuses an index section with no URLs',
+  )
+
+  /*
+    190e. The `lastmod` loses its offset.
+
+    `toISOString()` is the obvious spelling and it answers in `Z`. Both are valid W3C datetimes and a
+    crawler accepts either, so nothing breaks — which is the point: the acceptance criterion names the
+    Asia/Dubai offset because the person asking "did the sitemap notice my price change at four this
+    afternoon?" is in it, and a `lastmod` of `12:00:00Z` is an answer they have to do arithmetic on.
+  */
+  checkRejectedBy(
+    'publish-loop: 190e a lastmod that drops the zone offset is caught',
+    withEditedFile(
+      SITEMAP,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const shifted = new Date(ms + offsetMinutes * 60_000)',
+          '  const shifted = new Date(ms)\n  offsetMinutes = 0',
+        ),
+      () => runExpectingFailure('pnpm', unit(SITEMAP_TEST)),
+    ),
+    'formats an instant in the zone it is given',
+  )
+
+  /*
+    190f. The IndexNow fake accepts the marker as a key.
+
+    The one mutation in this block that produces a system reporting SUCCESS for something that reached
+    nobody. `Y1-indexnow-key` is open, so the setting holds a marker; a constructor that accepted it would
+    submit with a key no file serves, every submission would answer 403 in production, and the outbox
+    would be full of accepted pings. The refusal is in the constructor because that is the one moment it
+    can be made before a submission exists.
+  */
+  checkRejectedBy(
+    'publish-loop: 190f an IndexNow fake that accepts an unset key is caught',
+    withEditedFile(
+      INDEXNOW,
+      (text) => replaceOnce(text, '  if (indexNowKeyIsUnset(key)) {', '  if (false) {'),
+      () => runExpectingFailure('pnpm', unit(INDEXNOW_TEST)),
+    ),
+    'refuses to construct with the marker the setting holds while Y1-indexnow-key is open',
+  )
+
+  /*
+    190g. The idempotency key stops being over the SET.
+
+    Without the sort, a retry whose paths came back in a different order is a different key — so the
+    second ping looks legitimate, the outbox count stops being a measurement, and the acceptance
+    criterion's "one ping per changed URL set" is unfalsifiable.
+  */
+  checkRejectedBy(
+    'publish-loop: 190g an idempotency key that depends on URL order is caught',
+    withEditedFile(
+      INDEXNOW,
+      (text) =>
+        replaceOnce(
+          text,
+          "  const canonical = [...new Set(urls)].sort().join('\\n')",
+          "  const canonical = [...urls].join('\\n')",
+        ),
+      () => runExpectingFailure('pnpm', unit(INDEXNOW_TEST)),
+    ),
+    'is the same key for the same set in any order',
+  )
+
+  /*
+    190h. A thrown failure stops reaching the outbox.
+
+    "We never pinged" and "we pinged and it blew up" are different answers, and the outbox is the only
+    thing that distinguishes them. The mutation is the natural order — throw, then record — and under it
+    the two become the same.
+  */
+  checkRejectedBy(
+    'publish-loop: 190h a provider failure that leaves no outbox entry is caught',
+    withEditedFile(
+      INDEXNOW,
+      (text) =>
+        replaceOnce(
+          text,
+          "        record(submission, { kind: 'rejected', reason: 'unknown', detail: String(armed) })\n",
+          '',
+        ),
+      () => runExpectingFailure('pnpm', unit(INDEXNOW_TEST)),
+    ),
+    'records a thrown failure in the outbox before throwing',
+  )
+
+  /*
+    190i. The purge port answers "purged" instead of "accepted".
+
+    No CDN promises completion at the moment of the call. A port that claimed it would make the pipeline
+    assert something no CDN does, and the test built on it would pass while a stale page was still being
+    served from an edge.
+  */
+  checkRejectedBy(
+    'publish-loop: 190i a purge that reports completion rather than acceptance is caught',
+    withEditedFile(
+      PURGE,
+      (text) =>
+        replaceOnce(
+          text,
+          "      const notPaths = request.paths.filter((path) => !path.startsWith('/'))",
+          "      const notPaths = request.paths.filter((path) => path.startsWith('/'))",
+        ),
+      () => runExpectingFailure('pnpm', unit(PURGE_TEST)),
+    ),
+    'answers accepted with the path count',
+  )
+
+  /*
+    190j. The interconnection map over-purges.
+
+    The failure nobody reports. A row that purged every tag would make every propagation test pass, the
+    cache would empty on a change that touched one page, and nothing anywhere would say so. The mutation
+    adds `availability` to the theme row, which is exactly the shape a careful reader would add "to be
+    safe" — and `theme.accent`'s own settings test already asserts a theme change does NOT invalidate
+    availability, which is the reason that row is written down.
+  */
+  checkRejectedBy(
+    'publish-loop: 190j an interconnection row that purges a tag it does not declare is caught',
+    withEditedFile(
+      MAP,
+      (text) =>
+        replaceOnce(
+          text,
+          "  accent_density_radius: {\n    cacheTags: ['theme'],",
+          "  accent_density_radius: {\n    cacheTags: ['theme', 'availability'],",
+        ),
+      () => runExpectingFailure('pnpm', unit(MAP_TEST)),
+    ),
+    'purges availability only for the four changes that can move a slot',
+  )
+
+  /*
+    190k. The interconnection map loses a row docs/09 §5 names.
+
+    Eight rows, and the one that goes missing is the one nobody tests for — which is why the count and the
+    names are both asserted. A map with seven rows still satisfies every per-row assertion.
+  */
+  checkRejectedBy(
+    'publish-loop: 190k an interconnection map missing one of the eight documented rows is caught',
+    withEditedFile(
+      MAP,
+      (text) => replaceOnce(text, "  'package_template',\n] as const", '] as const'),
+      () => runExpectingFailure('pnpm', unit(MAP_TEST)),
+    ),
+    'covers the eight changes docs/09 §5 names, and no more',
+  )
+}
+
+// 191a-191z. (W-SITE-09) The 301 map shown to be able to stop being a function: each of the four
+//            properties — total, single-valued, one hop, acyclic — broken in turn, the coverage gate shown
+//            to be able to pass over a gap, the importer shown to be able to overwrite a redirect a live
+//            page depends on, and the similarity rule shown to be able to accept a template fill.
+//
+//            The failure this block exists against is the quietest one a relaunch has. A URL that ranks,
+//            is not in the map, and 404s from the day of the cutover is invisible from inside the
+//            application: nothing here knows the URL exists, so no test can discover it. Only a declared
+//            baseline can, which is why the coverage check is a GATE and not a unit test — and why every
+//            mutation below leaves a site that works.
+{
+  const LEGACY = 'packages/core/src/seo/legacy-redirects.ts'
+  const LEGACY_TEST = 'packages/core/src/seo/legacy-redirects.test.ts'
+  const PROXY_TEST = 'apps/web/src/legacy-redirects.test.ts'
+  const IMPORTER = 'packages/db/src/repositories/redirects.ts'
+  const PROXY = 'apps/web/proxy.ts'
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+
+  // The control for the whole block, including the gate itself: `pnpm redirects` has to pass on the
+  // committed tree or every case below is asserting against a tree that was already red.
+  {
+    const legacy = run('pnpm', unit(LEGACY_TEST))
+    check(
+      'redirects: the committed map suite passes, which is the control for 191a to 191f',
+      !legacy.failed,
+      `the map suite does not pass on the committed tree:\n${legacy.output}`,
+    )
+    const gate = run('pnpm', ['redirects'])
+    check(
+      'redirects: the committed tree passes the coverage gate, the control for 191g and 191h',
+      !gate.failed,
+      `pnpm redirects does not pass on the committed tree:\n${gate.output}`,
+    )
+    const proxy = run('pnpm', unit(PROXY_TEST))
+    check(
+      'redirects: the committed proxy decision table passes, the control for 191i and 191j',
+      !proxy.failed,
+      `the proxy table does not pass on the committed tree:\n${proxy.output}`,
+    )
+  }
+
+  /*
+    191a. Totality dropped: a baseline path with no row stops being a finding.
+
+    THE defect of this unit. The map still works for every URL in it, every other rule still fires, and
+    the one URL nobody mapped 404s from the cutover — earning nothing, reported by nothing.
+  */
+  checkRejectedBy(
+    'redirects: 191a a baseline path with no row ceasing to be a finding is caught',
+    withEditedFile(
+      LEGACY,
+      (text) =>
+        replaceOnce(
+          text,
+          '  for (const path of input.baseline) {\n    if (bySource.has(path)) continue',
+          '  for (const path of input.baseline) {\n    if (true) continue',
+        ),
+      () => runExpectingFailure('pnpm', unit(LEGACY_TEST)),
+    ),
+    'reports a baseline path with no row',
+  )
+
+  /*
+    191b. The one-hop rule dropped.
+
+    A chain costs the first URL a hop per rename, for ever, and crawlers stop following. It is the
+    invariant 0029 enforces in the database; this is the half that holds over the COMMITTED map, which has
+    no trigger behind it.
+  */
+  checkRejectedBy(
+    'redirects: 191b a chain ceasing to be a finding is caught',
+    withEditedFile(
+      LEGACY,
+      (text) =>
+        replaceOnce(
+          text,
+          '    if (sources.has(row.target)) {\n      findings.push({\n        rule: ',
+          '    if (false) {\n      findings.push({\n        rule: ',
+        ),
+      () => runExpectingFailure('pnpm', unit(LEGACY_TEST)),
+    ),
+    'reports a chain, and does not also report its target as a dead page',
+  )
+
+  /*
+    191c. Single-valuedness dropped: one source may be mapped twice.
+
+    Two rows for one path is two answers, and which one a middleware serves depends on the order they come
+    back in — so the site is correct in testing and wrong in production, or the other way round, and
+    neither is reproducible.
+  */
+  checkRejectedBy(
+    'redirects: 191c a source mapped twice ceasing to be a finding is caught',
+    withEditedFile(
+      LEGACY,
+      (text) =>
+        replaceOnce(
+          text,
+          '    const existing = bySource.get(row.source)\n    if (existing !== undefined) {',
+          '    const existing = bySource.get(row.source)\n    if (existing === undefined && false) {',
+        ),
+      () => runExpectingFailure('pnpm', unit(LEGACY_TEST)),
+    ),
+    'reports a source mapped twice',
+  )
+
+  /*
+    191d. The loop walk stops walking.
+
+    A loop is reported separately from the chain that makes it, because the symptom and the fix differ: a
+    chain costs a hop, a loop costs the page — the browser answers "too many redirects", which names
+    neither row.
+  */
+  checkRejectedBy(
+    'redirects: 191d a loop ceasing to be a finding is caught',
+    withEditedFile(
+      LEGACY,
+      /*
+        The walk removed, rather than its `break`. Removing the break was the first spelling and it HANGS:
+        the loop then has nothing to stop it, so the case produced no answer at all rather than a failing
+        one — which is why `redirectMapFindings` now carries a step bound as well as its `seen` set. A
+        gate case that hangs is worse than one that misses.
+      */
+      (text) =>
+        replaceOnce(
+          text,
+          '  for (const start of bySource.keys()) {\n    const seen = new Set<string>([start])',
+          '  for (const start of [] as readonly string[]) {\n    const seen = new Set<string>([start])',
+        ),
+      () => runExpectingFailure('pnpm', unit(LEGACY_TEST)),
+    ),
+    'reports a loop as well as the chain that makes it',
+  )
+
+  /*
+    191e. A dead target stops being a finding.
+
+    0029's own phrase: a redirect to a 404 is a 404 with extra steps. It is the finding a relaunch
+    produces by renaming a target page after the map was written, which is to say: later, by somebody who
+    never read the map.
+  */
+  checkRejectedBy(
+    'redirects: 191e a target no route serves ceasing to be a finding is caught',
+    withEditedFile(
+      LEGACY,
+      (text) =>
+        replaceOnce(
+          text,
+          '    } else if (!input.isServedPage(row.target)) {',
+          '    } else if (false) {',
+        ),
+      () => runExpectingFailure('pnpm', unit(LEGACY_TEST)),
+    ),
+    'reports a target no route serves',
+  )
+
+  /*
+    191f. The similarity ceiling raised past the one thing it measures.
+
+    A template-filled area page is the same sentences with the place name swapped, which scores near 1. A
+    ceiling above that accepts exactly what docs/09's "real differentiated content rather than a template
+    fill" forbids — and the pages still render, still rank for a while, and then stop.
+  */
+  checkRejectedBy(
+    'redirects: 191f a similarity ceiling that accepts a template fill is caught',
+    withEditedFile(
+      LEGACY,
+      (text) =>
+        replaceOnce(
+          text,
+          'export const AREA_PAGE_SIMILARITY_CEILING = 0.8',
+          'export const AREA_PAGE_SIMILARITY_CEILING = 1.01',
+        ),
+      () => runExpectingFailure('pnpm', unit(LEGACY_TEST)),
+    ),
+    'scores a place-name swap as nearly identical',
+  )
+
+  /*
+    191g. A baseline path removed from the committed map.
+
+    The gate's own subject, from the other direction: this is what the relaunch actually does — a row is
+    deleted in a tidy-up and the URL it covered goes quiet. `pnpm redirects` prints the path, which is the
+    criterion's own requirement ("fails the build with the path printed").
+  */
+  checkRejectedBy(
+    'redirects: 191g a row removed from the committed baseline is caught by pnpm redirects',
+    withEditedFile(
+      LEGACY,
+      (text) =>
+        replaceOnce(
+          text,
+          "  {\n    source: '/product-tag/spa-abu-dhabi',\n    target: TREATMENTS_INDEX,\n    reason: 'WooCommerce baseline: product tag archive (docs/13 SS6)',\n  },\n",
+          '',
+        ),
+      () => runExpectingFailure('pnpm', ['redirects']),
+    ),
+    'Redirect map problems',
+  )
+
+  /*
+    191h. A target changed to a path no route serves.
+
+    The second thing a relaunch does: a page is renamed and the map is not. The gate reads the route
+    registry rather than a list, so this fires on the commit that renames the route rather than on the
+    commit that remembers the map.
+  */
+  checkRejectedBy(
+    'redirects: 191h a target the route registry does not declare is caught by pnpm redirects',
+    withEditedFile(
+      LEGACY,
+      (text) =>
+        replaceOnce(
+          text,
+          "const TREATMENTS_INDEX = '/treatments'",
+          "const TREATMENTS_INDEX = '/the-menu'",
+        ),
+      () => runExpectingFailure('pnpm', ['redirects']),
+    ),
+    'target_is_not_a_page',
+  )
+
+  /*
+    191i. The locale prefix dropped on the hop.
+
+    `/ar/product/x` landing on `/treatments/x` sends an Arabic reader into the English tree, and the
+    English page's `hreflang` set then tells the crawler the Arabic document is somewhere the reader was
+    never sent. The mutation is the obvious spelling — redirect to the target — which is right for exactly
+    the prefixless half of the traffic.
+  */
+  checkRejectedBy(
+    'redirects: 191i a legacy redirect that drops the locale prefix is caught',
+    withEditedFile(
+      PROXY_TEST,
+      (text) =>
+        replaceOnce(
+          text,
+          '  return localisedPath(retired.target, localeOf(canonical))',
+          '  return retired.target',
+        ),
+      () => runExpectingFailure('pnpm', unit(PROXY_TEST)),
+    ),
+    'the Arabic tree stays in the Arabic tree',
+  )
+
+  /*
+    191j. The map allowed to shadow a page the site serves.
+
+    0029 refuses a row whose source is a live treatment page by name (`redirect_source_still_live`); the
+    committed module has no trigger, so this is the only thing holding it. A row shadowing a served path
+    is a page that 301s away from itself, and the symptom is a page that "disappeared" with nothing in the
+    route code to explain it.
+  */
+  checkRejectedBy(
+    'redirects: 191j a committed row shadowing a served route is caught',
+    withEditedFile(
+      LEGACY,
+      (text) =>
+        replaceOnce(
+          text,
+          "  {\n    source: '/product-tag/massage-abu-dhabi',",
+          "  {\n    source: '/pricing',\n    target: TREATMENTS_INDEX,\n    reason: 'a row shadowing a served route, which is the defect 191j is about',\n  },\n  {\n    source: '/product-tag/massage-abu-dhabi',",
+        ),
+      () => runExpectingFailure('pnpm', unit(PROXY_TEST)),
+    ),
+    'never redirects a path the registry serves',
+  )
+
+  /*
+    191k. The importer upserts instead of refusing.
+
+    `redirect_map` is shared with the slug-change and therapist-archival rows, so an import that
+    overwrote one of those would silently undo a redirect a live page depends on — and the symptom is a
+    404 on a URL that worked yesterday, with nothing in the import's output to connect the two. The
+    acceptance line asks for the refusal to be asserted rather than the upsert, and this is the mutation
+    that assertion exists against.
+  */
+  checkRejectedBy(
+    'redirects: 191k an importer that overwrites an existing redirect is caught',
+    withEditedFile(
+      IMPORTER,
+      (text) =>
+        replaceOnce(
+          text,
+          '      if (existing.targetPath === row.targetPath) unchanged += 1\n      else conflicts.push({ sourcePath: row.sourcePath, existingTarget: existing.targetPath })\n      continue',
+          '      unchanged += 1\n      continue',
+        ),
+      // The importer's own suite, which needs a DATABASE and not a built application: a gate case whose
+      // fixture waits for `next build` is one whose failure a reader waits minutes for.
+      () =>
+        runExpectingFailure('pnpm', [
+          'exec',
+          'vitest',
+          'run',
+          '-c',
+          'vitest.integration.config.ts',
+          'packages/fixtures/src/redirects.itest.ts',
+        ]),
+    ),
+    'refuses a source that already redirects somewhere else',
+  )
+
+  /*
+    191l. The proxy stops serving the map at all.
+
+    The whole layer, removed. Every unit test about the decision still passes — they compose the three
+    functions themselves — and the site 404s every ranking URL. Only a request can see it, which is why
+    this case drives the integration suite.
+  */
+  checkRejectedBy(
+    'redirects: 191l a proxy that no longer serves the legacy map is caught',
+    withEditedFile(
+      PROXY,
+      (text) =>
+        replaceOnce(
+          text,
+          '    const retired = resolveLegacyRedirect(neutralPath(canonical))',
+          '    const retired = null as { readonly target: string } | null',
+        ),
+      /*
+        The SOURCE scan, not the served request. Only a request can see a deleted layer's effect, and this
+        application's unit tests cannot make one — `next/server` is not importable from vitest here — so
+        the integration suite is what asserts the status and the `location`, and this case fails in four
+        seconds instead of after a build. `legacy-redirects.test.ts` asserts the three functions and their
+        ORDER, which is what makes a deletion visible to it at all.
+      */
+      () => runExpectingFailure('pnpm', unit(PROXY_TEST)),
+    ),
+    'resolves the legacy map from the committed module, after canonicalising',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -61790,6 +62652,11 @@ export function chargebackNetEffectFils(`,
     // enforces "the codebase has no capability to file a return".
     'pnpm no-autofile',
     'pnpm structured-data',
+    // W-SITE-09's 301 map. Registered here in the position `pnpm verify` runs it, because that is what
+    // makes dropping it from CI a failing build rather than the silent loss of the one check that can
+    // see a ranking URL at all: nothing inside this application knows those URLs exist, so an unmapped
+    // one is a 404 no test can discover.
+    'pnpm redirects',
     'pnpm audit:online',
     'pnpm palette',
     'pnpm tokens',

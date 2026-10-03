@@ -24,6 +24,7 @@
 
 import type { Facts } from '@berelax/shared'
 import { AppError } from '@berelax/shared'
+import type { TherapistCandidate } from '../therapist-publishable.ts'
 import {
   areaServedNodes,
   businessId,
@@ -42,7 +43,6 @@ import {
   imageObjectNode,
   type PersonNodesOptions,
   personNodesFor,
-  type TherapistCandidate,
   videoObjectNode,
 } from './content.ts'
 import { offerIdsIn, serviceNodes } from './offerings.ts'

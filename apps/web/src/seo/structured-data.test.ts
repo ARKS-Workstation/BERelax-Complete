@@ -3,7 +3,7 @@ import { join, relative, sep } from 'node:path'
 import { FAQ_ENTRIES } from '@berelax/cms'
 import { specimenFacts, validateGraph } from '@berelax/core'
 import { describe, expect, it } from 'vitest'
-import { ROUTES, sampleParamsOf } from '../routes/registry.ts'
+import { sampleableDocumentRoutes, sampleParamsOf } from '../routes/registry.ts'
 import { breadcrumbTrailFor, graphInputFor, pageGraph } from './graph-input.ts'
 
 /**
@@ -263,7 +263,11 @@ describe('the graph for a registry route', () => {
     // The registry is in exact bijection with the filesystem, so this enumerates every document the site
     // serves. Each one either renders a graph or is a deliberate deferral; either way the builder has to be
     // able to produce one for it.
-    const documents = ROUTES.filter((route) => route.kind === 'document')
+    // `sampleableDocumentRoutes` rather than every document: W-SITE-06's `/therapists/[slug]` declares
+    // `noSamplePath` because no therapist is publishable (ADR 0020), so there is no real page to build a
+    // graph FOR — and `graphInputFor` would throw on the pattern, which is the guard working rather than a
+    // gap. The route's graph is asserted against a published therapist in `public-site.itest.ts` instead.
+    const documents = sampleableDocumentRoutes()
     expect(documents.length).toBeGreaterThan(0)
     for (const route of documents) {
       // A route with a dynamic segment is built for one real page — its registry sample params. Without them

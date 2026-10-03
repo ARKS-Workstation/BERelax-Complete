@@ -119,6 +119,8 @@ export interface ContentCopy {
     /** The link to the catalogue index. Not the word the registry uses; see the header. */
     readonly menu: string
     readonly prices: string
+    /** The link to the therapist index. */
+    readonly therapists: string
     /** The link to the booking flow. */
     readonly book: string
     readonly faq: string
@@ -154,6 +156,7 @@ export function navLabels(copy: ContentCopy): Readonly<Record<NavRouteId, string
     home: copy.home,
     treatments: copy.labels.menu,
     pricing: copy.labels.prices,
+    therapists: copy.labels.therapists,
     book: copy.labels.book,
     spa: copy.labels.spa,
     faq: copy.labels.faq,

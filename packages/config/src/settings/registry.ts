@@ -330,6 +330,30 @@ export const PROVISIONAL_DEPOSIT_PERCENT_BP = 0
  * and the Unconfirmed Assumptions panel. A second spelling is a reader that silently falls back to the
  * declared default — which for these two is a placeholder, so the fallback would be invisible.
  */
+/**
+ * The IndexNow key, and the open question it stands in for (W-SITE-08).
+ *
+ * ## Why it is a SETTING and not a secret
+ *
+ * An IndexNow key is published by the site that uses it, at `https://<host>/<key>.txt`, and verified by
+ * the search engine fetching that file. It is a credential in the sense that it authorises a submission
+ * and **not** in the sense that it has to be concealed — anybody can read it off the live site. So it
+ * belongs with the configuration an owner can see rather than in the encrypted settings table, where it
+ * would be masked on display and therefore impossible to publish.
+ *
+ * ## Why the default is a MARKER rather than a key
+ *
+ * Brief rule 15, and the same argument the statement descriptor makes: `app_setting.value` is NOT NULL so
+ * "unset" cannot be a null, and a plausible-looking key would be indistinguishable from one a search
+ * engine had verified. The consequence here is sharper than usual, because a wrong key does not fail —
+ * IndexNow answers 403 and the pipeline would go on reporting pings that reach nobody. So
+ * `createFakeIndexNow` REFUSES a marker from its constructor (`indexNowKeyIsUnset`), which is the "never
+ * silently succeeds" half of W-SITE-08's acceptance criterion enforced at the one moment it can be.
+ */
+export const INDEXNOW_KEY_SETTING_KEY = 'seo.indexnow_key'
+export const INDEXNOW_KEY_OPEN_QUESTION_ID = 'Y1-indexnow-key'
+export const PROVISIONAL_INDEXNOW_KEY = 'INDEXNOW-KEY-PENDING-Y1-INDEXNOW-KEY'
+
 export const WPS_EMPLOYER_ID_SETTING_KEY = 'hr.wps_employer_id'
 export const WPS_AGENT_ID_SETTING_KEY = 'hr.wps_agent_id'
 
@@ -372,6 +396,29 @@ export const PROVISIONAL_SUMMER_MONTHS: readonly number[] = Object.freeze([7, 8]
 // conservative rather than non-compliant. Each carries its OPEN-QUESTIONS id.
 
 export const SETTINGS = [
+  define({
+    /**
+     * The IndexNow key this site publishes. **UNSET** — see {@link INDEXNOW_KEY_SETTING_KEY}.
+     *
+     * `invalidates` is empty on purpose. Changing the key changes nothing a reader can see: no page, no
+     * schema block and no cached document depends on it. What it changes is which submissions a search
+     * engine accepts, and that is a consequence of the NEXT publish rather than of this change — so a
+     * cache tag here would purge pages for a reason unrelated to their content.
+     */
+    key: INDEXNOW_KEY_SETTING_KEY,
+    tier: 'operational',
+    schema: z.string().min(1).max(128),
+    defaultValue: PROVISIONAL_INDEXNOW_KEY,
+    label: 'IndexNow key',
+    help: 'The key this site publishes at /<key>.txt so that Bing, Yandex, Seznam and Naver accept a "this page changed" ping. It is not a secret \u2014 anybody can read it off the live site \u2014 and Google does not use it, reading the sitemap instead. While it is unset the publish pipeline refuses the ping with a named reason rather than reporting one it did not send.',
+    editableBy: OWNER_MANAGER,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: INDEXNOW_KEY_OPEN_QUESTION_ID,
+      note: 'UNSET. An IndexNow key is a string the site owner chooses, published by this site at /<key>.txt and verified by the search engine fetching it \u2014 so the build CANNOT choose one: a key generated here would be a key no file serves, every submission would answer 403, and the pipeline would report pings that reached nobody. What is needed is one value, chosen once, plus the file served at its path. Until then createFakeIndexNow refuses this marker from its constructor and the propagation job records the refusal on the agent row.',
+    },
+  }),
   define({
     key: 'booking.turnaround_minutes_standard',
     tier: 'operational',

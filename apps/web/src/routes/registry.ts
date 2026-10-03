@@ -97,6 +97,23 @@ export interface RouteEntry {
    * a handler's URL to screenshot it or to read an `hreflang` set out of it.
    */
   readonly sampleParams?: Readonly<Record<string, string>>
+  /**
+   * Why this parameterised **document** has no fetchable sample path, declared exactly when it has none.
+   *
+   * There is one, and it is W-SITE-06's `/therapists/[slug]`. Every other parameterised document can name
+   * a real path because a seeded row exists for it; this one cannot, and the reason is the whole subject
+   * of ADR 0020: a therapist page exists only with a display name **and** a recorded photography consent,
+   * none of the nineteen has either (`Y12-names`, `Y12-consent-photo`), and this build may not invent one
+   * (brief rule 15). So there is no slug that answers 200, and `sampleParams` here would hand every
+   * consumer of this registry a 404 to assert `hreflang`, canonical URLs and normalisation against.
+   *
+   * It is a DECLARED absence with a sentence in it rather than an omission, because an omission is
+   * indistinguishable from the defect it would hide — a parameterised document whose author forgot the
+   * sample params, which is how a harness ends up photographing a pattern. `sampleableDocumentRoutes()`
+   * is the one place that reads it, and `registry.test.ts` asserts the two fields are mutually exclusive
+   * and that this one appears only on a parameterised document.
+   */
+  readonly noSamplePath?: string
   /** Why this route is in the registry with these properties. Read by nobody; read by everybody. */
   readonly why: string
 }
@@ -1681,6 +1698,42 @@ export const ROUTES = [
       'noindex prefix.',
   },
   {
+    id: 'sitemap-index',
+    path: '/sitemap.xml',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: true,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'The sitemap INDEX (W-SITE-08). A handler and locale-neutral for the reason /robots.txt and ' +
+      '/api/facts are: it is bytes rather than a document, it has no language, and giving it a locale ' +
+      'would give one file two URLs — which for a sitemap means two sets of <loc> a crawler has to ' +
+      'reconcile. `indexable: true` and `sitemap: false`: it carries no x-robots-tag, because a sitemap ' +
+      'a crawler is told not to read is a sitemap that does nothing, and it is not IN a sitemap, because ' +
+      'nothing lists a sitemap. `robots.txt` advertises it, and only once this entry exists — the ' +
+      'registry is in bijection with the filesystem, so declaring it and serving it are one statement.',
+  },
+  {
+    id: 'sitemap-section',
+    path: '/sitemaps/[type]',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: true,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'One sitemap per type — pages, treatments, therapists, journal — so a crawler can re-fetch the ' +
+      'catalogue without re-reading the brochure pages. A section with no URLs answers 404 rather than ' +
+      'an empty <urlset>, which is a positive statement that those pages have gone; two of the four are ' +
+      'legitimately empty today (no therapist is publishable, no journal post has its two bylines). A ' +
+      'handler, so it declares no sampleParams and nothing opens its URL to read an hreflang set out of ' +
+      "it — the alternates it PUBLISHES are the pages' own, built by the same `alternatesFor` the <head> " +
+      'uses, which is what makes the cross-check an assertion rather than a reconciliation.',
+  },
+  {
     id: 'spa',
     path: '/spa',
     kind: 'document',
@@ -1696,6 +1749,49 @@ export const ROUTES = [
       'landmarks although docs/09 §4 lists both, and the room inventory on record is the provisional ' +
       'five-room stub (Y8-rooms), so neither is published as fact. ISR for the same reason /contact is — ' +
       'it reads the row, and a corrected opening time reaches it by revalidation.',
+  },
+  {
+    id: 'therapists',
+    path: '/therapists',
+    kind: 'document',
+    rendering: 'dynamic',
+    locales: LOCALES,
+    indexable: true,
+    sitemap: true,
+    changefreq: 'weekly',
+    why:
+      'docs/09 §1: "The trust layer." One card per therapist, and the card is where ADR 0020 is visible: ' +
+      'a name and an anchor for a therapist who may be published, a photograph with no name and no link ' +
+      'for everybody else — which is all nineteen today (Y12-names, Y12-consent-photo) and is the launch ' +
+      'state docs/13 §8 states. DYNAMIC and not ISR, which is the one non-obvious property here: this ' +
+      'page IS the publication state, so a withdrawn photography consent has to stop showing a name on ' +
+      'the next request rather than on the next revalidation. A cached card carrying the name of ' +
+      'somebody who has withdrawn consent is the single failure the guard exists to prevent, and it ' +
+      'would be invisible — the row says unpublished and the page says otherwise.',
+  },
+  {
+    id: 'therapist',
+    path: '/therapists/[slug]',
+    kind: 'document',
+    rendering: 'dynamic',
+    locales: LOCALES,
+    indexable: true,
+    sitemap: true,
+    changefreq: 'weekly',
+    noSamplePath:
+      'No therapist is publishable, so no slug answers 200. ADR 0020 needs a display name and a recorded ' +
+      'photography consent, all nineteen have neither (Y12-names, Y12-consent-photo), and inventing one ' +
+      'would be inventing a person (brief rule 15). The day an admin publishes one, this field is ' +
+      'replaced by sampleParams naming their slug.',
+    why:
+      'docs/09 §1 calls it "the differentiator" and §2 says why: a returning client searches for a ' +
+      'person, it is the best E-E-A-T signal in a health-adjacent category, and it converts because the ' +
+      'decision is already made. Three statuses from one segment, and all three are ADR 0020: 200 for a ' +
+      'therapist with a name and a recorded consent, 301 to /therapists for one who has left (docs/09 ' +
+      '§2: "Do not 404 it" — the page has inbound links, reviews and rankings), and 404 for every other ' +
+      'slug. Dynamic for the index reason, and more sharply: a prerendered 200 carrying a name is a ' +
+      'cached copy of a page a consent withdrawal has to remove, and revalidatePath is a door somebody ' +
+      'has to remember to walk through.',
   },
   {
     id: 'till',
@@ -1966,6 +2062,23 @@ export function documentRoutes(): readonly Route[] {
   return ROUTES.filter((route) => route.kind === 'document')
 }
 
+/**
+ * The documents that can actually be FETCHED — the set a harness may open.
+ *
+ * `documentRoutes()` is the set of documents the site serves; this is the subset that has a URL today. The
+ * two differ by exactly the routes that declare `noSamplePath`, and the distinction exists because every
+ * consumer that opens a route — the normalisation walk, the `hreflang` assertions, the structured-data
+ * extraction, the link graph — was written against `documentRoutes()` and would assert all of it against a
+ * 404 the moment a parameterised document had no seeded row behind it.
+ *
+ * A function rather than each consumer writing the filter itself, because five copies of it are five
+ * places to forget it — and forgetting it does not fail here: it fails in whichever suite opened the
+ * pattern, naming the page rather than the omission.
+ */
+export function sampleableDocumentRoutes(): readonly Route[] {
+  return ROUTES.filter((route) => route.kind === 'document' && !('noSamplePath' in route))
+}
+
 /** The path of one route in one locale. Throws for a locale the route is not served in. */
 export function pathFor(route: RouteEntry, locale: Locale): string {
   if (!route.locales.includes(locale)) {
@@ -2082,6 +2195,15 @@ export interface SitemapEntry {
   readonly path: string
   readonly locale: Locale
   readonly changefreq: ChangeFrequency
+  /**
+   * The entry's route id, so a consumer can ask `alternatesFor` for its `hreflang` set.
+   *
+   * On the entry rather than looked up from the path by the caller, and the difference is not convenience:
+   * a path-to-id lookup is a second resolution of the URL space, and W-SITE-08's acceptance criterion is
+   * that the sitemap's `hreflang` set and the page's `<head>` agree. They agree because both come from
+   * `alternatesFor(id, locale)`, and that is only possible if the id travels with the entry.
+   */
+  readonly id: RouteId
 }
 
 export function sitemapEntries(): readonly SitemapEntry[] {
@@ -2093,7 +2215,12 @@ export function sitemapEntries(): readonly SitemapEntry[] {
     // the rows, and this function stays synchronous and database-free for every other route.
     if (isParameterised(route.path)) continue
     for (const locale of route.locales) {
-      entries.push({ path: pathFor(route, locale), locale, changefreq: route.changefreq })
+      entries.push({
+        id: route.id,
+        path: pathFor(route, locale),
+        locale,
+        changefreq: route.changefreq,
+      })
     }
   }
   return entries

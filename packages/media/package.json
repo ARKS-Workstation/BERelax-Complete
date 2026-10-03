@@ -11,6 +11,7 @@
     "./ladders": "./src/ladders.ts",
     "./loader": "./src/loader.ts",
     "./placeholder": "./src/placeholder.ts",
+    "./purge": "./src/purge/index.ts",
     "./sharp": "./src/sharp.ts",
     "./slots": "./src/slots/index.ts",
     "./srcset": "./src/srcset.ts",

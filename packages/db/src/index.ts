@@ -285,6 +285,15 @@ export {
   reverseChargeExceptions,
 } from './queries/reverse-charge-exceptions.ts'
 export { doNotPairExclusion, therapistsExcludedBy } from './queries/therapist-exclusions.ts'
+export {
+  readServiceSkills,
+  readTherapistPageBySlug,
+  readTherapistPages,
+  type ServiceSkillRow,
+  THERAPIST_INDEX_PATH,
+  type TherapistPageRow,
+  therapistPathFor,
+} from './queries/therapist-pages.ts'
 // M-TILL-13's four till readers. `readTillIssuer` returns the placeholder TRN unvalidated on purpose —
 // `requireIssuerTrn` in `@berelax/core` is the only thing that may put a TRN on a document, and a reader
 // that threw would leave the till unable to draw the screen explaining why it cannot issue one.
@@ -1487,6 +1496,14 @@ export {
   recordDocumentFetch,
   registerPrivateDocument,
 } from './repositories/private-document.ts'
+export {
+  type PropagationOutcome,
+  type PropagationRecord,
+  type PropagationSurface,
+  type RecordPropagationInput,
+  readPropagations,
+  recordPropagation,
+} from './repositories/propagation.ts'
 /*
   W-SITE-10's publication control plane. The only module in the build that writes `publication_lint_pass`,
   `publication_approval` and `publication_record`: 0093 makes all three append-only for every role, so a
@@ -1593,6 +1610,14 @@ export {
   recordGatewayObservation,
   recordReconciliationException,
 } from './repositories/reconciliation.ts'
+export {
+  allRedirects,
+  type BaselineRedirect,
+  type ImportBaselineResult,
+  importBaselineRedirects,
+  lookupRedirect,
+  type RedirectRow,
+} from './repositories/redirects.ts'
 export {
   RESCHEDULE_REFUSALS,
   type RescheduleDeps,
@@ -5928,4 +5953,63 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // ZY772 through ZY780 are released UNUSED and deliberately unregistered, because `pnpm sqlstate` refuses
 // an entry for a code no migration raises.
 //
-export const SCHEMA_VERSION = 156 as const
+// 157 is 0157_therapist_public_slug.sql (W-SITE-06) — one nullable column on `employee`, two CHECKs and
+// one UNIQUE index. Mirrored in `packages/db/src/schema/staff.ts`.
+//
+// THE SLUG IS WRITTEN, NOT GENERATED, AND THAT IS THE WHOLE DECISION. `employee.is_publishable` is a
+// generated column and this looked like its sibling. A generated `public_slug` needs an IMMUTABLE
+// `slugify()` in SQL, which is a second implementation of `therapistSlug()` in `@berelax/core` — and
+// `pnpm db:drift` compares column shapes, not the behaviour of two functions, so the two could disagree
+// about a combining mark for ever with every check green. The transformation is spelled once, in core,
+// and `publishTherapist()` is the one writer.
+//
+// WHAT THE DATABASE CONTRIBUTES IS THE REFUSAL TYPESCRIPT CANNOT MAKE. `employee_display_name_unique`
+// already existed and is not enough: `Anna-Maria` and `Anna Maria` are two distinct display names that
+// reduce to one slug, so without `employee_public_slug_unique` they are two therapists at one URL, two
+// sitemap entries for one page, and a route resolution decided by row order.
+// `therapist-publishable.test.ts` asserts that collision as a fact about the function, so the index
+// refuses a known case rather than a hypothetical one.
+//
+// `employee_public_slug_with_display_name` IS AN EQUIVALENCE. A slug with no name is a URL for somebody
+// who may not be published; a name with no slug is a therapist the route cannot find, which presents as a
+// 404 on a page the admin has just published and names neither column.
+//
+// ZY781 through ZY790 are released UNUSED and deliberately unregistered: every refusal here is a CHECK or
+// a unique index, so the codes are 23514 and 23505 and the constraint name says which rule, and
+// `pnpm sqlstate` refuses an entry for a code no migration raises.
+//
+// 158 is 0158_publish_propagate_agent.sql (W-SITE-08) — one `agent_definition` row, its
+// `agent_heartbeat` row, the `publish_propagation` table, two indexes and one trigger. Mirrored in
+// `packages/db/src/schema/agents.ts`.
+//
+// THE AGENT HAS NO CRON, WHICH IS THE ONE UNUSUAL THING IN IT. Every other agent in this registry is
+// scheduled; propagation is triggered by a publish, because propagating a change nobody made reads the
+// same rows and sends nothing. `expected_interval_seconds` is therefore a WATCHDOG BOUND rather than a
+// schedule — a week, chosen so that a quiet week in which nobody published is not an incident while a
+// broken loop is noticed long before a quarter's rankings are. `pnpm jobs` refuses a cron without an
+// agent and says nothing about an agent without a cron, which is the right way round: the agent row is
+// what makes "no agent ever stops quietly" (docs/09 §5) true for a job whose silence is the hardest to
+// notice — a publish that revalidated its pages and failed to ping leaves a site that looks entirely
+// correct and is simply not re-crawled.
+//
+// `publish_propagation` IS THE VISIBLE OUTBOX THE CRITERION ASKS FOR. The fakes hold theirs in memory,
+// which is right for a fake and useless for an operator: a process restart is the end of the record, and
+// "did we actually ping, and with what?" is asked about production. The table is NOT append-only — a run
+// is one row updated once as it completes, and the ordering question is `audit_event`'s (0005), which the
+// job writes as its fifth artefact.
+//
+// `publish_propagation_once_per_set` IS THE IDEMPOTENCY. Unique on `(surface, idempotency_key)`, where
+// the key is a hash of the sorted, deduplicated changed URL set — so "a retried publish yields one ping
+// per changed URL set" is a property of this database rather than of a fake's memory. Per SURFACE as
+// well as per key, because the same URL set can legitimately be republished by two different kinds of
+// change (archiving a therapist and editing the CMS page that linked them both touch `/therapists`), and
+// collapsing those would lose one of them.
+//
+// ZY791 holds `(idempotency_key, changed_urls)` TOGETHER. The key is a hash OF the set, so a key that
+// moved on its own makes the row a record of a submission nobody made — and once IndexNow has accepted a
+// set, rewriting it makes the outbox answer "what did we send?" with what somebody wishes had been sent.
+//
+// ZY792 through ZY800 are released UNUSED and deliberately unregistered, because `pnpm sqlstate` refuses
+// an entry for a code no migration raises.
+//
+export const SCHEMA_VERSION = 158 as const

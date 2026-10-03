@@ -93,6 +93,9 @@ importers:
       '@berelax/google':
         specifier: workspace:*
         version: link:../../packages/google
+      '@berelax/hr':
+        specifier: workspace:*
+        version: link:../../packages/hr
       '@berelax/media':
         specifier: workspace:*
         version: link:../../packages/media

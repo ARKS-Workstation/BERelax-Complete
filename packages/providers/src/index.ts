@@ -96,3 +96,14 @@ export type {
   SmsProvider,
   SmsRequest,
 } from './sms/port.ts'
+
+/*
+  W-SITE-08's IndexNow port and fake are deliberately NOT re-exported here.
+
+  They live on the `@berelax/providers/seo` subpath instead, because
+  `.dependency-cruiser.cjs`'s `messaging-providers-only-inside-a-transport` bans THIS barrel outside a
+  messaging transport — it re-exports the SMS and email ports, so an import of the barrel reaches SMSala
+  while naming nothing forbidden. Adding IndexNow here would have made the propagation job's import of it
+  a boundary violation, and the fix would have been to widen the rule rather than to use a subpath. See
+  `packages/google`, which imports `@berelax/providers/google` for the same reason.
+*/

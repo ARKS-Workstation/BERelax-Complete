@@ -34,7 +34,7 @@ import { collectionAvailability, type JournalPost, readMedicalDisclaimer } from 
 import { buildFacts } from './facts/build.ts'
 import { localisedPath, neutralPath } from './i18n/locales.ts'
 import { siteOrigin } from './routes/alternates.ts'
-import { documentRoutes, isParameterised, samplePathFor } from './routes/registry.ts'
+import { isParameterised, sampleableDocumentRoutes, samplePathFor } from './routes/registry.ts'
 import { ADMIN_SESSION_COOKIE } from './session-cookie.ts'
 
 /**
@@ -796,7 +796,10 @@ describe('acceptance — the link graph over the built site', () => {
    * reported as an orphan.
    */
   function candidatesFor(locale: 'en' | 'ar'): readonly Candidate[] {
-    return documentRoutes().flatMap((route) =>
+    // `sampleableDocumentRoutes` rather than `documentRoutes`: W-SITE-06's `/therapists/[slug]` has no
+    // fetchable path (no therapist is publishable — ADR 0020), so it contributes no node. The therapist
+    // INDEX is in the set and is linked from the navigation, which is what keeps it out of the orphan rule.
+    return sampleableDocumentRoutes().flatMap((route) =>
       isParameterised(route.path)
         ? facts.catalogue.services.map((service) => ({
             path: localisedPath(`/treatments/${service.slug}`, locale),

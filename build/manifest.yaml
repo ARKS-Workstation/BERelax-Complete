@@ -17945,7 +17945,7 @@ units:
       both a display name and recorded photography consent, unlinked cards for everyone else, and 301-on-archival
       rather than a 404.'
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - B-UI-01
@@ -17998,11 +17998,32 @@ units:
       days, same treatment with another therapist, waitlist join), asserted present rather than an empty
       block
     files:
-    - apps/web/app/(public)/therapists/page.tsx
-    - apps/web/app/(public)/therapists/[slug]/page.tsx
+    - apps/web/app/(en)/(public)/therapists/page.tsx
+    - apps/web/app/(en)/(public)/therapists/[slug]/page.tsx
+    - apps/web/app/(ar)/ar/therapists/page.tsx
+    - apps/web/app/(ar)/ar/therapists/[slug]/page.tsx
+    - apps/web/app/_therapists/pages.tsx
     - packages/core/src/seo/therapist-publishable.ts
+    - packages/db/migrations/0157_therapist_public_slug.sql
+    - packages/db/src/queries/therapist-pages.ts
+    - packages/hr/src/therapist-publication.ts
+    - apps/web/src/therapists/read.ts
+    - apps/web/src/therapists/content.ts
+    - apps/web/src/therapists/sitemap.ts
     - apps/web/src/jobs/rewrite-internal-links.ts
-    - tests/routes/therapists.spec.ts
+    - apps/web/src/therapist-guard.test.ts
+    - apps/web/src/public-site.itest.ts
+    notes:
+    - 'NOTE: the route files are under the `(en)`/`(ar)` route groups rather than `(public)`, because
+      W-SITE-01 put two root layouts there — one `<html>` per locale — and a registry document must be
+      served in both. The planned `tests/routes/therapists.spec.ts` is `apps/web/src/public-site.itest.ts`:
+      the repository has no `tests/` tree, and the suite shares one port band (and therefore one file and
+      one server) with W-SITE-08 and W-SITE-09.'
+    - 'NOTE: the Playwright assertion that the booking flow opens with the therapist pre-selected is a
+      plain fetch of `/book?therapist=<id>` asserting the chosen-therapist block and the staff reference
+      in the served markup, not a browser test. The claim is about server-rendered HTML — the booking
+      flow is a GET form set (B-UI-01) — so a browser adds nothing the fetch cannot see; a Playwright
+      pass over the whole five-step flow is deferred to W-SITE-11, which already starts a browser.'
   - id: W-SITE-08
     order: 146
     title: Sitemaps, hreflang, IndexNow and the publish propagation pipeline
@@ -18010,7 +18031,7 @@ units:
       revalidation by cache tag, IndexNow ping and CDN purge on publish, each idempotent and each visible
       in an outbox. This is M4 Findable.'
     owner: claude
-    status: todo
+    status: done
     size: L
     milestone: M4
     depends_on:
@@ -18039,16 +18060,40 @@ units:
     files:
     - apps/web/app/sitemap.xml/route.ts
     - apps/web/app/sitemaps/[type]/route.ts
+    - packages/core/src/seo/sitemap.ts
+    - apps/web/src/sitemap/build.ts
+    - apps/web/src/revalidate/interconnection.ts
     - packages/media/src/purge/port.ts
+    - packages/media/src/purge/fake-purge.ts
+    - packages/providers/src/seo/port.ts
+    - packages/providers/src/seo/fake-indexnow.ts
+    - packages/db/migrations/0158_publish_propagate_agent.sql
+    - packages/db/src/repositories/propagation.ts
     - apps/worker/src/jobs/publish-propagate.ts
-    - tests/seo/publish-loop.spec.ts
+    - apps/web/src/public-site.itest.ts
+    notes:
+    - 'NOTE: the planned `tests/seo/publish-loop.spec.ts` is the W-SITE-08 block of
+      `apps/web/src/public-site.itest.ts`: the repository has no `tests/` tree, and the suite shares one
+      port band — and therefore one file and one server — with W-SITE-06 and W-SITE-09.'
+    - 'NOTE: the IndexNow key is UNSET and the refusal is the mechanism, not a gap. `Y1-indexnow-key` is
+      a new open question: a key is chosen by the owner and published by this site at /<key>.txt, so the
+      build cannot choose one. `seo.indexnow_key` holds a marker `is_placeholder_text()` refuses,
+      `createFakeIndexNow` throws from its constructor rather than submitting, and the propagation job
+      records `refused_no_key` with the question id as `last_error` on the publish_propagate agent row.'
+    - 'NOTE: the `journal` sitemap section is empty and therefore 404s and is absent from the index —
+      no journal post is publishable, because a post needs an author byline and a reviewer byline
+      (W-SITE-07) and this build invents neither. The section appears the day one is published with no
+      change to the builder.'
+    - 'NOTE: there is no CDN. docs/05 names none, so `packages/media/src/purge` ships a port and a fake
+      whose outbox is asserted; the real adapter arrives with the deployment. A purge therefore answers
+      ACCEPTED and never completed, which is what every CDN promises at the moment of the call.'
   - id: W-SITE-09
     order: 147
     title: Legacy WooCommerce URL migration and the 301 map
     summary: The redirect map table, the baseline importer, and the one-hop invariant that makes a relaunch
       safe for pages that already rank — including the retained {treatment} in {area} pages.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - W-SITE-08
@@ -18073,11 +18118,39 @@ units:
     - 'Retained area pages are differentiated, not template fill: a similarity test asserts pairwise body-text
       similarity below 0.8 across all retained area pages'
     files:
-    - packages/db/migrations/00XX_redirect_map.sql
+    - packages/core/src/seo/legacy-redirects.ts
     - packages/db/src/repositories/redirects.ts
-    - apps/web/middleware.ts
+    - apps/web/proxy.ts
     - scripts/import-crawl-baseline.mjs
-    - tests/seo/redirects.spec.ts
+    - scripts/check-redirect-coverage.mjs
+    - apps/web/src/legacy-redirects.test.ts
+    - packages/fixtures/src/redirects.itest.ts
+    - apps/web/src/public-site.itest.ts
+    notes:
+    - 'NOTE: there is NO migration. `redirect_map` already exists with every column this unit needs and
+      the one-hop invariant already enforced — migration 0029 created it under that name for exactly
+      this unit ("W-SITE-09 imports the legacy WooCommerce URLs into the same table and inherits the
+      one-hop invariant"), so 0159 was released unused. The allocated `00XX_redirect_map.sql` would have
+      been a second table and therefore a second answer to "where does this path go".'
+    - 'NOTE: the middleware is `apps/web/proxy.ts`, not `middleware.ts`: Next 16.3 renamed the
+      convention and W-SITE-01 moved the file. The planned `tests/seo/redirects.spec.ts` is split in
+      three — `apps/web/src/legacy-redirects.test.ts` (the decision, as a table),
+      `packages/fixtures/src/redirects.itest.ts` (the importer, against rows and no server) and the
+      W-SITE-09 block of `apps/web/src/public-site.itest.ts` (the served hop, the query string and the
+      locale prefix). The repository has no `tests/` tree, and the suite shares one port band with
+      W-SITE-06 and W-SITE-08.'
+    - 'NOTE: the retained `{treatment} in {area}` pages are NOT built and `RETAINED_AREA_PAGES` is
+      empty. Which legacy URLs have genuine demand is `Y1-woo-baseline`, which is open, and writing area
+      pages before that export would be the template fill docs/09 forbids in the same sentence that asks
+      for them. What IS built is the rule that will judge them — a Jaccard similarity with the
+      criterion''s 0.8 ceiling, proven on a fixture to catch a place-name swap — and the emptiness is
+      asserted beside it, so the day a page is added the rule is already there to hold.'
+    - 'NOTE: `apps/web/proxy.ts` resolves the map from the COMMITTED module rather than from
+      `redirect_map`, because a middleware that imported a database connection cannot run on the edge.
+      The importer writes the same rows into the table for everything that can read it, and
+      `public-site.itest.ts` holds the two equal. The slug-change and therapist-archival rows are
+      deliberately absent from the module: nothing commits them, and the pages that own those paths
+      resolve them against the table themselves.'
   - id: W-SITE-11
     order: 148
     title: 'Performance enforcement: Lighthouse CI budgets and field RUM'

@@ -2814,6 +2814,28 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['refuse_intent_without_confirmed_mcc'],
     translators: [],
   },
+  // ZY781 through ZY790 are W-SITE-06's and are released UNUSED: every refusal in 0157 is a CHECK or a
+  // unique index, so the codes are 23514 and 23505 and the constraint name says which rule. An entry for
+  // a code no migration raises is refused.
+  //
+  // ZY791 is W-SITE-08's, of the band ZY791-ZY800; ZY792 through ZY800 are left free and deliberately
+  // unregistered for the same reason.
+  //
+  // It is what makes the propagation outbox a record of what was SENT. The key is a hash OF the URL set,
+  // so neither half may move without the other, and neither may move at all once IndexNow has accepted
+  // the set — an outbox that can be edited afterwards answers "what did we send?" with what somebody
+  // wishes had been sent.
+  {
+    code: 'ZY791',
+    rule: 'A propagation record may not claim to have submitted a URL set it no longer holds.',
+    migration: '0158',
+    raisedBy: ['assert_propagation_submitted_what_it_claims'],
+    // No translator, as ZY771 has none, and for the same reason: nothing in the repository rewrites a
+    // recorded URL set, so there is no call site to turn the refusal into a named error at. The trigger's
+    // own message carries the rule name, and `recordPropagation` refuses the only legitimate way a caller
+    // could reach it (an empty set) before the statement is issued.
+    translators: [],
+  },
   {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',

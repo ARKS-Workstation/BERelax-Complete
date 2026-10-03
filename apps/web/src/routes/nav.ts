@@ -24,6 +24,11 @@ export const NAV_ROUTE_IDS = [
   // B-UI-01. Second only to the menu on purpose: the site exists to take a booking, and docs/09 §3
   // lists the nav among the flow's entry points beside the hero CTA and the sticky book bar.
   'book',
+  // W-SITE-06. docs/09 §1 calls `/therapists/[slug]` "the differentiator" and docs/13 §6 lists Therapists
+  // in the live site's own navigation, so the trust layer is offered before the place and the questions. It
+  // is also what keeps the index out of the link graph's orphan rule: an indexable document nothing links
+  // to is reachable only from a sitemap, which is how a page that exists never ranks.
+  'therapists',
   'spa',
   'faq',
   'journal',

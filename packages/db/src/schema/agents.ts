@@ -11,6 +11,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
 
@@ -143,5 +144,61 @@ export const agentAlert = pgTable(
   (t) => [
     unique('agent_alert_agent_key_incident_key_key').on(t.agentKey, t.incidentKey),
     check('agent_alert_silent_for_seconds_check', sql`silent_for_seconds >= 0`),
+  ],
+)
+
+/**
+ * One publish-propagation run: the changed URL set, the key both outbound calls deduplicate on, and each
+ * call's outcome (migration 0158, W-SITE-08).
+ *
+ * The VISIBLE outbox the acceptance criterion asks for. The fakes hold theirs in memory, which is right
+ * for a fake and useless for an operator: a process restart is the end of the record, and the question
+ * asked afterwards — *did we actually ping, and with what?* — is asked about production.
+ *
+ * Not append-only, deliberately. A run is one row updated once as it completes, because what is asked of
+ * it is "what is the state of this propagation"; the ordering question is `audit_event`'s (0005), which
+ * this job writes as its fifth artefact. What IS refused is editing the record after the fact: ZY791
+ * holds `(idempotency_key, changed_urls)` together, because the key is a hash OF the set.
+ */
+export const publishPropagation = pgTable(
+  'publish_propagation',
+  {
+    id: uuid('id').primaryKey().default(sql`uuid_generate_v7()`),
+    /** `service`, `therapist`, `content`, … Text rather than an enum: the set grows with every surface. */
+    surface: text('surface').notNull(),
+    /** The row that changed, or NULL for a surface with no single row behind it (a theme change). */
+    subjectId: text('subject_id'),
+    /** sha256 of the sorted, deduplicated URL set, truncated. UNIQUE per surface — that IS the idempotency. */
+    idempotencyKey: text('idempotency_key').notNull(),
+    changedUrls: text('changed_urls').array().notNull(),
+    indexnowOutcome: text('indexnow_outcome').notNull(),
+    indexnowError: text('indexnow_error'),
+    purgeOutcome: text('purge_outcome').notNull(),
+    purgeError: text('purge_error'),
+    /** The tags docs/09 §5's map declares for this change. Stored because "and no others" is the claim. */
+    cacheTags: text('cache_tags').array().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex('publish_propagation_once_per_set').on(t.surface, t.idempotencyKey),
+    index('publish_propagation_recent_idx').on(t.createdAt.desc()),
+    check(
+      'publish_propagation_surface_known',
+      sql`${t.surface} in ('service', 'therapist', 'content', 'premises', 'theme', 'media', 'package')`,
+    ),
+    check(
+      'publish_propagation_outcomes_known',
+      sql`${t.indexnowOutcome} in ('accepted', 'deduplicated', 'rejected', 'refused_no_key', 'not_attempted')
+       and ${t.purgeOutcome} in ('accepted', 'deduplicated', 'rejected', 'not_attempted')`,
+    ),
+    // A rejection with no reason cannot be acted on; a success carrying an error is a run whose state two
+    // columns disagree about.
+    check(
+      'publish_propagation_errors_explain_themselves',
+      sql`(${t.indexnowOutcome} in ('rejected', 'refused_no_key')) = (${t.indexnowError} is not null)
+       and (${t.purgeOutcome} = 'rejected') = (${t.purgeError} is not null)`,
+    ),
+    check('publish_propagation_changed_something', sql`cardinality(${t.changedUrls}) > 0`),
   ],
 )

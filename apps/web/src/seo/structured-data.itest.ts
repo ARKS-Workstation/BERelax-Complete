@@ -24,9 +24,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildFacts } from '../facts/build.ts'
 import { siteOrigin } from '../routes/alternates.ts'
 import {
-  documentRoutes,
   ROUTES,
   routeById,
+  sampleableDocumentRoutes,
   sampleParamsOf,
   samplePathFor,
 } from '../routes/registry.ts'
@@ -260,7 +260,7 @@ describe('every JSON-LD block on every registry document came out of a builder',
     // routes: every document the registry declares is fetched, and every block found on it is either one this
     // unit builds or a failure. A page nobody thought about cannot introduce a hand-written block unnoticed.
     const accounted = new Set(GRAPH_ROUTES.map((route) => route.path))
-    for (const route of documentRoutes()) {
+    for (const route of sampleableDocumentRoutes()) {
       for (const locale of route.locales) {
         // `samplePathFor` rather than the pattern: a document with a dynamic segment has no fetchable path of
         // its own, and fetching `/treatments/[slug]` would assert something about a 404.

@@ -21,6 +21,11 @@
  * here changing.
  */
 import { AppError } from '@berelax/shared'
+import {
+  isTherapistPublishable,
+  type TherapistCandidate,
+  therapistPublishingRefusals,
+} from '../therapist-publishable.ts'
 import type {
   AnswerNode,
   BreadcrumbListNode,
@@ -34,63 +39,18 @@ import type {
 import { type LicenceClass, personTypesFor } from './vocabulary.ts'
 
 // ------------------------------------------------------------------------------------------------
-// Person — the publishing guard
+// Person — the publishing guard, which lives in ONE place
 // ------------------------------------------------------------------------------------------------
 
-/**
- * A therapist as the publishing guard sees one.
- *
- * `displayName` and `photographyConsentRecordedAt` are `string | null` rather than optional, because that
- * is what a nullable column reads as and a consumer that has to handle both `undefined` and `null` handles
- * neither (the same argument `PostalAddress` in `@berelax/shared` makes).
- *
- * There is no column behind either field yet. `employee.staff_reference` is an internal handle and 0030
- * states the reason it is not a name: *"a therapist has no display name until an admin sets one, and
- * publishing one needs a recorded photography consent as well (ADR 0020, Y12-names). There is deliberately
- * no `display_name` column here — a nullable one is what an admin screen fills in without a consent row,
- * and the guard would be invisible."* This interface is therefore the shape the guard will read, declared
- * here so the guard exists before the columns do rather than being remembered afterwards.
- */
-export interface TherapistCandidate {
-  /** The internal handle — `Therapist 07`. Never published; it is here to name a rejection. */
-  readonly staffReference: string
-  readonly displayName: string | null
-  /** When a photography consent was recorded, ISO 8601. Null means none. */
-  readonly photographyConsentRecordedAt: string | null
-  readonly skills?: readonly string[]
-  readonly languages?: readonly string[]
-  readonly jobTitle?: string
-  /** The published portrait URL, when one is served. */
-  readonly portraitUrl?: string
-  /** The therapist page, when the route exists. */
-  readonly url?: string
-}
-
-/** Why a therapist may not be published. The reason is named so an admin screen can say which. */
-export type TherapistPublishingRefusal = 'no_display_name' | 'no_photography_consent'
-
-/**
- * The reasons this therapist may not be published, or an empty list.
- *
- * Both, not the first. An admin who is told about the missing name sets it, comes back and is then told
- * about the consent; two refusals shown at once are one conversation instead of two, and the same argument
- * `lintPublicDisplayName` makes for returning every finding.
- */
-export function therapistPublishingRefusals(
-  candidate: TherapistCandidate,
-): readonly TherapistPublishingRefusal[] {
-  const refusals: TherapistPublishingRefusal[] = []
-  if (candidate.displayName === null || candidate.displayName.trim() === '') {
-    refusals.push('no_display_name')
-  }
-  if (candidate.photographyConsentRecordedAt === null) refusals.push('no_photography_consent')
-  return refusals
-}
-
-/** True only when the therapist has both a display name and a recorded photography consent. */
-export function mayPublishTherapist(candidate: TherapistCandidate): boolean {
-  return therapistPublishingRefusals(candidate).length === 0
-}
+/*
+  The guard used to be defined here, beside the builder that was its only consumer. It is now
+  `packages/core/src/seo/therapist-publishable.ts`, and the move is W-SITE-06's: the predicate acquired
+  three consumers — this builder, the route handler and the sitemap builder — and a predicate defined
+  inside the structured-data module is one a route author reasonably writes again.
+  `isTherapistPublishable` is the one name all three call, it is reached from `@berelax/core` exactly as
+  the old name was, and nothing is re-exported from here: a second export path for one predicate is how
+  two copies of it end up looking like one.
+*/
 
 export interface PersonNodesOptions {
   readonly origin: string
@@ -152,7 +112,7 @@ export function personNodesFor(
   options: PersonNodesOptions,
 ): readonly PersonNode[] {
   return candidates
-    .filter((candidate) => mayPublishTherapist(candidate))
+    .filter((candidate) => isTherapistPublishable(candidate))
     .map((candidate) => personNodeFor(candidate, options))
 }
 
