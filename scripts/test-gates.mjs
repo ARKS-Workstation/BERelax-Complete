@@ -65788,6 +65788,329 @@ export function chargebackNetEffectFils(`,
   }
 }
 
+// 206a-206z. (B-M1) The milestone gate shown to be able to FAIL. Four claims docs/14 §3 calls
+//            non-negotiable, a census that re-derives them over every row the database holds, and the
+//            one thing that makes any of it worth having: a row planted past close makes the job exit
+//            non-zero NAMING the rule. The two guards the database already enforces — the therapist
+//            exclusion constraint and the capacity trigger — cannot be broken from here without
+//            dropping them and committing, so they are watched failing inside a rolled-back transaction
+//            by `packages/fixtures/src/domain-invariants.itest.ts` instead, and what is proved here is
+//            the half that needs a COMMITTED row and a separate connection.
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const CENSUS = 'packages/core/src/ops/domain-invariants.ts'
+  const WALKTHROUGH = 'apps/web/src/m1-walkthrough.itest.ts'
+  const MARKER = 'gate-206-fixture'
+
+  check(
+    'the domain invariant cases have a database to census, so they are run rather than skipped',
+    typeof dbUrl === 'string' && dbUrl.length > 0,
+    'neither TEST_DATABASE_URL nor DATABASE_URL is set; a census nobody ran is not evidence',
+  )
+
+  // 206a. The four claims are declared, with docs/14 §3's own words. Read from source rather than
+  //       restated: the ids below are what every case in this block asserts against, and a block whose
+  //       list had drifted from the module's would be testing four claims nobody makes.
+  {
+    const source = readFileSync(CENSUS, 'utf8')
+    const ids = [
+      'NO_DOUBLE_BOOKED_THERAPIST',
+      'NO_ROOM_OVER_CAPACITY',
+      'NOTHING_PAST_CLOSE_WITH_TURNAROUND',
+      'AFTER_MIDNIGHT_BUSINESS_DAY',
+    ]
+    const missing = ids.filter((id) => !source.includes(`id: '${id}',`))
+    check(
+      "the census declares docs/14 §3's four claims by id",
+      missing.length === 0,
+      `not declared in ${CENSUS}: ${missing.join(', ')}`,
+    )
+    for (const claim of [
+      'no double-booked therapist',
+      'no room over capacity',
+      'nothing scheduled past close once turnaround is counted',
+      'an after-midnight slot resolves to the correct business day',
+    ]) {
+      check(
+        `and carries docs/14 §3's own wording: "${claim}"`,
+        source.includes(claim),
+        `${CENSUS} does not contain that clause verbatim`,
+      )
+    }
+  }
+
+  if (typeof dbUrl === 'string' && dbUrl.length > 0) {
+    /** One statement set, committed, so the census's own connection can see it. */
+    const psqlCommit = (statement) =>
+      run('psql', ['--no-psqlrc', '-v', 'ON_ERROR_STOP=1', '-q', dbUrl, '-c', statement])
+
+    /**
+     * Plants one appointment and removes it afterwards, whatever happens.
+     *
+     * COMMITTED, deliberately: the census runs in its own process over its own connection, so a row
+     * inside an open transaction is invisible to it — and the rows this gate is about are exactly the
+     * ones that were committed while a guard was absent. The `finally` is the whole reason this is a
+     * helper: a planted breach left behind fails every later gate in this file with a violation that has
+     * nothing to do with the case under test.
+     */
+    const withPlantedAppointment = (periodSql, tradingDateSql, turnaround, body) => {
+      const planted = psqlCommit(
+        `insert into customer (phone_e164, created_via) values ('+971590744900', 'front_desk') ` +
+          `on conflict (phone_e164) do nothing; ` +
+          `insert into booking (customer_id, source, notes) ` +
+          `select id, 'front_desk', '${MARKER}' from customer where phone_e164 = '+971590744900'; ` +
+          `insert into appointment (booking_id, trading_date, service_variant_id, shape, therapist_id, ` +
+          `room_id, period, status, delivery_id, room_places, turnaround_minutes, ` +
+          `therapist_buffer_minutes, gross_price_fils, net_fils, vat_fils) ` +
+          `select b.id, ${tradingDateSql}, sv.id, 'solo', e.id, r.id, ${periodSql}, 'confirmed', ` +
+          `uuid_generate_v7(), 1, ${turnaround}, 10, 21000, 20000, 1000 ` +
+          `from booking b, service_variant sv, employee e, rooms r ` +
+          `where b.notes = '${MARKER}' and r.code = 'room-3' ` +
+          `and sv.id = (select id from service_variant order by id limit 1) ` +
+          `and e.id = (select id from employee order by staff_reference desc limit 1) limit 1`,
+      )
+      try {
+        if (planted.failed) {
+          return { planted, result: { failed: false, output: '' } }
+        }
+        return { planted, result: body() }
+      } finally {
+        psqlCommit(
+          `delete from appointment where booking_id in ` +
+            `(select id from booking where notes = '${MARKER}'); ` +
+            `delete from booking where notes = '${MARKER}'; ` +
+            `delete from customer where phone_e164 = '+971590744900'`,
+        )
+      }
+    }
+
+    // The trading date every case below plants on: one `business_day` holds, far enough ahead that no
+    // suite books on it. Read from the table rather than chosen, because three of the four claims are
+    // measured against that row's own opening and closing instants.
+    // Derived from the table's own horizon rather than from `current_date + n`: the seeded calendar ends
+    // a fixed number of days after the date the seed ran, so an offset from today falls off the end as
+    // soon as the database is a fortnight old — and a NULL trading date then fails the fixture INSERT
+    // with a not-null violation that says nothing about this gate. The second-to-last day, so there is
+    // always a NEXT one for the business-day case.
+    const HORIZON = `(select max(trading_date) - 1 from business_day)`
+    const DAY = `(select trading_date from business_day where trading_date = ${HORIZON})`
+    const OPENS = `(select opens_at from business_day where trading_date = ${HORIZON})`
+    const CLOSES = `(select closes_at from business_day where trading_date = ${HORIZON})`
+
+    // 206b. The CONTROL, and it comes first: a correct appointment makes the census exit zero. Without
+    //       it every refusal below would be satisfied by a census that refuses everything, which is the
+    //       shape a gate gets switched off for.
+    {
+      const { planted, result } = withPlantedAppointment(
+        `tstzrange(${OPENS} + interval '2 hours', ${OPENS} + interval '3 hours', '[)')`,
+        DAY,
+        20,
+        () => run('pnpm', ['domain-invariants']),
+      )
+      check(
+        'the census can plant a correct appointment at all',
+        !planted.failed,
+        `the fixture INSERT failed, so every case in this block would be about nothing:\n${planted.output}`,
+      )
+      check(
+        'a correct appointment passes all four claims and the census exits zero',
+        !result.failed && String(result.output).includes('VERDICT: all four hold'),
+        String(result.output).slice(-4000),
+      )
+      check(
+        'and the census says how many appointments, rooms and trading dates it examined',
+        /examined: [1-9]\d* appointment\(s\), [1-9]\d* room\(s\), [1-9]\d* trading date\(s\)/.test(
+          String(result.output),
+        ),
+        String(result.output).slice(-4000),
+      )
+    }
+
+    // 206c. The acceptance line's own fixture: *"a deliberately broken fixture (an appointment inserted
+    //       past close) is proven to fail the invariant job"*. Nothing in the database refuses this row
+    //       — the close is the availability solver's rule and not a constraint — so it is exactly the
+    //       kind of row that satisfies every test in the repository and breaks the claim.
+    {
+      const { result } = withPlantedAppointment(
+        `tstzrange(${CLOSES} - interval '30 minutes', ${CLOSES} + interval '30 minutes', '[)')`,
+        DAY,
+        0,
+        () => runExpectingFailure('pnpm', ['domain-invariants']),
+      )
+      checkRejectedBy(
+        'an appointment inserted past close makes the invariant job fail, by name',
+        result,
+        'domain-invariant-scheduled-past-close',
+      )
+      check(
+        'and the breach is reported against the claim rather than as a bare non-zero exit',
+        result.output.includes('BREACH  NOTHING_PAST_CLOSE_WITH_TURNAROUND'),
+        result.output.slice(-4000),
+      )
+    }
+
+    // 206d. The half of the close rule that only exists because turnaround is counted: a treatment that
+    //       ends EXACTLY at close is correct, and the same treatment with twenty minutes of turnaround
+    //       after it is not. A check comparing the treatment's end alone would pass this row, which is
+    //       what docs/14 §3's "once turnaround is counted" is there to prevent.
+    {
+      const { result } = withPlantedAppointment(
+        `tstzrange(${CLOSES} - interval '1 hour', ${CLOSES}, '[)')`,
+        DAY,
+        20,
+        () => runExpectingFailure('pnpm', ['domain-invariants']),
+      )
+      checkRejectedBy(
+        'an appointment whose TURNAROUND runs past close is refused by the same rule',
+        result,
+        'domain-invariant-scheduled-past-close',
+      )
+      check(
+        'and the message names the turnaround rather than only the end of the treatment',
+        /holds its room for 20 more minute\(s\)/.test(result.output),
+        result.output.slice(-4000),
+      )
+    }
+
+    // 206e. And the control for 206d, which is the one that would be missing if this gate had been
+    //       written by somebody in a hurry: the same period with NO turnaround ends exactly at close and
+    //       is CORRECT. The close is inclusive on the closing side (hours-override.ts), so an exclusive
+    //       comparison would strand the last booking of every single day.
+    {
+      const { result } = withPlantedAppointment(
+        `tstzrange(${CLOSES} - interval '1 hour', ${CLOSES}, '[)')`,
+        DAY,
+        0,
+        () => run('pnpm', ['domain-invariants']),
+      )
+      check(
+        'a treatment ending exactly at close with no turnaround is accepted',
+        !result.failed,
+        String(result.output).slice(-4000),
+      )
+    }
+
+    // 206f. The fourth claim: an after-midnight start filed on the calendar date it falls on rather than
+    //       on the trading date it belongs to. Trading runs 11:00-02:00, so the half-hour before close is
+    //       01:30 the following morning and belongs to the PREVIOUS trading date.
+    {
+      const NEXT_DAY = `(select trading_date from business_day where trading_date > ${DAY} order by trading_date limit 1)`
+      const { result } = withPlantedAppointment(
+        `tstzrange(${CLOSES} - interval '30 minutes', ${CLOSES} - interval '15 minutes', '[)')`,
+        NEXT_DAY,
+        0,
+        () => runExpectingFailure('pnpm', ['domain-invariants']),
+      )
+      checkRejectedBy(
+        'an after-midnight appointment filed on the wrong business day is refused by name',
+        result,
+        'domain-invariant-wrong-business-day',
+      )
+      check(
+        'and the message says which window the start fell outside',
+        result.output.includes('filed on the wrong business day'),
+        result.output.slice(-4000),
+      )
+    }
+  }
+
+  // 206g. The three routes W-SITE-11 deferred here are covered BECAUSE this suite audits them, and the
+  //       coverage is DERIVED rather than declared. So removing the axe call from the walkthrough must
+  //       make `pnpm perf-layers` report them as uncovered — without this, the three paths could be
+  //       taken out of the baseline by anybody and nothing would notice they were never audited.
+  {
+    const refused = withEditedFile(
+      WALKTHROUGH,
+      (text) => replaceOnce(text, 'const result = await auditPage(page, {', 'const result = ({'),
+      () => runExpectingFailure('pnpm', ['perf-layers']),
+    )
+    checkRejectedBy(
+      'removing the axe run from the walkthrough makes the three routes read as uncovered',
+      refused,
+      'a-new-public-document-is-covered-by-axe-and-a-baseline',
+    )
+    for (const path of ['/tag-loader', '/therapists', '/therapists/[slug]']) {
+      check(
+        `and names ${path} specifically`,
+        refused.output.includes(path),
+        refused.output.slice(-3000),
+      )
+    }
+  }
+
+  // 206h. The same from the other side: the baseline may not keep listing a route that IS covered, or
+  //       the list would excuse nothing while reading as an allowance. This is the rule that stops the
+  //       three being quietly put back.
+  {
+    const refused = withEditedFile(
+      'lighthouse/budget.json',
+      (text) => replaceOnce(text, '    "/treatments",', '    "/therapists",\n    "/treatments",'),
+      () => runExpectingFailure('pnpm', ['perf-layers']),
+    )
+    checkRejectedBy(
+      'putting a now-covered route back into the uncovered baseline is refused',
+      refused,
+      'a-new-public-document-is-covered-by-axe-and-a-baseline',
+    )
+  }
+
+  // 206i. The census is a `pnpm verify` step AND a CI job of its own, and the job runs the walkthrough
+  //       BEFORE it. That order is load-bearing rather than tidy: the census refuses a run that examined
+  //       no appointment, and a freshly migrated and seeded database holds none — so a job that seeded
+  //       and censused would fail on the floor, correctly and uselessly.
+  {
+    const workflow = readFileSync('.github/workflows/ci.yml', 'utf8')
+    const chain = JSON.parse(readFileSync('package.json', 'utf8')).scripts.verify
+    check(
+      'the domain invariant census is a verify step',
+      chain.includes('pnpm domain-invariants'),
+      chain,
+    )
+    check(
+      'and has a CI job of its own',
+      /^\s{2}domain-invariants:$/m.test(workflow),
+      'no `domain-invariants:` job in .github/workflows/ci.yml',
+    )
+    const walkthroughStep = workflow.indexOf('apps/web/src/m1-walkthrough.itest.ts')
+    const censusStep = workflow.lastIndexOf('run: pnpm domain-invariants')
+    check(
+      'and runs the M1 walkthrough before it, so the census has an estate to examine',
+      walkthroughStep !== -1 && censusStep !== -1 && walkthroughStep < censusStep,
+      `walkthrough at ${walkthroughStep}, census at ${censusStep}`,
+    )
+    const buildStep = workflow.indexOf('pnpm --filter @berelax/web build')
+    check(
+      'and builds the application before driving it (brief rule 17)',
+      buildStep !== -1 && buildStep < walkthroughStep,
+      `build at ${buildStep}, walkthrough at ${walkthroughStep}`,
+    )
+  }
+
+  // 206j. The walkthrough's own shape, asserted because it is what every claim above rests on: it drives
+  //       a BROWSER through all five steps rather than fetching, and it does not confuse the two gaps it
+  //       found with the links that work.
+  {
+    const source = readFileSync(WALKTHROUGH, 'utf8')
+    for (const [what, needle] of [
+      ['starts the built application through the harness', 'startWebServer({'],
+      ['drives a real browser', 'chromium.launch('],
+      [
+        'clicks the slot grid rather than fetching a URL with a slot in it',
+        'button[name="${BOOK_FIELDS.slot}"]',
+      ],
+      ['reaches the confirmation state', 'data-book-state="booked"'],
+      ['reads the appointment back off the database', 'from appointment where booking_id'],
+    ]) {
+      check(`the walkthrough ${what}`, source.includes(needle), `${WALKTHROUGH} has no ${needle}`)
+    }
+    check(
+      'and does not spawn `next start` itself (brief rule 19)',
+      !/spawn\(\s*'pnpm'/.test(source) && !source.includes("'next', 'start'"),
+      `${WALKTHROUGH} spawns the application itself`,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -66693,6 +67016,13 @@ export function chargebackNetEffectFils(`,
     // the one check that re-adds every money identity over every row the database holds, rather than over
     // the rows one unit's own fixture wrote. Its POSITION is asserted separately, in the 152a-152z block.
     'pnpm money-invariants',
+    // B-M1's domain invariant census, in the position `pnpm verify` runs it: immediately after the money
+    // census, because both read the estate the integration suite just wrote. docs/14 §3 says the four
+    // domain invariants run on EVERY unit regardless of what changed, so it is a verify step as well as
+    // a CI job of its own — and registered here because that is what makes dropping it from CI a failing
+    // build rather than the silent loss of the one check that re-derives them over every row the
+    // database holds.
+    'pnpm domain-invariants',
     'pnpm db:migrate:dry',
     'pnpm db:drift',
     'pnpm db:conventions',

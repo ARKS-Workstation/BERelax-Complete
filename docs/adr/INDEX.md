@@ -4,7 +4,7 @@
 
 # ADR index
 
-116 records, generated from the front matter of each one. Every column below is read
+117 records, generated from the front matter of each one. Every column below is read
 out of the record it describes, so a row cannot be wrong without the record being wrong — which is
 the whole reason this file is not maintained by hand. For the argument behind any of them, read
 [README.md](README.md) and then the record.
@@ -127,3 +127,4 @@ the whole reason this file is not maintained by hand. For the argument behind an
 | [0125](0125-a-findings-register-is-a-reviewed-file-and-an-empty-one-is-not-a-clean-one.md) | A findings register is a REVIEWED FILE, an empty one is not a clean one, and the vulnerable fixture route may not be in the application | accepted | 2026-10-03 | H-HARD-10 | docs/01 decisions — none; this is ADR 0002 applied to a security review, ADR 0003 applied |
 | [0126](0126-a-soak-proves-counts-of-rows-and-a-p95-from-this-container-is-not-a-product-figure.md) | A soak proves COUNTS OF ROWS; the p95 it also measures is a figure about the container, and the budget is enforced only for a machine somebody chose | accepted | 2026-10-03 | H-HARD-11 | docs/01 decisions — none; this is brief rule 23 turned into a field and a rule, ADR 0070's |
 | [0127](0127-a-go-no-go-that-cannot-say-no-is-decoration.md) | A go/no-go check that cannot say NO is decoration; a freeze is a CLAIM a human makes; and a cutover rehearsal's window is a floor measured on whatever machine ran it | accepted | 2026-10-03 | H-MIG-11 | docs/01 decisions — none; this is ADR 0002's floor applied to a release gate, ADR 0107's |
+| [0128](0128-a-milestone-gate-is-a-census-over-the-estate-not-a-registry-of-tests.md) | A milestone gate is a WALKTHROUGH plus a CENSUS over the estate, not a registry of tests; and what the walkthrough cannot reach it reports rather than simulates quietly | accepted | 2026-10-03 | B-M1 | docs/01 decisions — none; this is ADR 0074's "named set" argument taken the other way for a |

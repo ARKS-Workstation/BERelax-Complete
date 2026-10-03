@@ -339,6 +339,14 @@ jobs:
       - name: The seven money invariants are examined and hold
         run: pnpm money-invariants
 
+      # B-M1's domain invariant census. Immediately after the money census and for the same reason: both
+      # re-derive their claims over every row the database holds, so both have to run after the suites
+      # that wrote them. docs/14 §3 calls these four non-negotiable and says they run on every unit
+      # regardless of what changed, which is why they are a step here as well as a job of their own
+      # below — the job is what judges them over the estate the M1 walkthrough itself creates.
+      - name: The four domain invariants hold over the whole estate
+        run: pnpm domain-invariants
+
       - name: Migration dry run
         run: pnpm db:migrate:dry
 
@@ -577,3 +585,72 @@ jobs:
             ffmpeg -hide_banner -encoders | grep -q libx264
             ffmpeg -hide_banner -encoders | grep -q libx265
           '
+
+  # The acceptance line's "its own CI job": the four docs/14 §3 domain invariants, judged over an estate
+  # the M1 WALKTHROUGH created rather than over whatever the whole suite happened to leave behind.
+  #
+  # That ordering is the point of having a second job at all. The census refuses a run that examined no
+  # appointment (ADR 0002's floor), and a freshly migrated and seeded database holds none — so a job that
+  # only applied migrations and seeded would fail on the floor, correctly and uselessly. Running the
+  # walkthrough first means the rows under examination are the ones the milestone is about: a booking
+  # taken through the public flow in a browser, a Morocco Bath in the single wet room, and a couple in
+  # the capacity-2 room.
+  #
+  # It does not gate `verify` and `verify` does not gate it. The same check runs as a step there, over
+  # the whole estate; this job is the milestone's own reading.
+  domain-invariants:
+    name: domain-invariants
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: berelax
+          POSTGRES_PASSWORD: berelax
+          POSTGRES_DB: berelax_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U berelax -d berelax_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install psql client
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
+
+      - name: Install Chromium for the walkthrough
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Apply migrations to the test database
+        run: pnpm db:apply
+
+      - name: Seed the catalogue and the premises row
+        run: pnpm seed
+
+      # The walkthrough drives the BUILT application, so the build comes before it (brief rule 17).
+      - name: Build the web application
+        run: pnpm --filter @berelax/web build
+
+      - name: The M1 walkthrough
+        run: pnpm exec vitest run -c vitest.integration.config.ts apps/web/src/m1-walkthrough.itest.ts
+
+      # And the invariants over what it wrote. A breach fails the build, which is the acceptance line.
+      - name: The four domain invariants hold over the walkthrough's estate
+        run: pnpm domain-invariants

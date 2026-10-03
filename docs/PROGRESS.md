@@ -2,11 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**210 / 211 units complete.**
-
-## Next up
-
-1. **B-M1 — M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop**
+**211 / 211 units complete.**
 
 ## All units
 
@@ -58,7 +54,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 41.6 | `W-SYS-12` | Private SQLSTATE allocation: one code, one rule, with an allocator | — | — | — |
 | [x] | 41.7 | `W-SYS-13` | Test isolation: a suite may delete only what it created | — | — | — |
 | [x] | 41.8 | `W-SYS-14` | Private document storage: the signed URL, and the audited download | `W-SYS-05`, `F06` | — | — |
-| [ ] | 42 | `B-M1` | M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop | `B-CAT-06`, `B-MSG-04`, `B-UI-04`, `B-UI-05` | M1 | — |
+| [x] | 42 | `B-M1` | M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop | `B-CAT-06`, `B-MSG-04`, `B-UI-04`, `B-UI-05` | M1 | — |
 | [x] | 43 | `M-TILL-01` | Chart of accounts and the pure double-entry ledger kernel | `F05` | — | Y8-coa |
 | [x] | 44 | `M-TILL-02` | Append-only journal schema, period locks and the posting repository | `F04`, `F06`, `M-TILL-01` | — | — |
 | [x] | 45 | `M-TILL-03` | Gap-free sequential document numbering allocated inside the insert transaction | `F04` | — | — |
