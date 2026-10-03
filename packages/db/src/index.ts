@@ -473,6 +473,16 @@ export {
   withdrawAnalyticsConsent,
 } from './repositories/analytics-consent.ts'
 export {
+  ANALYTICS_DISPATCH_SQLSTATE,
+  analyticsDispatchStateCounts,
+  DISPATCH_ATTEMPT_OUTCOMES,
+  type DispatchAttemptOutcome,
+  type DueDispatch,
+  type DueDispatchQuery,
+  dueAnalyticsDispatches,
+  recordDispatchAttempt,
+} from './repositories/analytics-dispatch.ts'
+export {
   type DecidedTransition,
   TRANSITION_REFUSALS,
   type TransitionActor,
@@ -794,6 +804,19 @@ export {
   readDepositBalance,
   readDepositMovements,
 } from './repositories/deposit.ts'
+export {
+  DISPATCH_RECONCILIATION_REFUSALS,
+  DISPATCH_RECONCILIATION_SQLSTATE,
+  type DispatchReconciliationItemInput,
+  type DispatchReconciliationRefusal,
+  type DispatchReconciliationSummaryInput,
+  dispatchReconciliationRefusalOf,
+  dispatchReconciliationsForDay,
+  type PushedDispatchRow,
+  pushedDispatchesForDay,
+  type StoredDispatchReconciliation,
+  writeDispatchReconciliation,
+} from './repositories/dispatch-reconciliation.ts'
 export {
   DUPLICATE_CANDIDATE_LIMIT,
   DUPLICATE_CANDIDATE_REFUSALS,
@@ -1186,6 +1209,12 @@ export {
   NUMBERING_LEDGER_COLUMNS,
   type NumberingGap,
 } from './repositories/numbering.ts'
+export {
+  type OfflineConversionFacts,
+  offlineInvoiceConversions,
+  offlineNoShowConversions,
+  offlinePackageConversions,
+} from './repositories/offline-conversions.ts'
 export {
   generateOtpCode,
   hashOtpCode,
@@ -5124,5 +5153,85 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 //
 // ZY521-ZY525 of the band ZY521-ZY530 are used; ZY526 through ZY530 are released UNUSED and deliberately
 // unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
+//
+// 137 is 0137_analytics_dispatch_transport.sql (A-MEAS-03) — the transport half of `analytics_dispatch`:
+// the shared event identity, the payload that went out, the action source, the instant the conversion
+// actually happened, the attempt counter, the per-destination idempotency index and the `failed` state.
+// The Drizzle mirror in `packages/db/src/schema/analytics-dispatch.ts` carries all of it, so `pnpm
+// db:drift` compares the two.
+//
+// 0125 created this table and left exactly these columns out, in its own words: *a column with no producer
+// is indistinguishable from one whose producer stopped working*. The producer is
+// `apps/worker/src/jobs/analytics-dispatch.ts`, and it arrives in the same commit as the columns.
+//
+// **The consent gate is not re-answered.** `dispatch_consent_gap` and the ZY312 trigger are 0125's, this
+// file touches neither, and the consumer reads the decision rather than making it a second time — a second
+// consent check in the consumer is the defect A-MEAS-02 exists to prevent (ADR 0076, ADR 0091). The
+// trigger firing on UPDATE is what makes a retry safe without the consumer knowing: a dispatch that failed
+// while consent stood and is retried after a withdrawal is refused on the way back to `queued`.
+//
+// Three of 0125's constraints are RELAXED here rather than worked around, which 0125 asked for by name:
+// `analytics_dispatch_reason_known` gains `transport_failed`, `analytics_dispatch_reason_iff_refused` gains
+// `failed`, and a third narrow sibling is added beside the two instead of folding all three into one
+// alternation — three narrow rules fail by name, where one wide rule fails by saying a row is wrong.
+//
+// `event_id` is NOT NULL with no default, which is safe here and nowhere later: the table is created by
+// 0125 in the same ordered run and nothing between them writes a row. A nullable column would also have
+// made the idempotency index stop being one, because two NULLs are distinct to a unique index. That index
+// is on `(event_id, destination)` across EVERY state and is deliberately not partial — a `suppressed` row
+// and a later `queued` row for one pair would be two answers to whether that conversion was permitted.
+//
+// ZY451 and ZY452 are used of the band ZY451-ZY460; ZY453 through ZY460 are released UNUSED and
+// deliberately unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
+// Both are triggers rather than CHECKs because both compare NEW against OLD. ZY451 freezes a transmitted
+// dispatch, which is what A-MEAS-07 rests on: comparing internal truth against what was pushed is only a
+// comparison while the pushed side cannot be edited to agree with the other. ZY452 refuses an attempt
+// counter that decreases, because the backoff delay is a function of the attempt number and a reset
+// restarts the ladder at its shortest delay for ever.
+//
+// It also inserts the consumer's `agent_definition` and its `agent_heartbeat` row, 0031's convention as
+// restated by 0110 and 0122 — 0107 shipped `gratuity_accrual` without the heartbeat and nothing caught it
+// until a suite read the table; `pnpm jobs` now does. `budget_fils_per_run` is 0 and that is a measured
+// figure rather than a placeholder: both adapters are named fakes behind the provider port, `real`
+// resolves to `notImplemented`, and the pass performs no outbound call of any kind.
+//
+// 138 is 0138_dispatch_reconciliation.sql (A-MEAS-07) — the daily comparison between what this business
+// says it took and what each ad platform was actually told: one summary per (business_day, destination)
+// and one ITEM per difference, named by event_id. Mirrored in
+// `packages/db/src/schema/analytics-dispatch.ts`, so `pnpm db:drift` compares the two.
+//
+// The items are ROWS and not a jsonb array on the summary, which is the decision the rest follows from. A
+// count that cannot be held against its items by a constraint is a number nobody can check, and the panel
+// renders the counts — so the thing that has to be impossible is a summary disagreeing with the rows
+// underneath it. That is ZY471, a DEFERRED constraint trigger: the summary and its items are written in
+// one transaction, so a row-by-row check would fire on the summary before any item existed.
+//
+// `intentionally_not_pushed` is a classification and NOT a discrepancy, and it is the reason this table
+// has the shape it does. 0125 writes a suppression when the visitor did not grant the signal a
+// destination requires; counting that as `missing` would report a growing number of entirely correct
+// refusals as a fault, every day, for ever — and the first response to a number like that is to make it go
+// away. So it is counted, named, and kept out of both the difference and the `unreconciled` condition.
+//
+// `difference_fils` is SIGNED. Positive means conversions this business took that a platform does not know
+// about; negative means a platform was told about revenue the journal cannot produce. An absolute figure
+// would make the second indistinguishable from the first, and the second is the one somebody answers for.
+//
+// ZY472 refuses a reconciliation for a trading day that had not closed at the instant it claims to have
+// run. Trading runs 11:00-02:00, so a run while the day is open compares this build's figures against
+// dispatches the consumer has not attempted yet and reports every one as missing — a screen saying the
+// conversions did not go out, on the busiest part of the evening. A CHECK cannot state it, because the
+// closing instant is a row in `business_day`.
+//
+// Idempotence per business day is a PRIMARY KEY and not a convention: `(business_day, destination)` on the
+// summary and `(business_day, destination, event_id, classification)` on the item, so a second run cannot
+// add a row. An append-only history was the alternative and is wrong here — a reconciliation is the
+// current answer to a question about a day, asked again whenever the answer might have changed, and a
+// table of every answer ever given makes "is this day reconciled" a query with an ordering in it.
+//
+// ZY471 and ZY472 are used of the band ZY471-ZY480; ZY473 through ZY480 are released UNUSED and
+// deliberately unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises. It
+// also inserts the pass's own `agent_definition` and `agent_heartbeat` row (0031's convention), with
+// `expected_interval_seconds` 86400 and `budget_fils_per_run` 0: the pass reads this build's own tables
+// and performs no outbound call of any kind.
 //
 export const SCHEMA_VERSION = 142 as const

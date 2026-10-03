@@ -10,6 +10,7 @@
     "start": "tsx src/run.ts"
   },
   "dependencies": {
+    "@berelax/analytics": "workspace:*",
     "@berelax/clinical": "workspace:*",
     "@berelax/config": "workspace:*",
     "@berelax/core": "workspace:*",
@@ -17,8 +18,8 @@
     "@berelax/fixtures": "workspace:*",
     "@berelax/google": "workspace:*",
     "@berelax/media": "workspace:*",
-    "@berelax/providers": "workspace:*",
     "@berelax/messaging": "workspace:*",
+    "@berelax/providers": "workspace:*",
     "@berelax/shared": "workspace:*",
     "pg-boss": "12.33.1"
   }

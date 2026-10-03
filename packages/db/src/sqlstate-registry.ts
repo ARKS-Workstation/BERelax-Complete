@@ -2417,6 +2417,62 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['assert_won_chargeback_nets_to_zero'],
     translators: ['packages/db/src/repositories/chargeback.ts'],
   },
+  // ZY451-ZY452 are A-MEAS-03's, of the band ZY451-ZY460; ZY453 through ZY460 are left free and
+  // deliberately absent, because an entry for a code no migration raises is direction 3.
+  //
+  // Both are TRIGGERS rather than CHECKs because both compare NEW against OLD, which a CHECK cannot see,
+  // and both are about a row the consumer has already finished with.
+  //
+  // ZY451 is the one A-MEAS-07 rests on. Reconciling internal truth against what was PUSHED is only a
+  // comparison while the pushed side cannot be edited to agree with the other one: a payload rewritten to
+  // the corrected figure makes every variance zero, and nothing errors. It is also why a corrected
+  // conversion value is a NEW dispatch with its own event_id (A-MEAS-05) rather than an edit of this row.
+  //
+  // ZY452 has no statutory half and is the subtler of the two. The backoff delay is a function of the
+  // attempt number, so a reset restarts the ladder at its shortest delay for ever — a destination that is
+  // down is then retried at the shortest interval and the failed row never ages out. The symptom is not an
+  // error: it is a consumer that looks busy.
+  {
+    code: 'ZY451',
+    rule: 'A transmitted dispatch may not leave `sent`, and its event id, payload and transmission instant may not change.',
+    migration: '0137',
+    raisedBy: ['refuse_transmitted_dispatch_change'],
+    translators: ['packages/db/src/repositories/analytics-dispatch.ts'],
+  },
+  {
+    code: 'ZY452',
+    rule: "A dispatch's transport attempt counter may only increase.",
+    migration: '0137',
+    raisedBy: ['assert_dispatch_attempts_monotonic'],
+    translators: ['packages/db/src/repositories/analytics-dispatch.ts'],
+  },
+  // ZY471-ZY472 are A-MEAS-07's, of the band ZY471-ZY480; ZY473 through ZY480 are left free and
+  // deliberately absent, because an entry for a code no migration raises is direction 3.
+  //
+  // ZY471 is the one the whole table rests on. A reconciliation's COUNTS are what a panel renders, so a
+  // summary claiming zero discrepancies while its item rows hold three is a screen showing a number the
+  // rows underneath it contradict — and nothing else would error. It is a DEFERRED constraint trigger
+  // because the summary and its items are written in one transaction, so a row-by-row check would fire on
+  // the summary before any item existed; ZZ004's shape, for a different reason.
+  //
+  // ZY472 is about the CLOCK rather than the arithmetic. Trading runs 11:00-02:00, so a reconciliation run
+  // while the day is still open compares internal figures against dispatches the consumer has not
+  // attempted yet and reports every one of them as missing. A CHECK cannot state it: the closing instant
+  // is a row in `business_day`, and a CHECK may not read another row.
+  {
+    code: 'ZY471',
+    rule: "A reconciliation summary's classification counts must equal the item rows written for that business day and destination.",
+    migration: '0138',
+    raisedBy: ['assert_reconciliation_agrees_with_its_items'],
+    translators: ['packages/db/src/repositories/dispatch-reconciliation.ts'],
+  },
+  {
+    code: 'ZY472',
+    rule: 'A trading day that had not closed may not be reconciled.',
+    migration: '0138',
+    raisedBy: ['assert_reconciled_day_has_closed'],
+    translators: ['packages/db/src/repositories/dispatch-reconciliation.ts'],
+  },
   // ZY521-ZY525 are H-HARD-07's, of the band ZY521-ZY530; ZY526 through ZY530 are left free and
   // deliberately absent, because an entry for a code no migration raises is direction 3.
   //

@@ -55662,6 +55662,828 @@ export function chargebackNetEffectFils(`,
   )
 }
 
+// 169a-169z. (A-MEAS-03) The dispatch consumer: the brand shown to be forgeable, the stored payload shown
+//            to be able to arrive as nothing at all, the gate shown NOT to be re-asked, and the backoff
+//            shown to be able to stop growing.
+//
+// Every claim in this unit fails SILENTLY if it is wrong, and two of them did before this block existed.
+// The commit this unit inherited cast `JSON.parse(row.payload) as EgressPayload`, which satisfies the
+// brand perfectly — and the row it parsed held a jsonb *string*, because a JS string parameter cast with
+// `::jsonb` is JSON-ENCODED by the driver. Together those two defects would have posted a conversion with
+// no event type, no category code and no value to GA4, which answers 200 to it. Nothing errored, every
+// unit case passed, and the only evidence would have been an advertising account reporting conversions
+// worth nothing.
+//
+// So the fixtures below are mutations of shipped source, each one the plausible version of the mistake,
+// and each is required to be caught by a rule or a case that names it.
+{
+  const CONSUMER = 'apps/worker/src/jobs/analytics-dispatch.ts'
+  const GUARD = 'packages/core/src/analytics/egress-guard.ts'
+  const GUARD_SUITE = 'packages/core/src/analytics/egress-guard.test.ts'
+  const WRITER = 'packages/db/src/repositories/analytics-consent.ts'
+  const READER = 'packages/db/src/repositories/analytics-dispatch.ts'
+  const EVENT_ID = 'packages/analytics/src/event-id.ts'
+  const EVENT_ID_SUITE = 'packages/analytics/src/event-id.test.ts'
+  const FAKES = 'packages/analytics/src/fakes.ts'
+  const FAKES_SUITE = 'packages/analytics/src/fakes.test.ts'
+  const PORT = 'packages/analytics/src/port.ts'
+  const ADAPTERS_SUITE = 'packages/analytics/src/adapters.test.ts'
+  const BARREL = 'packages/analytics/src/index.ts'
+  const DISPATCH_ITEST = 'apps/worker/src/jobs/analytics-dispatch.itest.ts'
+
+  const unitFails = (...files) =>
+    runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const itestFails = (...files) =>
+    runExpectingFailure('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      ...files,
+    ])
+  /** Breaks one shipped file and requires a named refusal from a repository-wide script gate. */
+  const scriptRefuses = (file, find, into, script) =>
+    withEditedFile(
+      file,
+      (source) => replaceOnce(source, find, into),
+      () => runExpectingFailure('pnpm', [script]),
+    )
+  /** Breaks one shipped file and requires a named case back from a suite. */
+  const brokenUnit = (file, find, into, ...suites) =>
+    withEditedFile(
+      file,
+      (source) => replaceOnce(source, find, into),
+      () => unitFails(...suites),
+    )
+
+  // 169a. THE defect this unit inherited. A stored payload re-entering the branded type by a cast is a
+  //       payload the guard never built: no allowlist has been applied to it, so it may carry a service
+  //       name or a price on a non-terminal event, and every adapter accepts it because the type says it
+  //       is fine. `egressPayloadFromStored` is the re-entry; this is what happens without it.
+  checkRejectedBy(
+    'dispatch consumer: a stored payload cast back into the brand is caught',
+    scriptRefuses(
+      CONSUMER,
+      '    return egressPayloadFromStored(dispatch.payload)',
+      '    return JSON.parse(dispatch.payload) as EgressPayload',
+      'egress',
+    ),
+    'egress-brand-minted-outside-the-guard',
+  )
+
+  // 169b. And the control on the rule that catches it: the guard must mint exactly ONCE. A second mint
+  //       inside the guard is the version of 169a that the module-level exemption would hide, and the
+  //       re-entry function is precisely where somebody would add it.
+  checkRejectedBy(
+    'dispatch consumer: a second mint inside the guard itself is caught',
+    scriptRefuses(
+      GUARD,
+      '  return payload\n}',
+      '  return { ...payload } as unknown as EgressPayload\n}',
+      'egress',
+    ),
+    'mints a branded payload',
+  )
+
+  // 169c. The second half of the inherited defect, and the one no type could see. `${payload}::jsonb`
+  //       looks exactly right and the driver JSON-ENCODES the string, so the column holds a jsonb string
+  //       whose text is the payload — `jsonb_typeof` of `string` rather than `object`. Every field then
+  //       reads as `undefined` in the consumer. The guard's re-entry is what notices.
+  checkRejectedBy(
+    'dispatch writer: a payload double-encoded into a jsonb string is caught',
+    withEditedFile(
+      WRITER,
+      (source) => replaceOnce(source, '${input.payload}::text::jsonb,', '${input.payload}::jsonb,'),
+      () => itestFails(DISPATCH_ITEST),
+    ),
+    'A stored egress payload is not an object',
+  )
+
+  // 169d. The round trip is what makes the re-entry a PROOF rather than a second construction of the same
+  //       document. Remove it and a renumbered category table posts the stale document and reconciles
+  //       against the new one — which is A-MEAS-07 reporting a variance nobody can attribute.
+  checkRejectedBy(
+    'dispatch consumer: a stored payload that does not rebuild to itself must be refused',
+    brokenUnit(
+      GUARD,
+      '  if (rebuilt !== asStored) {',
+      '  if (rebuilt !== asStored && false) {',
+      GUARD_SUITE,
+    ),
+    'does not rebuild to itself',
+  )
+
+  // 169e. A key the allowlist does not name is REFUSED on a stored payload rather than projected away. A
+  //       drop is right for a caller handing the guard what it held; an extra key on a stored payload
+  //       means the row was not written by the serialiser, and projecting it away hides that.
+  checkRejectedBy(
+    'dispatch consumer: a smuggled field on a stored payload must be refused, not dropped',
+    brokenUnit(
+      GUARD,
+      '    if ((EGRESS_PAYLOAD_FIELDS as readonly string[]).includes(key)) continue',
+      '    if (true) continue',
+      GUARD_SUITE,
+    ),
+    'does not name',
+  )
+
+  // 169f. The funnel stage is part of the event identity, and dropping it is the mistake that reads as a
+  //       simplification. One booking contributes `booking_created`, `confirmed`, `attended` and `paid`;
+  //       an id over the aggregate alone makes all four one event, three are discarded as duplicates, and
+  //       the campaign appears to produce bookings that never got paid.
+  checkRejectedBy(
+    'dispatch identity: an event id that ignores the funnel stage is caught',
+    brokenUnit(
+      EVENT_ID,
+      '      ? [subject.kind, aggregateId, stage]',
+      '      ? [subject.kind, aggregateId]',
+      EVENT_ID_SUITE,
+    ),
+    'a different id',
+  )
+
+  // 169g. The separator is what keeps two distinct conversions from producing one canonical form. A bare
+  //       concatenation is not an error anywhere: it is one conversion reported instead of two, for ever.
+  //
+  //       The case this fires is the CONTROL inside 'the separator', and that is worth stating because the
+  //       obvious candidate does not fire. 'keeps apart two subjects a bare concatenation would merge'
+  //       still passes under this mutation: both vocabularies are closed, no kind is a prefix of another
+  //       and no stage is a suffix of one, so a colliding pair cannot be built out of them — which means
+  //       the only thing that can catch a dropped separator is an assertion about the canonical form
+  //       ITSELF. Running this case is how that was found.
+  checkRejectedBy(
+    'dispatch identity: a canonical form that drops its separators is caught',
+    brokenUnit(
+      EVENT_ID,
+      '  return parts.join(EVENT_ID_SEPARATOR)',
+      "  return parts.join('')",
+      EVENT_ID_SUITE,
+    ),
+    'cannot appear in any kind or any stage',
+  )
+
+  // 169h. The egress guard that stops a staging run reaching a real advertising account. There is no test
+  //       recipient for a conversion — a staging event lands in the property the owner reads, inflates
+  //       what a campaign is optimised on, and cannot be removed — so this one has no allowlist to widen
+  //       and the only way to break it is to make it answer `transmit`.
+  checkRejectedBy(
+    'dispatch transport: an egress guard that transmits outside production is caught',
+    brokenUnit(
+      FAKES,
+      "  if (isProduction(appEnv)) return { kind: 'transmit' }",
+      "  if (true) return { kind: 'transmit' }",
+      FAKES_SUITE,
+      ADAPTERS_SUITE,
+    ),
+    'transmits in production and in nothing else',
+  )
+
+  // 169i. The backoff that stops growing. `2 ** attemptsMade` relaxed to a constant delay is not an error
+  //       and not a slow test: it is a destination that is down being retried at the shortest interval
+  //       for ever, and the symptom is a consumer that looks busy.
+  checkRejectedBy(
+    'dispatch transport: a backoff ladder that stops growing is caught',
+    brokenUnit(
+      FAKES,
+      '  return ANALYTICS_RETRY_BASE_SECONDS * ANALYTICS_RETRY_FACTOR ** attemptsMade',
+      '  return ANALYTICS_RETRY_BASE_SECONDS',
+      FAKES_SUITE,
+    ),
+    'grows, and the first delay is the base',
+  )
+
+  // 169j. A fractional or negative attempt count computes a delay BELOW the base — `2 ** -1` is 0.5 — so
+  //       the ladder's first rung becomes an immediate retry, which is the one failure a backoff exists to
+  //       prevent. The refusal is what keeps that unreachable.
+  checkRejectedBy(
+    'dispatch transport: a backoff that computes a delay for a negative attempt count is caught',
+    brokenUnit(
+      FAKES,
+      '  if (!Number.isInteger(attemptsMade) || attemptsMade < 0) {',
+      '  if (false) {',
+      FAKES_SUITE,
+    ),
+    'refuses a fractional or negative attempt count',
+  )
+
+  // 169k. The action source is refused and never defaulted. The value a default reaches is `website`, so
+  //       the defect reports a walk-in as a web order in somebody else's advertising report — a figure
+  //       rather than an error.
+  checkRejectedBy(
+    'dispatch transport: an action source defaulted to website instead of refused is caught',
+    brokenUnit(
+      PORT,
+      '  if (mapped !== undefined) return mapped',
+      "  return mapped ?? 'website'",
+      ADAPTERS_SUITE,
+    ),
+    'REFUSES an unknown source rather than defaulting to website',
+  )
+
+  // 169l. THE BARREL IS THE LOOPHOLE. A re-export of either adapter from `index.ts` makes the
+  //       module-matching rule match nothing, and the consumer then keeps the fake in production with
+  //       nothing saying so — worse than the payments case, because the dispatch rows would read `sent`.
+  checkRejectedBy(
+    'dispatch registry: an adapter re-exported through the barrel is caught by rule name',
+    withEditedFile(
+      BARREL,
+      (source) =>
+        replaceOnce(
+          source,
+          'export {\n  ANALYTICS_AGGREGATE_KINDS,',
+          "export { GA4_MEASUREMENT_PROTOCOL } from './ga4.ts'\nexport {\n  ANALYTICS_AGGREGATE_KINDS,",
+        ),
+      () => runExpectingFailure('pnpm', ['boundaries']),
+    ),
+    'analytics-adapters-only-through-the-registry',
+  )
+
+  // 169m. A destination the consent gate will enqueue to and no adapter serves must THROW rather than be
+  //       skipped. A skipped row stays queued for ever with nothing saying why, which reads exactly like
+  //       a consumer that stopped running — ADR 0002's failure in a queue.
+  checkRejectedBy(
+    'dispatch registry: a destination no adapter serves must throw rather than be skipped',
+    brokenUnit(
+      'packages/analytics/src/registry.ts',
+      '      if (adapter !== undefined) return adapter',
+      '      if (adapter !== undefined) return adapter\n      return ga4',
+      'packages/analytics/src/registry.test.ts',
+    ),
+    'throws for a destination no adapter serves',
+  )
+
+  // 169n. The reader's instants. `timestamptz::text` is PostgreSQL's display form and not ISO-8601, so a
+  //       field named `occurredAtIso` held `2026-09-30 09:00:00+00` — which both adapters put through
+  //       `new Date(...)`, outside the format `Date.parse` is specified for. It happens to work in V8 and
+  //       is the shape that dates a conversion wrongly where it does not.
+  checkRejectedBy(
+    'dispatch reader: a non-ISO instant on a field named Iso is caught',
+    withEditedFile(
+      READER,
+      (source) =>
+        replaceOnce(
+          source,
+          '    occurredAtIso: row.occurred_at.toISOString(),',
+          '    occurredAtIso: String(row.occurred_at),',
+        ),
+      () => itestFails(DISPATCH_ITEST),
+    ),
+    'carries the instant the conversion HAPPENED',
+  )
+
+  // 169o. The empty backoff ladder, which is what a mis-wired caller passes. An empty array makes every
+  //       failed row due on every pass — the hammering the ladder exists to prevent — and a limit of zero
+  //       drains nothing while reporting a clean pass, which is ADR 0002's failure exactly.
+  checkRejectedBy(
+    'dispatch reader: an empty ladder or a zero limit must be refused rather than obeyed',
+    brokenUnit(
+      READER,
+      '  if (query.backoffSeconds.length === 0) {',
+      '  if (false) {',
+      'packages/db/src/analytics-dispatch.test.ts',
+    ),
+    'refuses an empty backoff ladder',
+  )
+
+  // 169p. The vacuity control for this whole block, and it is not a formality: every case above asserts
+  //       that a MUTATED tree fails, and a tree that fails for its own reasons satisfies all of them. So
+  //       the unmutated suites must pass, and the script gates must answer clean.
+  {
+    const suites = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.config.ts',
+      GUARD_SUITE,
+      EVENT_ID_SUITE,
+      FAKES_SUITE,
+      ADAPTERS_SUITE,
+      'packages/analytics/src/registry.test.ts',
+      'packages/analytics/src/identity.test.ts',
+      'packages/db/src/analytics-dispatch.test.ts',
+    ])
+    check(
+      'dispatch gate: the unmutated suites pass, so every case above measured its own mutation',
+      !suites.failed,
+      suites.output,
+    )
+    const egress = run('pnpm', ['egress'])
+    check(
+      'dispatch gate: and the egress guard answers clean on the real tree',
+      !egress.failed,
+      egress.output,
+    )
+  }
+}
+
+// 170a-170z. (A-MEAS-05) The offline conversion loop: every way a corrected figure could come to be an
+//            EDIT rather than a statement, and every way a sum could stop being zero.
+//
+// The defects this block is about are all arithmetic that still renders. A void written as zero, a credit
+// pushed with the wrong sign, a correction sent as a second absolute figure: none of them errors, none
+// fails a type, and each one leaves an advertising account optimising on a number this business never
+// took. The ledger is therefore a pure function with a committed arithmetic, and each mutation below has
+// to be caught by a case that names the claim.
+//
+// Two of them are about IDENTITY rather than money, and they are the subtler half. A correction that
+// derives the same `event_id` as the figure it corrects is discarded by the platform as a duplicate — so
+// the wrong number stays and the correction LOOKS like it worked, which is worse than it failing.
+{
+  const LEDGER = 'packages/core/src/analytics/conversion-value.ts'
+  const LEDGER_SUITE = 'packages/core/src/analytics/conversion-value.test.ts'
+  const EVENT_ID = 'packages/analytics/src/event-id.ts'
+  const EVENT_ID_SUITE = 'packages/analytics/src/event-id.test.ts'
+  const PASS = 'apps/worker/src/jobs/offline-conversions.ts'
+  const READS = 'packages/db/src/repositories/offline-conversions.ts'
+  const OFFLINE_ITEST = 'apps/worker/src/jobs/offline-conversions.itest.ts'
+
+  const unitFails = (...files) =>
+    runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const itestFails = (...files) =>
+    runExpectingFailure('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      ...files,
+    ])
+  const brokenUnit = (file, find, into, ...suites) =>
+    withEditedFile(
+      file,
+      (source) => replaceOnce(source, find, into),
+      () => unitFails(...suites),
+    )
+  const brokenItest = (file, find, into) =>
+    withEditedFile(
+      file,
+      (source) => replaceOnce(source, find, into),
+      () => itestFails(OFFLINE_ITEST),
+    )
+
+  // 170a. The no-show void written as nothing. The conversion then stands at its full value for ever and
+  //       the ledger sums to the booking rather than to zero — a treatment nobody had, reported as
+  //       revenue, in somebody else's advertising account.
+  checkRejectedBy(
+    'offline conversions: a no-show void worth nothing is caught',
+    brokenUnit(
+      LEDGER,
+      "    push('no_show_void', -conversionLedgerNetFils(statements), outcome.noShow.atIso)",
+      "    push('no_show_void', 0, outcome.noShow.atIso)",
+      LEDGER_SUITE,
+    ),
+    'sums to EXACTLY zero fils',
+  )
+
+  // 170b. The credit note's SIGN. A refund pushed as a positive value is a second sale, and the figure is
+  //       exactly right in magnitude — which is what makes it survive a review.
+  checkRejectedBy(
+    'offline conversions: a credit note pushed as a positive value is caught',
+    brokenUnit(
+      LEDGER,
+      "    push('credit_note', -credited.grossFils, credited.atIso)",
+      "    push('credit_note', credited.grossFils, credited.atIso)",
+      LEDGER_SUITE,
+    ),
+    'negative value equal to the credit',
+  )
+
+  // 170c. The correction sent as a second ABSOLUTE figure rather than as a delta. The platform's number
+  //       for the conversion is the SUM over the ids it has seen, so this doubles the conversion — and
+  //       both rows look like perfectly ordinary conversions.
+  checkRejectedBy(
+    'offline conversions: a correction sent as an absolute figure rather than a delta is caught',
+    brokenUnit(
+      LEDGER,
+      "    push('invoice_correction', outcome.initialFils - pushed, outcome.occurredAtIso)",
+      "    push('invoice_correction', outcome.initialFils, outcome.occurredAtIso)",
+      LEDGER_SUITE,
+    ),
+    'reaches the invoice gross',
+  )
+
+  // 170d. The provisional `Y11-vat-package` position: a package SALE pushes zero and the value is
+  //       recognised at redemption. Pushing the sale price reports the whole package as revenue on the day
+  //       it was sold, which is the position that question has not answered.
+  checkRejectedBy(
+    'offline conversions: a package sale pushing a value is caught',
+    brokenUnit(
+      LEDGER,
+      '      // Zero, and stated rather than omitted. See the header.\n      valueFils: 0,',
+      '      valueFils: 1,',
+      LEDGER_SUITE,
+    ),
+    'pushes zero at the sale',
+  )
+
+  // 170e. And the other direction: a sale with NO statement at all. A sale that pushed nothing is
+  //       indistinguishable from a sale the pass never saw, which is the distinction A-MEAS-07's whole
+  //       classification rests on — `missing` against `intentionally_not_pushed`.
+  checkRejectedBy(
+    'offline conversions: a package sale that writes no statement at all is caught',
+    brokenUnit(
+      LEDGER,
+      '  if (redemption === undefined) return statements',
+      '  if (redemption === undefined) return []',
+      LEDGER_SUITE,
+    ),
+    'rather than as no conversion at all',
+  )
+
+  // 170f. `never now()`, which the database cannot say on its own: `occurred_at <= decided_at` (0137) is
+  //       satisfied by EQUALITY, and equality is exactly what a clock read in the wrong place produces.
+  //       Relax the strict comparison and an offline upload dates itself on the night the worker ran.
+  checkRejectedBy(
+    'offline conversions: an event instant equal to the pass instant is caught',
+    brokenUnit(LEDGER, '  if (at < pass) return', '  if (at <= pass) return', LEDGER_SUITE),
+    'refuses an instant equal to the pass',
+  )
+
+  // 170g. The identity half. A correction that derives the same id as the figure it corrects is discarded
+  //       by the platform as a duplicate, so the wrong number stays and the correction looks like it
+  //       worked — and nothing in this build would say otherwise.
+  checkRejectedBy(
+    'offline conversions: a correction sharing the original id is caught',
+    brokenUnit(
+      EVENT_ID,
+      '      : [subject.kind, aggregateId, stage, `r${revision}`]',
+      '      : [subject.kind, aggregateId, stage]',
+      EVENT_ID_SUITE,
+    ),
+    'its own id',
+  )
+
+  // 170h. And the same defect measured where it bites: over real dispatch rows. Two statements that share
+  //       an id are ONE row, because the idempotency index absorbs the second — so the ledger read back
+  //       from the table is a figure short, which is the shape the platform would also hold.
+  checkRejectedBy(
+    'offline conversions: a shared correction id collapses the stored ledger, and that is caught',
+    withEditedFile(
+      EVENT_ID,
+      (source) =>
+        replaceOnce(
+          source,
+          '      : [subject.kind, aggregateId, stage, `r${revision}`]',
+          '      : [subject.kind, aggregateId, stage]',
+        ),
+      () => itestFails(OFFLINE_ITEST),
+    ),
+    'every statement must have written its own row',
+  )
+
+  // 170i. The session. A-FIRST-08 owns the attribution and nothing in this schema joins a session to a
+  //       booking, so a conversion with none is COUNTED and skipped. A pass that went ahead would push a
+  //       conversion under somebody else's consent decision — which the gate cannot catch, because the
+  //       session it was handed really did grant everything.
+  checkRejectedBy(
+    'offline conversions: a conversion uploaded without an attribution on file is caught',
+    brokenItest(PASS, '    if (sessionId === null) {', '    if (false as boolean) {'),
+    'counts a conversion with no analytics session',
+  )
+
+  // 170j. The action source. The value a default reaches is `website`, so the defect reports a walk-in as
+  //       a web order — a figure rather than an error.
+  checkRejectedBy(
+    'offline conversions: an action source defaulted instead of counted is caught',
+    brokenItest(
+      PASS,
+      '    if (conversion.bookingSource === null) {',
+      '    if (false as boolean) {',
+    ),
+    'counts a conversion with no booking channel',
+  )
+
+  // 170k. The trading DATE. Trading runs 11:00-02:00, so an instant cast to a date moves every sale after
+  //       midnight onto the previous day — and the conversions with it, into the wrong attribution window.
+  checkRejectedBy(
+    'offline conversions: an instant accepted where a trading date belongs is caught',
+    brokenItest(
+      READS,
+      '  if (/^\\d{4}-\\d{2}-\\d{2}$/.test(tradingDate)) return',
+      '  if (true) return',
+    ),
+    'refuses an instant where a trading DATE belongs',
+  )
+
+  // 170l. The vacuity control, and it is not a formality: every case above asserts that a MUTATED tree
+  //       fails, and a tree that fails for its own reasons satisfies all of them.
+  {
+    const suites = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.config.ts',
+      LEDGER_SUITE,
+      EVENT_ID_SUITE,
+    ])
+    check(
+      'offline conversions: the unmutated ledger suites pass, so every case above measured its mutation',
+      !suites.failed,
+      suites.output,
+    )
+    const itest = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      OFFLINE_ITEST,
+    ])
+    check(
+      'offline conversions: and the integration suite passes on the real tree',
+      !itest.failed,
+      itest.output,
+    )
+  }
+}
+
+// 171a-171z. (A-MEAS-07) The reconciliation: every way a disagreement could come to read as agreement, and
+//            every way a figure could reach a screen that has no business showing one.
+//
+// This unit's whole subject is two sides of one number disagreeing, so the defects it is about are all
+// shapes in which the disagreement STOPS BEING VISIBLE. A consent suppression counted as missing produces a
+// permanent, entirely correct discrepancy — and the first response to a number like that is to make it go
+// away. A duplicate counted twice produces a money difference that is not there. A summary that may
+// disagree with its own items produces a panel rendering a count the rows underneath it contradict. And the
+// one that matters most: an unreconciled day that still carries a revenue figure, which a panel renders as
+// a figure whatever the warning beside it says.
+{
+  const RECON = 'packages/core/src/analytics/reconciliation.ts'
+  const RECON_SUITE = 'packages/core/src/analytics/reconciliation.test.ts'
+  const PANEL = 'apps/web/app/(admin)/analytics/panels/revenue-by-source.ts'
+  const PANEL_SUITE = 'apps/web/src/revenue-by-source-render.test.ts'
+  const WRITER = 'packages/db/src/repositories/dispatch-reconciliation.ts'
+  const MIGRATION = 'packages/db/migrations/0138_dispatch_reconciliation.sql'
+  const MIGRATION_SUITE = 'packages/db/src/dispatch-reconciliation.test.ts'
+  const RECON_ITEST = 'apps/worker/src/jobs/dispatch-reconciliation.itest.ts'
+
+  const unitFails = (...files) =>
+    runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const itestFails = () =>
+    runExpectingFailure('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      RECON_ITEST,
+    ])
+  const brokenUnit = (file, find, into, ...suites) =>
+    withEditedFile(
+      file,
+      (source) => replaceOnce(source, find, into),
+      () => unitFails(...suites),
+    )
+
+  // 171a. A consent suppression counted as a discrepancy. The conversion happened, the push correctly did
+  //       not, and nothing is owed — so this reports a growing number of entirely correct refusals as a
+  //       fault, every day, for ever.
+  checkRejectedBy(
+    'reconciliation: a consent suppression counted as missing is caught',
+    brokenUnit(
+      RECON,
+      '  suppressed: true,\n    cancelled_consent_withdrawn: true,',
+      '  suppressed: false,\n    cancelled_consent_withdrawn: false,',
+      RECON_SUITE,
+    ),
+    'is not counted as a discrepancy',
+  )
+
+  // 171b. And the other direction, which is the subtler one: a QUEUED or FAILED row read as a deliberate
+  //       refusal. The pass runs after the day has closed and the consumer drains every five minutes, so a
+  //       row still owed is a conversion the platform does not have — and calling it intentional makes the
+  //       day reconcile while the money is short.
+  checkRejectedBy(
+    'reconciliation: a queued or failed dispatch read as a deliberate refusal is caught',
+    brokenUnit(
+      RECON,
+      '    queued: false,\n    sent: false,\n    suppressed: true,',
+      '    queued: true,\n    sent: false,\n    suppressed: true,',
+      RECON_SUITE,
+    ),
+    'is NOT what a queued or failed row is',
+  )
+
+  // 171c. A duplicate's value counted once per ROW. The platform's figure is the sum over the ids it has
+  //       seen, so a conversion delivered twice under one id is one conversion to it too — counting it
+  //       twice reports a money disagreement that does not exist, on a day whose money is right.
+  checkRejectedBy(
+    'reconciliation: a duplicate counted twice in the money difference is caught',
+    brokenUnit(
+      RECON,
+      '      pushedFils += first.valueFils\n      pushedCount += 1\n      continue',
+      '      for (const row of delivered) pushedFils += row.valueFils\n      pushedCount += 1\n      continue',
+      RECON_SUITE,
+    ),
+    'does not report a disagreement that is not there',
+  )
+
+  // 171d. A duplicate reported with ONE id. "There is a duplicate" is not actionable; "these two rows are
+  //       the same conversion" is — and the ids are taken in id ORDER, so two runs of the pass produce
+  //       identical rows rather than whichever row the query returned first.
+  checkRejectedBy(
+    'reconciliation: a duplicate whose two ids are not taken in id order is caught',
+    brokenUnit(
+      RECON,
+      '  for (const rows of byEvent.values()) rows.sort((a, b) => a.dispatchId.localeCompare(b.dispatchId))',
+      '  for (const rows of byEvent.values()) rows.reverse()',
+      RECON_SUITE,
+    ),
+    'in id order',
+  )
+
+  // 171e. A push with no internal record behind it, dropped. It is the more alarming direction — a
+  //       platform told about revenue the journal cannot produce — and leaving it out is the silent lie.
+  checkRejectedBy(
+    'reconciliation: a dispatch with no internal truth behind it, dropped, is caught',
+    brokenUnit(
+      RECON,
+      '    pushedWithoutInternalTruth.push(eventId)',
+      '    if (false as boolean) pushedWithoutInternalTruth.push(eventId)',
+      RECON_SUITE,
+    ),
+    'makes the day unreconciled',
+  )
+
+  // 171f. THE one that matters most: a revenue figure on the unreconciled variant. A figure beside a
+  //       warning is read as a figure, which is the whole reason the union is shaped the way it is rather
+  //       than being a nullable number (ADR 0002, ADR 0073).
+  checkRejectedBy(
+    'reconciliation: a revenue figure carried on the unreconciled answer is caught',
+    brokenUnit(
+      RECON,
+      '    differenceFils,\n    pushedWithoutInternalTruth,',
+      '    differenceFils,\n    pushedFils,\n    pushedWithoutInternalTruth,',
+      RECON_SUITE,
+    ),
+    'carries no revenue figure on the unreconciled variant at all',
+  )
+
+  // 171g. The same defect at the API layer: a caller holding a number getting it past the boundary for a
+  //       day whose figures do not agree.
+  checkRejectedBy(
+    'reconciliation: an API that answers a number for an unreconciled day is caught',
+    brokenUnit(
+      PANEL,
+      '  if (isUnreconciled(entry.reconciliation)) return UNRECONCILED',
+      '  if (isUnreconciled(entry.reconciliation)) return entry.figure ?? UNRECONCILED',
+      PANEL_SUITE,
+    ),
+    'answers Unreconciled rather than a number',
+  )
+
+  // 171h. And at the document layer. A figure element the markup still carries is a number a stylesheet or
+  //       a screenshot can show, whatever the state attribute says.
+  checkRejectedBy(
+    'reconciliation: a panel that renders a figure on an unreconciled day is caught',
+    brokenUnit(
+      PANEL,
+      '    `<p>${escapeHtml(UNRECONCILED_PANEL_SENTENCE)}</p>`,',
+      '    `<p>${escapeHtml(UNRECONCILED_PANEL_SENTENCE)}</p>`,\n    `<p class="revenue-by-source__figure">${escapeHtml(entry.figure ?? \'\')}</p>`,',
+      PANEL_SUITE,
+    ),
+    'renders NO figure and no figure element at all',
+  )
+
+  // 171i. A reconciled destination with no figure, answered as a zero. `0.00` is a real figure and reads as
+  //       "this source produced no revenue", which is the exact confusion ADR 0002 is about.
+  checkRejectedBy(
+    'reconciliation: a missing figure answered as a zero rather than as the word is caught',
+    brokenUnit(
+      PANEL,
+      '  if (entry.figure === undefined) {',
+      '  if (false as boolean) {',
+      PANEL_SUITE,
+    ),
+    'rather than a zero',
+  )
+
+  // 171j. The write. An upsert instead of a delete-then-insert leaves the previous run's `missing` item
+  //       behind when a dispatch finally lands, and ZY471 then refuses the whole write — so the day stops
+  //       being reconcilable at all, which is a gate firing about a bug in the writer.
+  checkRejectedBy(
+    'reconciliation: a writer that leaves a stale item behind is caught',
+    withEditedFile(
+      WRITER,
+      (source) =>
+        replaceOnce(
+          source,
+          '      await tx`\n        delete from analytics_dispatch_reconciliation_item',
+          '      if (false as boolean) await tx`\n        delete from analytics_dispatch_reconciliation_item',
+        ),
+      () => itestFails(),
+    ),
+    'removes the missing item',
+  )
+
+  // 171k. ZY471's DEFERRAL, which is the line the migration test exists for. `deferrable initially
+  //       immediate` applies at the statement, so the WRITER'S ORDER would decide whether the rule held —
+  //       it would pass for every write this pass makes and fail for the first caller that wrote its items
+  //       first.
+  checkRejectedBy(
+    'reconciliation: a constraint trigger that is not deferred is caught',
+    brokenUnit(
+      MIGRATION,
+      'create constraint trigger analytics_dispatch_reconciliation_agrees\n  after insert or update or delete on analytics_dispatch_reconciliation\n  deferrable initially deferred',
+      'create constraint trigger analytics_dispatch_reconciliation_agrees\n  after insert or update or delete on analytics_dispatch_reconciliation\n  deferrable initially immediate',
+      MIGRATION_SUITE,
+    ),
+    'deferrable initially deferred',
+  )
+
+  // 171l. The state/figures bijection relaxed. A row saying `reconciled` beside three missing items is a
+  //       screen that shows a number while the rows underneath it say the number is wrong.
+  checkRejectedBy(
+    'reconciliation: a state that no longer follows the figures is caught',
+    brokenUnit(
+      MIGRATION,
+      "    check ((state = 'unreconciled')\n           = (difference_fils <> 0 or missing_count > 0 or duplicate_count > 0))",
+      '    check (state = state)',
+      MIGRATION_SUITE,
+    ),
+    'holds the state to the figures in both directions',
+  )
+
+  // 171m. And the suppression count smuggled INTO that condition, which is 171a arriving through the
+  //       schema: every day with a consent refusal on it would read as unreconciled for ever.
+  checkRejectedBy(
+    'reconciliation: a suppression count that makes a day unreconciled is caught',
+    brokenUnit(
+      MIGRATION,
+      'or missing_count > 0 or duplicate_count > 0))',
+      'or missing_count > 0 or duplicate_count > 0 or intentionally_not_pushed_count > 0))',
+      MIGRATION_SUITE,
+    ),
+    'holds the state to the figures in both directions',
+  )
+
+  // 171n. One dispatch id written twice for a duplicate — one row reported as two, which is a second
+  //       conversion that does not exist.
+  checkRejectedBy(
+    'reconciliation: a duplicate naming one row twice is caught',
+    brokenUnit(
+      MIGRATION,
+      '               and dispatch_id <> other_dispatch_id))',
+      '               and dispatch_id is not null))',
+      MIGRATION_SUITE,
+    ),
+    'ties each classification to the rows it may name',
+  )
+
+  // 171o. The day window on the read. A read with no window reconciles every day against every dispatch
+  //       ever written, which answers `reconciled` for the most recent day and nonsense for all the rest.
+  checkRejectedBy(
+    'reconciliation: a read that ignores the trading day window is caught',
+    withEditedFile(
+      WRITER,
+      (source) =>
+        replaceOnce(
+          source,
+          '       and d.decided_at >= b.opens_at\n       and d.decided_at <  b.closes_at',
+          '       and b.trading_date is not null',
+        ),
+      () => itestFails(),
+    ),
+    'keys on the DECISION instant inside the trading window',
+  )
+
+  // 171p. The vacuity control. Every case above asserts that a MUTATED tree fails, and a tree that fails
+  //       for its own reasons satisfies all of them.
+  {
+    const suites = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.config.ts',
+      RECON_SUITE,
+      PANEL_SUITE,
+      MIGRATION_SUITE,
+    ])
+    check(
+      'reconciliation: the unmutated suites pass, so every case above measured its own mutation',
+      !suites.failed,
+      suites.output,
+    )
+    const itest = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      RECON_ITEST,
+    ])
+    check(
+      'reconciliation: and the integration suite passes on the real tree',
+      !itest.failed,
+      itest.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

@@ -317,6 +317,45 @@ const CASES = [
       '',
     ].join('\n'),
   },
+  // A-MEAS-03 asks dependency-cruiser to prove two things about packages/analytics that no test can see,
+  // because both are about which modules may REACH an adapter rather than about how one behaves. Each
+  // fixture is written in the place the mistake would actually be made.
+  {
+    rule: 'analytics-adapters-only-through-the-registry',
+    // The import a worker author writes the first time they want a dispatcher and have not found the
+    // registry. It would keep using the fake in production with nothing saying so, and the dispatch rows
+    // would be written `sent` — worse than the payments case, where the money simply does not move.
+    file: 'packages/analytics/src/__boundary_fixture__.ts',
+    source: [
+      "import { createFakeGa4MeasurementProtocol } from './ga4.ts'",
+      'export const illegal = createFakeGa4MeasurementProtocol',
+      '',
+    ].join('\n'),
+  },
+  {
+    rule: 'analytics-adapters-only-through-the-registry',
+    // The Meta adapter as well as the GA4 one, because the rule's `to` is one alternation and a fixture
+    // for only one branch would still pass if the other had drifted — the lesson the ledger, pricing and
+    // payment fixtures above each record.
+    file: 'packages/analytics/src/__boundary_fixture__.ts',
+    source: [
+      "import { createFakeMetaConversionsApi } from './meta-capi.ts'",
+      'export const illegal = createFakeMetaConversionsApi',
+      '',
+    ].join('\n'),
+  },
+  {
+    rule: 'analytics-dispatch-must-not-reach-the-database',
+    // The decision an adapter must never be able to make is whether consent permits the push. The gate is
+    // ONE statement asked in two places (ADR 0076); an adapter that could read `analytics.session` would
+    // be a third, arriving from the module that also holds the transport.
+    file: 'packages/analytics/src/__boundary_fixture__.ts',
+    source: [
+      "import { sessionConsentRow } from '@berelax/db'",
+      'export const illegal = sessionConsentRow',
+      '',
+    ].join('\n'),
+  },
 ]
 
 let failures = 0

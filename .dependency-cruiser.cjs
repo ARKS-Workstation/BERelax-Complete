@@ -508,6 +508,49 @@ module.exports = {
       to: { path: '^packages/payments/src/conformance/fixtures/' },
     },
     {
+      name: 'analytics-adapters-only-through-the-registry',
+      comment:
+        'Only packages/analytics/src/registry.ts may construct a GA4 or Meta dispatch adapter. Everything ' +
+        'else takes one from createAnalyticsDispatchers, which is the only place ANALYTICS_PROVIDER is ' +
+        'read — and that is what makes choosing a real destination a configuration change rather than an ' +
+        'edit at every call site (ADR 0022 rule 3, ADR 0005). A consumer that imported ' +
+        'createFakeGa4MeasurementProtocol directly would keep using the fake in production with nothing ' +
+        'saying so: parseConfig would still refuse ANALYTICS_PROVIDER=real outside production, ' +
+        'notImplemented would still throw for real, and the conversions would still go nowhere, because ' +
+        'that call site never asked the config anything. Worse than the payments case, because the ' +
+        'dispatch rows would be written `sent`. The registry also owns the shared local outbox and the ' +
+        'shared transport script, so a directly constructed adapter writes to an outbox the admin panel ' +
+        'and A-MEAS-07 do not read. ' +
+        'THE BARREL IS THE LOOPHOLE, and it is closed harder than the payments one: ' +
+        'packages/analytics/src/index.ts does not reach either adapter module AT ALL, not even for a ' +
+        'constant, because a re-export of any kind makes a module-matching rule match nothing. A ' +
+        'consumer names a destination through DISPATCH_DESTINATIONS, which the registry assembles. Any ' +
+        'test or integration suite is exempt: registry.test.ts and adapters.test.ts have to reach the ' +
+        'adapters to test them, and packages/fixtures asserts the bodies they build.',
+      severity: 'error',
+      from: {
+        pathNot: ['^packages/analytics/src/registry\\.ts$', '\\.(test|itest)\\.ts$'],
+      },
+      to: { path: '^packages/analytics/src/(ga4|meta-capi)\\.ts$' },
+    },
+    {
+      name: 'analytics-dispatch-must-not-reach-the-database',
+      comment:
+        'packages/analytics builds and records outbound payloads and must not read a row. The dispatch ' +
+        'queue, the consent decision on it and the invoice behind its figure are all ' +
+        "apps/worker/src/jobs/analytics-dispatch.ts's to read, and the adapter is handed a value. " +
+        'This is not tidiness. The decision an adapter must never be able to make is whether consent ' +
+        'permits the push: the gate is ONE statement asked in two places (ADR 0076), ' +
+        'dispatch_consent_gap and the ZY312 trigger, and an adapter that could reach ' +
+        'analytics.session would be a third — the exact drift A-MEAS-02 was built to prevent, arriving ' +
+        'from the one module that also holds the transport. An adapter that cannot see a consent column ' +
+        'cannot re-decide consent. It also keeps every body a pure function of its arguments, which is ' +
+        'what lets packages/fixtures assert the serialised bytes with nothing running.',
+      severity: 'error',
+      from: { path: '^packages/analytics/', pathNot: '\\.(test|itest)\\.ts$' },
+      to: { path: '^packages/(db|clinical|hr|google|messaging|payments)/' },
+    },
+    {
       name: 'no-circular',
       comment: 'Circular dependencies make build order and reasoning undecidable.',
       severity: 'error',

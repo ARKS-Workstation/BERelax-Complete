@@ -4,7 +4,7 @@
 
 # ADR index
 
-82 records, generated from the front matter of each one. Every column below is read
+85 records, generated from the front matter of each one. Every column below is read
 out of the record it describes, so a row cannot be wrong without the record being wrong — which is
 the whole reason this file is not maintained by hand. For the argument behind any of them, read
 [README.md](README.md) and then the record.
@@ -90,6 +90,9 @@ the whole reason this file is not maintained by hand. For the argument behind an
 | [0086](0086-a-suggestion-stores-its-before-state-and-applying-one-is-a-human-action.md) | a suggestion STORES its before-state, applying one is a human action through the publication control plane, and the draft passes the same lint as a published page | accepted | 2026-10-02 | G-SEO-05 | docs/01 decisions — none; this is the mechanism behind docs/07 §3's *"propose-only, with publish |
 | [0088](0088-a-mandate-is-a-record-that-a-mandate-exists-and-the-absence-of-a-fee-policy-is-a-refusal.md) | a mandate is a RECORD that a mandate exists, and the absence of a fee policy is a REFUSAL | accepted | 2026-10-02 | Y-PAY-07 | docs/01 decisions — none. It stands on ADR 0007 (integer fils, the VAT-inclusive gross |
 | [0089](0089-a-reversal-is-a-dated-event-and-the-refund-cap-is-three-figures.md) | a reversal is a dated event, and the refund cap is THREE figures | accepted | 2026-10-02 | Y-PAY-08 | docs/01 decisions — none. It stands on ADR 0007 (integer fils, the VAT-inclusive gross |
+| [0091](0091-the-dispatch-consumer-decides-only-whether-the-transport-worked.md) | the dispatch consumer decides only whether the transport worked | accepted | 2026-10-03 | A-MEAS-03 | docs/01 decisions — none. Decision 14 is recorded in ADR 0018; this is a mechanism under it, |
+| [0092](0092-a-corrected-conversion-value-is-a-new-statement-not-an-edit.md) | a corrected conversion value is a new statement, not an edit | accepted | 2026-10-03 | A-MEAS-05 | docs/01 decisions — none. Decision 14 is recorded in ADR 0018 and decision 19b (prepaid |
+| [0093](0093-an-unreconciled-day-has-no-revenue-figure-to-render.md) | an unreconciled day has no revenue figure to render | accepted | 2026-10-03 | A-MEAS-07 | docs/01 decisions — none. This is a mechanism beside ADR 0002 (a report that cannot |
 | [0097](0097-the-alert-registry-is-what-the-alerting-path-reads-and-an-slo-has-no-invented-target.md) | the alert registry is what the alerting path READS, an SLO carries no invented target, and what is not defended is written down | accepted | 2026-10-03 | H-HARD-05 | docs/01 decisions — none; this is the mechanism one floor above ADR 0031's heartbeat |
 | [0098](0098-the-breach-clock-starts-at-discovery-and-a-filed-incident-is-immutable.md) | the breach clock starts at the discovery, a filed incident is immutable, and the threshold is decided nowhere | accepted | 2026-10-03 | H-HARD-07 | docs/01 decisions — none; this is the incident-register half of docs/04 §9 and the |
 | [0099](0099-the-documentation-set-is-generated-and-checked-or-it-is-decoration.md) | the processor register is held against the services actually wired up, and every page in the documentation set is generated or checked | accepted | 2026-10-03 | H-HARD-09 | docs/01 decisions — none; this is the mechanism behind docs/04 §8's processor register and |

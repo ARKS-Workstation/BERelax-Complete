@@ -14153,7 +14153,7 @@ units:
       retries with backoff and per-destination idempotency, with both providers behind the H02 fake-adapter
       interface in a new packages/analytics package.'
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - A-MEAS-01
@@ -14244,7 +14244,7 @@ units:
       a compensating void so the net is zero, credit notes push negatives, and walk-in and phone bookings
       upload as offline conversions with a real past event_time plus the how-heard fallback.'
     owner: claude
-    status: todo
+    status: done
     size: L
     milestone: M7
     depends_on:
@@ -14278,6 +14278,38 @@ units:
       test across the full fils range the catalogue uses
     - a package redemption pushes conversion value at redemption while the package sale pushes zero, matching
       the Y11-vat-package provisional position
+    - 'NOTE: deferred to A-FIRST-08 — the analytics SESSION a till conversion belongs to. Nothing in this
+      schema joins an analytics session to a booking, so the pass takes the session from an injected
+      resolver whose shipped implementation answers ''nothing on file'' for every conversion, and the pass
+      COUNTS the refusals rather than choosing one: a session picked here would push a conversion under
+      somebody else''s consent decision, which the ZY312 gate cannot catch because the session it was
+      handed really did grant everything. The ledger, the identities, the instants and the enqueue are all
+      built and proved against a real PostgreSQL by supplying the session the way A-FIRST-08 will. The
+      ''how-heard fallback'' named in this entry''s summary is the same deferral: this schema has no
+      how-heard column, and inventing one would be a second statement of attribution.'
+    - 'NOTE: deferred to A-MEAS-04 — the correction of a conversion announced at BOOKING time. The ledger''s
+      invoice_correction statement (an estimate pushed on the booking, corrected to the invoice gross) is
+      built and proved in packages/core/src/analytics/conversion-value.test.ts, and is not reachable end to
+      end because nothing in this build announces a conversion at booking time yet, so there is no earlier
+      figure on file to correct. The discounted-invoice acceptance line is satisfied where it is decided
+      instead: the repository reads invoice.gross_total and never appointment.gross_price_fils.'
+    - 'NOTE: deferred to A-FIRST-09 — the DATA half of the invoiced and package reads. invoice refuses
+      DELETE for every role (ZI003) and TRUNCATE as the owner is the only legal removal, which is a
+      declaration in packages/db/src/suite-table-declarations.ts and a statement wide enough to take other
+      suites'' rows with it; package_sale is the same shape. A suite may delete only rows it created
+      (ADR 0050), so writing a document in this unit''s suite would mean leaving one behind for ever. All
+      three reads ARE asserted to run against the real schema, to filter by trading date and to refuse an
+      instant where a date belongs, and the no-show read has a real walk-in fixture.'
+    - 'NOTE: handed to A-MEAS-06 — a second agent_definition and agent_heartbeat row for this pass. It
+      reports to analytics_dispatch'' agent because the two passes are one pipeline, and the limit is that
+      the consumer writes a heartbeat every five minutes, so this pass failing for a week is invisible to a
+      per-agent watchdog. A second agent needs a migration number this unit was allocated none of.'
+    - 'NOTE: this unit''s integration suite is apps/worker/src/jobs/offline-conversions.itest.ts and not
+      packages/db/src/dispatch.itest.ts as the file list names. packages/db may never import packages/core
+      (ADR 0001, where the ledger lives) and nothing-imports-an-app refuses a package reaching into apps/
+      (where the pass lives); pnpm boundaries refuses either, and a relative path is the same violation
+      written differently. A suite about a worker pass lives beside the pass, which is the convention
+      gratuity-accrual.itest.ts already follows.'
     files:
     - apps/worker/src/jobs/offline-conversions.ts
     - packages/core/src/analytics/conversion-value.ts
@@ -14320,7 +14352,7 @@ units:
       per destination, classifying every difference as missing, duplicate or intentionally suppressed by
       consent, and exposing a typed unreconciled state that downstream revenue panels must honour.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - A-FIRST-09
@@ -14334,6 +14366,31 @@ units:
       renders an explicit unreconciled state and the API returns Unreconciled rather than a number — asserted
       at both layers'
     - 'the job is idempotent per business_day: two runs produce identical rows'
+    - 'NOTE: deferred to A-FIRST-09 — the INTERNAL side of the comparison. "Internal paid conversions from
+      the rollups" is that unit''s funnel materialisation and is not built, so the pass takes the internal
+      side from an injected resolver whose shipped implementation answers ''nothing on file'' and then
+      writes NOTHING for that day, counting it in the log line. A reconciliation written from an empty
+      internal side would report every dispatch as a push with nothing behind it — a screen saying the
+      money does not add up, every morning, about a question nobody has asked yet. The classification, the
+      write, ZY471, ZY472, the day window and the idempotence are all built and proved against a real
+      PostgreSQL by supplying the internal side the way A-FIRST-09 will.'
+    - 'NOTE: this unit''s panel is apps/web/app/(admin)/analytics/panels/revenue-by-source.ts and not the
+      .tsx the file list names. Every admin screen in this repository is a route handler returning BYTES,
+      because apps/web/src/routes/registry.ts is in exact bijection with the filesystem and requires every
+      document to be served in both locales — a page.tsx here would need an Arabic admin document and the
+      W-SYS-01 shell. There is no analytics admin DOCUMENT yet: nothing under app/(admin)/analytics serves
+      a route, so the panel is a function the screen that arrives will call, and both layers are asserted
+      without a server by apps/web/src/revenue-by-source-render.test.ts.'
+    - 'NOTE: this unit''s integration suite is apps/worker/src/jobs/dispatch-reconciliation.itest.ts. It
+      needs @berelax/core''s classification, @berelax/db''s reads and writes and the worker''s pass in one
+      file; packages/db may never import packages/core (ADR 0001) and nothing-imports-an-app refuses a
+      package reaching into apps/, so a suite about a worker pass lives beside the pass.'
+    - 'NOTE: a DUPLICATE dispatch is unreachable through this build''s writer, and that is 0137''s unique
+      (event_id, destination) index doing its job. The classification is therefore proved over a pure
+      pushed list carrying two rows for one event id, and the STORAGE — both ids, and the CHECK that
+      refuses one id written twice — is proved over two real dispatch rows. Deliberate rather than a gap:
+      rows written before 0137 had no index, and a reconciliation that could not express a duplicate would
+      answer reconciled about one.'
     files:
     - apps/worker/src/jobs/dispatch-reconciliation.ts
     - packages/core/src/analytics/reconciliation.ts

@@ -7,6 +7,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@berelax/analytics": "workspace:*",
     "@berelax/auth": "workspace:*",
     "@berelax/config": "workspace:*",
     "@berelax/core": "workspace:*",

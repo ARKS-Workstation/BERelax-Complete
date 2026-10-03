@@ -22,6 +22,8 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "paths": {
+      "@berelax/analytics": ["./packages/analytics/src/index.ts"],
+      "@berelax/analytics/*": ["./packages/analytics/src/*"],
       "@berelax/auth": ["./packages/auth/src/index.ts"],
       "@berelax/clinical": ["./packages/clinical/src/index.ts"],
       "@berelax/cms": ["./packages/cms/src/index.ts"],

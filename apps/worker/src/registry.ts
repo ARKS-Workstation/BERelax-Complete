@@ -24,6 +24,7 @@ import { FLOW_TICK_JOB } from './automation/interpreter.ts'
 import type { JobContext, JobDefinition, JobHandler } from './job.ts'
 import { runWatchdog } from './jobs/agent-watchdog.ts'
 import { runAlertEvaluation } from './jobs/alert-evaluator.ts'
+import { ANALYTICS_DISPATCH_JOB_DEFINITION } from './jobs/analytics-dispatch.ts'
 import {
   ANALYTICS_PARTITIONS_JOB_DEFINITION,
   ANALYTICS_RETENTION_JOB_DEFINITION,
@@ -32,6 +33,7 @@ import { BUILD_DERIVATIVES_JOB } from './jobs/build-derivatives.ts'
 import { BUILD_VIDEO_RENDITIONS_JOB } from './jobs/build-video-renditions.ts'
 import { CASH_FORECAST_JOB_DEFINITION } from './jobs/cash-forecast.ts'
 import { CREDENTIAL_SWEEP_AGENT, runCredentialSweep } from './jobs/credential-sweep.ts'
+import { DISPATCH_RECONCILIATION_JOB_DEFINITION } from './jobs/dispatch-reconciliation.ts'
 import {
   GOOGLE_HEALTH_AGENT,
   GOOGLE_LIVENESS_AGENT,
@@ -51,6 +53,7 @@ import {
   REBUILD_OBLIGATION_NOTICES_JOB,
   SEND_OBLIGATION_NOTICE_JOB,
 } from './jobs/obligation-reminders.ts'
+import { OFFLINE_CONVERSIONS_JOB_DEFINITION } from './jobs/offline-conversions.ts'
 import {
   PACKAGE_EXPIRY_ACTOR,
   PACKAGE_EXPIRY_AGENT,
@@ -523,6 +526,27 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
   // 0064's argument for the statements, inherited), so what the cron buys is that the figures this build
   // REFUSES to produce are seen rather than silently rendered as zero (ADR 0073).
   CASH_FORECAST_JOB_DEFINITION,
+  // A-MEAS-03's dispatch consumer at every fifth minute, and the first cron here whose subject is an
+  // OUTBOUND queue rather than a report or a sweep. A cron and not a queue the enqueue announces, which is
+  // the opposite of what BUILD_DERIVATIVES_JOB and RECONCILE_DLR_JOB chose: a dispatch is a row the consent
+  // gate left in `queued`, and the reasons it is still there include "the far end was down for an hour"
+  // and "the consumer stopped" — neither of which an announcement can cover, because the announcement
+  // already happened. What has to be watched is the absence of a drain. Its declared interval in 0137 is
+  // 300 seconds, which is what makes the watchdog's "no success within twice the interval" mean something.
+  ANALYTICS_DISPATCH_JOB_DEFINITION,
+  // A-MEAS-05's producer, nightly at 03:17 — after trading closes at 02:00, so the trading date it uploads
+  // is COMPLETE. A conversion is not a figure that can be topped up: it is a new statement with its own
+  // event_id, so a pass over a day still in progress would upload the evening as a correction to the
+  // morning. It reports to `analytics_dispatch`' agent rather than declaring a second one, because the two
+  // passes are one pipeline — and the limit of sharing is stated in the job's own header and handed to
+  // A-MEAS-06, which owns the heartbeat and the watchdog for this dispatcher.
+  OFFLINE_CONVERSIONS_JOB_DEFINITION,
+  // A-MEAS-07's reconciliation at 04:23, AFTER the 03:17 upload and after the five-minute consumer has had
+  // time to drain it. The ordering is the design: a reconciliation that ran before the upload would report
+  // every offline conversion as missing, which is the same failure ZY472 refuses for a day that is still
+  // open. Its own agent and its own heartbeat row (0138), because a reconciliation nobody ran looks
+  // exactly like one that found nothing.
+  DISPATCH_RECONCILIATION_JOB_DEFINITION,
 ]
 
 /**
