@@ -529,6 +529,33 @@ export {
   type StoredBookingGrantRow,
 } from './repositories/booking-token.ts'
 export {
+  CAMPAIGN_AUDIT_ACTIONS,
+  CAMPAIGN_REFUSALS,
+  CAMPAIGN_SQLSTATE,
+  type CampaignOutcome,
+  type CampaignRecipientRow,
+  type CampaignRefusal,
+  type CampaignRow,
+  type CompiledSegmentQuery,
+  type CreateCampaignInput,
+  type CreateSegmentInput,
+  campaignRefusalOf,
+  claimCampaignRecipient,
+  createCampaign,
+  createSegment,
+  haltCampaign,
+  type LaunchCampaignInput,
+  launchCampaign,
+  readCampaignByKey,
+  readCampaignOutcome,
+  readSegmentByKey,
+  recountSegment,
+  type SegmentRecount,
+  type SegmentRow,
+  type SettleRecipientInput,
+  settleCampaignRecipient,
+} from './repositories/campaign.ts'
+export {
   CANCELLATION_REFUSALS,
   CANCELLATION_STATUSES,
   type CancelAppointmentInput,
@@ -5234,4 +5261,44 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // `expected_interval_seconds` 86400 and `budget_fils_per_run` 0: the pass reads this build's own tables
 // and performs no outbound call of any kind.
 //
-export const SCHEMA_VERSION = 142 as const
+// 154 is 0154_campaign_and_segment.sql (C-AUTO-10) — segments, campaigns, and a spend cap the DATABASE
+// enforces. Three tables: `customer_segment` (a definition document plus a DATED cached count),
+// `campaign` (a segment, a template, a cap and a schedule) and `campaign_recipient` (one contact's
+// outcome and the evidence it was lawful). Mirrored in `packages/db/src/schema/campaign.ts`, so
+// `pnpm db:drift` compares the two.
+//
+// The cap is the decision the rest follows from, and it is three layers rather than one.
+// `CampaignSpend` in `packages/messaging/src/send.ts` has checked a cap before every send since
+// C-AUTO-04, and that check holds a counter in ONE PROCESS: two workers draining one campaign each read
+// a spend of 400 of a 500 cap, each decide one more message fits, and both send — so the cap is exceeded
+// by exactly as many workers as are running. So `claim_campaign_recipient` reserves the estimate against
+// `cap_fils` and claims the next pending recipient in ONE statement under the campaign row's lock, which
+// closes the window; `campaign_spend_within_cap` is a CHECK, so the column cannot exceed the cap by any
+// route at all including a hand-written UPDATE; and ZY753 names the only two writers of `spent_fils`,
+// because a bounded column is still a column anything may move and the symptom of a hand-moved spend is
+// a recorded figure that is correct over sends nobody counted. That is the two-layer shape
+// `frequency_cap_value_is_a_cap()` has in 0080, with a third layer for the writer.
+//
+// `campaign_recipient_sent_row_is_answerable` is the acceptance line as a constraint: a `sent` row must
+// carry its gate decision, the id of the consent record the send rested on, its cost and its segment
+// count. A test asserting it would be a test about the rows that exist; the CHECK is a statement about
+// every row that ever will, which is what makes "which consent did this message go out under" one query.
+// `consent_record_id` is a plain uuid and NOT a foreign key, for `consent.contact_customer_id`'s stated
+// reason: the consent ledger is not joined to by reference, so an erasure cannot cascade a regulator's
+// evidence away.
+//
+// ZY755 makes a `sent` row immutable, and the consequence is deliberate rather than incidental: a
+// campaign that reached a provider can no longer be deleted at all, because the cascade from `campaign`
+// hits the refusal. A campaign that spent money and sent messages is the record of both.
+//
+// The promotional window is NOT in this migration. `messaging.promotional_window` is the ceiling and
+// `packages/core/src/messaging/promotional-window.ts` is the rule; a CHECK on `scheduled_at` would be a
+// second answer to when a message may be sent, and the symptom of two answers is a 21:30 campaign that
+// every screen says was compliant. No spend figure is written either: `cap_fils` is NOT NULL with no
+// default, and the AED 500 provisional lives in the F09 settings registry where it can say it is
+// provisional and reach the Unconfirmed Assumptions panel.
+//
+// ZY751 through ZY755 are used of the band ZY751-ZY760; ZY756 through ZY760 are released UNUSED and
+// deliberately unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
+//
+export const SCHEMA_VERSION = 154 as const

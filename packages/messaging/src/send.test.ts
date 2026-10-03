@@ -524,6 +524,45 @@ describe('encoding, cost and the campaign cap', () => {
     expect(() => new CampaignSpend(1.5)).toThrow(/whole number of fils/)
     expect(() => new CampaignSpend(-1)).toThrow(/whole number of fils/)
   })
+
+  /**
+   * C-AUTO-10 moved the ENFORCEMENT into the database — `claim_campaign_recipient` reserves against
+   * `campaign.cap_fils` and claims the recipient in one statement, because this object holds a counter
+   * in one process and two workers would each decide one more message fits. This object stayed, and the
+   * second constructor argument is what keeps it from becoming a SECOND statement of the cap: the sender
+   * builds it from `campaign.spent_fils`, so the refusal here and the reservation there are two readings
+   * of one number.
+   *
+   * The case below is what makes that argument load-bearing. Without it, a resumed campaign's choke
+   * point believes nothing has been spent, every per-message check passes, and the only thing still
+   * holding the cap is the database — which is the arrangement C-AUTO-10 deliberately does not have,
+   * because a cap invisible at the place a reader looks for it is a cap the next sender will not know
+   * about.
+   */
+  it('starts from the spend the campaign row already holds, not from zero', async () => {
+    const rate = smsSegmentPrice('smsala', 'GSM-7').fils
+    const cap = 2 * rate
+    // A campaign RESUMED after one message has already gone out: the row says `cap_fils` 2 and
+    // `spent_fils` 1, so exactly one message is left.
+    const campaign = new CampaignSpend(cap, rate)
+    const { ctx } = harness({ campaign })
+    const first = await sendMessage(ctx, requestFor(OFFER))
+    const second = await sendMessage(ctx, requestFor(OFFER))
+
+    // The REFUSAL first, so a failure names the rule rather than a figure: with the starting spend
+    // ignored, both sends succeed and this is the assertion that prints `campaign_cap_exceeded`. Gate
+    // case 186g reads it, and ADR 0003 is why rejection has to be assertable BY NAME.
+    expect(first.kind).toBe('sent')
+    expect(second).toMatchObject({ kind: 'blocked', reason: 'campaign_cap_exceeded' })
+    expect(campaign.spentFils).toBe(cap)
+    expect(new CampaignSpend(cap, rate).wouldExceed(rate)).toBe(false)
+    expect(new CampaignSpend(cap, rate).wouldExceed(rate + 1)).toBe(true)
+  })
+
+  it('refuses a starting spend that was computed rather than read', () => {
+    expect(() => new CampaignSpend(100, 1.5)).toThrow(/whole non-negative number of fils/)
+    expect(() => new CampaignSpend(100, -1)).toThrow(/whole non-negative number of fils/)
+  })
 })
 
 describe('provider failures arrive as named reasons, never as an exception', () => {

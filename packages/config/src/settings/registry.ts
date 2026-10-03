@@ -210,6 +210,35 @@ export const COMMISSION_ENABLED_SETTING_KEY = 'hr.commission_enabled'
  * both — and a second spelling is a reader that silently falls back to the declared default, which for
  * the percentage would be invisible because the fallback is a number.
  */
+/**
+ * The two campaign setting keys (C-AUTO-10).
+ *
+ * Spelled once here for the deposit keys' reason: `packages/db/src/settings/campaign.ts` reads them, the
+ * campaigns screen reads the second, and the Unconfirmed Assumptions panel lists both \u2014 and a second
+ * spelling is a reader that silently falls back to the declared default. For the cap that fallback would
+ * be invisible, because the fallback is a number and the number is a budget.
+ */
+export const CAMPAIGN_SPEND_CAP_FILS_SETTING_KEY = 'crm.campaign_spend_cap_fils'
+export const SEGMENT_COUNT_STALENESS_SECONDS_SETTING_KEY = 'crm.segment_count_staleness_seconds'
+
+/** Both, for a panel or a test that has to prove neither was forgotten. */
+export const CAMPAIGN_SETTING_KEYS = [
+  CAMPAIGN_SPEND_CAP_FILS_SETTING_KEY,
+  SEGMENT_COUNT_STALENESS_SECONDS_SETTING_KEY,
+] as const
+
+/** The open question both campaign settings stand in for. */
+export const CAMPAIGN_SPEND_CAP_OPEN_QUESTION_ID = 'Y6-sender-ids'
+
+/**
+ * AED 500 in fils, which is `build/manifest.yaml`'s provisional value for C-AUTO-10 and not a budget
+ * this build chose. 100 fils is AED 1 (ADR 0007).
+ */
+export const PROVISIONAL_CAMPAIGN_SPEND_CAP_FILS = 50_000
+
+/** Fifteen minutes, which is C-AUTO-10's own provisional value for the staleness window. */
+export const PROVISIONAL_SEGMENT_COUNT_STALENESS_SECONDS = 15 * 60
+
 export const DEPOSIT_ENABLED_SETTING_KEY = 'payments.deposit_enabled'
 export const DEPOSIT_PERCENT_BP_SETTING_KEY = 'payments.deposit_percent_bp'
 
@@ -615,6 +644,72 @@ export const SETTINGS = [
     provisional: {
       openQuestionId: 'Y9-frequency-cap',
       note: 'No figure supplied; 6 per rolling 30 days assumed.',
+    },
+  }),
+  /**
+   * The two campaign settings (C-AUTO-10), and both are provisional for different reasons.
+   *
+   * The CAP is a figure nobody has agreed. The STALENESS WINDOW is a figure nobody has agreed either, and
+   * it is here rather than hard-coded for a sharper reason: the number it governs is shown on a screen
+   * with a send button under it, and a window this build chose and did not declare would be a staleness
+   * judgement made on the owner's behalf about the size of their own marketing list.
+   */
+  define({
+    /**
+     * What one campaign may spend, in fils. **AED 500 gross per campaign**, and provisional.
+     *
+     * `build/manifest.yaml`'s own provisional value for C-AUTO-10 — *"default campaign spend cap AED 500
+     * gross per campaign, marked provisional"* — and not a figure this build chose. Nothing in the
+     * handover states a marketing budget; `Y6-sender-ids` is open, so no campaign can leave this build at
+     * all yet, and the number that matters on the day one can is the one somebody authorised.
+     *
+     * **It is a DEFAULT and not the cap.** `campaign.cap_fils` is NOT NULL with no default in migration
+     * 0154, so every campaign carries the cap it was created with and changing this can never alter a
+     * campaign that is already running. That is PACKAGE_VALIDITY_MONTHS' arrangement and its reason: a
+     * setting that could move a cap mid-send would be a budget that changed under a send nobody
+     * re-authorised.
+     *
+     * `operational` and OWNER_MANAGER: it is a marketing budget, which is the manager's to set and the
+     * owner's to overrule, and it has no compliance consequence — the thing with a compliance consequence
+     * is the promotional window above, which is `compliance_locked`. `invalidates: []` because nothing is
+     * prerendered from it.
+     */
+    key: CAMPAIGN_SPEND_CAP_FILS_SETTING_KEY,
+    tier: 'operational',
+    schema: z.number().int().min(0).max(10_000_000),
+    defaultValue: PROVISIONAL_CAMPAIGN_SPEND_CAP_FILS,
+    label: 'Default campaign spend cap (fils)',
+    help: 'What a new campaign is created with as its ceiling, in fils \u2014 100 fils is AED 1. The cap is copied onto the campaign when it is created and enforced by the database from then on, so changing this never alters a campaign that has already launched. A campaign that reaches its cap stops and holds the rest of its list.',
+    editableBy: OWNER_MANAGER,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: CAMPAIGN_SPEND_CAP_OPEN_QUESTION_ID,
+      note: 'AED 500 gross per campaign assumed, which is build/manifest.yaml\u2019s own provisional value for C-AUTO-10 and not a budget anybody has stated. Nothing in the handover names a marketing spend. Y6-sender-ids is open, so no campaign can leave this build yet; the figure matters on the day one can, and until then a cap this build invented must be visibly an assumption rather than a configured budget (brief rule 15).',
+    },
+  }),
+  define({
+    /**
+     * How old a segment's cached count may be before a screen must call it stale. **15 minutes.**
+     *
+     * C-AUTO-10's own provisional value — *"segment cached-count staleness window 15 minutes with the
+     * timestamp shown next to the number rather than hidden"*. The second half of that sentence is the
+     * part this setting cannot enforce, and `segmentCountFreshness` in `@berelax/core` is what does:
+     * it returns the AGE on both verdicts, so a caller that has the verdict has the age and there is
+     * nothing for a screen to omit without omitting the number too.
+     */
+    key: SEGMENT_COUNT_STALENESS_SECONDS_SETTING_KEY,
+    tier: 'operational',
+    schema: z.number().int().min(60).max(86_400),
+    defaultValue: PROVISIONAL_SEGMENT_COUNT_STALENESS_SECONDS,
+    label: 'Segment count staleness window (seconds)',
+    help: 'How old a segment\u2019s cached contact count may be before the screen shows it as stale. The count is always shown with the instant it was taken, whichever side of this it falls on \u2014 a count with no date is a number beside a send button with nothing saying how old it is.',
+    editableBy: OWNER_MANAGER,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: CAMPAIGN_SPEND_CAP_OPEN_QUESTION_ID,
+      note: '15 minutes assumed, which is build/manifest.yaml\u2019s own provisional value for C-AUTO-10. Nobody has said how current a recipient count has to be before a send, and the answer depends on how fast this list changes \u2014 which nobody can know before the business has run a campaign.',
     },
   }),
   /**

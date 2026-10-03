@@ -491,7 +491,7 @@ async function attempt(
  * ledger row is a promotional send that spent no allowance, and a ledger row with no message is an
  * allowance spent on nothing.
  */
-function ledgerBackedStore(
+export function ledgerBackedStore(
   sql: Sql,
   attribution: FrequencyLedgerAttribution,
   attemptedAtIso: string,
@@ -523,11 +523,23 @@ export function sendKeyFor(key: {
   return `flow:${key.runId}:${key.nodeId}:${key.channel}:${key.contactCustomerId}`
 }
 
-/** The suppression key kind a channel is listed under. `phone` for sms/whatsapp, `email` for email. */
-const keyKindFor = (channel: MessageChannel): string => (channel === 'email' ? 'email' : 'phone')
+/**
+ * The suppression key kind a channel is listed under. `phone` for sms/whatsapp, `email` for email.
+ *
+ * Exported for the campaign sender (C-AUTO-10), which keys the same three evaluators the same way. A
+ * second spelling of this mapping is one of the three evaluators looked up under the wrong key, which
+ * makes it throw and the send `blocked_unevaluable` — a refusal that reads as a compliance decision.
+ */
+export const keyKindFor = (channel: MessageChannel): string =>
+  channel === 'email' ? 'email' : 'phone'
 
-/** The contact's address for this channel. Only the phone exists in this schema today. */
-async function recipientFor(sql: Sql, customerId: string): Promise<string | null> {
+/**
+ * The contact's address for this channel. Only the phone exists in this schema today.
+ *
+ * Exported for the campaign sender's reason above: one reading of "what address does this contact have",
+ * so a campaign and a flow cannot disagree about whether there is somebody to send to.
+ */
+export async function recipientFor(sql: Sql, customerId: string): Promise<string | null> {
   const [row] = await sql<{ phone: string | null }[]>`
     select phone_e164 as phone from customer where id = ${customerId}::uuid
   `

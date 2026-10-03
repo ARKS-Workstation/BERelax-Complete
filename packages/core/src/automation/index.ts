@@ -5,6 +5,8 @@
  * the versioned rows are `@berelax/db`'s (`schema/flow.ts`, `repositories/flow.ts`), which reads this
  * validator through an injected function because it may not import this package.
  */
+export * from './campaign.ts'
 export * from './dsl.ts'
+export * from './segment-compile.ts'
 export * from './static-analysis.ts'
 export * from './step-plan.ts'

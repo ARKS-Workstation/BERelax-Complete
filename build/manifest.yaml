@@ -9942,7 +9942,7 @@ units:
       than only at launch, and refuse to be scheduled outside 07:00-21:00 Asia/Dubai. A campaign still running
       at 21:00 stops at the boundary and holds the remainder.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - C-AUTO-03
@@ -9972,6 +9972,15 @@ units:
     - packages/core/src/automation/segment-compile.ts
     - apps/worker/src/automation/campaign-sender.ts
     - apps/web/app/(admin)/crm/campaigns/
+    note: 'The campaigns screen is READ-ONLY: it shows every campaign with its segment''s DATED contact
+      count, its pre-launch estimate, what it has spent of its cap and how its recipients ended, and it
+      has no POST. Creating, estimating and launching a campaign belong to the sender and the API, because
+      a screen that could launch one would be a second place the spend cap and the promotional window are
+      decided - which is what migration 0154''s one-statement reservation and promotional-window.ts exist
+      to stop there being. No campaign can leave this build at all while Y6-sender-ids is open. The
+      authoring-time window refusal and the clinical-schema refusal are asserted in the two core unit
+      suites rather than in the integration suite, because both are judgements about a document and need
+      no database.'
   - id: C-AUTO-11
     order: 84
     title: Stock journeys - review solicitation, win-back, birthday - and the M3 proof

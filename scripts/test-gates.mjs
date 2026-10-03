@@ -56484,6 +56484,280 @@ export function chargebackNetEffectFils(`,
   }
 }
 
+// 186a-186z. (C-AUTO-10) The spend cap shown to be the DATABASE's, the clinical refusal shown to be
+//            three independent layers, and the 21:00 boundary shown to be asked per message.
+//
+//            The unit's claim is that a cap in application code is a cap until two workers run. Three
+//            things defend it — the one-statement reservation, the CHECK underneath it and ZY753 above
+//            it — and the registry entry for ZY753 is what makes the third one findable, so a case here
+//            removes the raise from the migration and requires `pnpm sqlstate` to notice.
+//
+//            Every case is a mutation a reviewer would wave through: a schema check reordered, a layer
+//            that "cannot fire anyway" deleted, a window verdict asked once instead of per message. Each
+//            leaves a system that WORKS, which is why none of them would be caught by a review.
+//
+//            186a to 186f run the two unit suites and are fast. 186g onwards drive the integration suite
+//            or a repository gate.
+{
+  const SEGMENT_TS = 'packages/core/src/automation/segment-compile.ts'
+  const SEGMENT_TEST = 'packages/core/src/automation/segment-compile.test.ts'
+  const CAMPAIGN_TS = 'packages/core/src/automation/campaign.ts'
+  const CAMPAIGN_TEST = 'packages/core/src/automation/campaign.test.ts'
+  const SENDER_TS = 'apps/worker/src/automation/campaign-sender.ts'
+  const CAMPAIGN_SQL = 'packages/db/migrations/0154_campaign_and_segment.sql'
+  const CAMPAIGN_ITEST = 'packages/fixtures/src/campaign.itest.ts'
+  const CHOKE_POINT_TS = 'packages/messaging/src/send.ts'
+  const CHOKE_POINT_TEST = 'packages/messaging/src/send.test.ts'
+  const campaignUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const campaignIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // The control for the whole block. Every case asserts that a BROKEN tree is caught, and that says
+  // nothing unless the committed tree passes.
+  {
+    const clean = run('pnpm', campaignUnit(SEGMENT_TEST))
+    check(
+      'campaign: the committed segment suite passes, which is the control for 186a to 186c',
+      !clean.failed,
+      `the segment suite does not pass on the committed tree:\n${clean.output}`,
+    )
+    const window = run('pnpm', campaignUnit(CAMPAIGN_TEST))
+    check(
+      'campaign: the committed campaign suite passes, which is the control for 186d to 186f',
+      !window.failed,
+      `the campaign suite does not pass on the committed tree:\n${window.output}`,
+    )
+  }
+
+  /*
+    186a. The schema check moved BELOW the registry lookup.
+
+    Not deleted — reordered, which is the version that survives a review because every refusal still
+    fires. `clinical.contraindication_flag.flag_key` is both outside the permitted schemas and
+    unregistered, so with the order swapped it is reported as `segment-unknown-attribute` and a reader
+    goes looking for a typo in a reference whose problem is exactly that it is understood. The mutation
+    makes the schema branch unreachable by returning the unknown-attribute refusal first.
+  */
+  checkRejectedBy(
+    'campaign: 186a a clinical reference reported as merely unknown is caught',
+    withEditedFile(
+      SEGMENT_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '    if (!isPermittedSchema(parsed.schema)) {',
+          '    if (false as boolean) {',
+        ),
+      () => runExpectingFailure('pnpm', campaignUnit(SEGMENT_TEST)),
+    ),
+    'segment-attribute-outside-the-permitted-schemas',
+  )
+
+  /*
+    186b. The registry-fault layer answering "clean" unconditionally.
+
+    This is the layer the other two cannot see. Layers 1 and 2 are both about what a DEFINITION may say;
+    neither has anything to say about what somebody adds to `SEGMENT_ATTRIBUTES`, and an entry naming the
+    clinical schema would leave every refusal passing while the compiler emitted a join into it. The
+    plausible wrong implementation is exactly this: a filter nobody expects to match.
+  */
+  checkRejectedBy(
+    'campaign: 186b a registry check that can never report a fault is caught',
+    withEditedFile(
+      SEGMENT_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '    .filter(([, attribute]) => !isPermittedSchema(attribute.schema))',
+          '    .filter(() => false)',
+        ),
+      () => runExpectingFailure('pnpm', campaignUnit(SEGMENT_TEST)),
+    ),
+    'segment-registry-entry-outside-the-permitted-schemas',
+  )
+
+  /*
+    186c. The count query written separately from the rows query.
+
+    The acceptance line is that the cached count equals a live recount, and that equality is only worth
+    asserting while the number a screen shows and the set a send enumerates are the SAME predicate. A
+    separately composed count is the shape that drifts, and it drifts silently: the two agree on the day
+    it is written. The mutation is the plausible one — count every contact, since the segment is "just a
+    filter" — and the suite's own assertion is that `count.text` CONTAINS `rows.text`.
+  */
+  checkRejectedBy(
+    'campaign: 186c a count query that is not the rows query is caught',
+    withEditedFile(
+      SEGMENT_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '      text: `select count(*)::int as "count" from (\\n${rowsText}\\n    ) as matched`,',
+          '      text: `select count(*)::int as "count" from customer`,',
+        ),
+      () => runExpectingFailure('pnpm', campaignUnit(SEGMENT_TEST)),
+    ),
+    'compileSegment',
+  )
+
+  /*
+    186d. A schedule accepted whatever the window says.
+
+    The plausible wrong implementation, and the one a reviewer reads as a simplification: the gate holds
+    an out-of-window message anyway, so why refuse at authoring time? Because a held campaign is
+    indistinguishable from a campaign nobody scheduled, which is how "the February campaign went to
+    nobody" becomes unanswerable.
+  */
+  checkRejectedBy(
+    'campaign: 186d a 22:30 schedule accepted rather than refused is caught',
+    withEditedFile(
+      CAMPAIGN_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (decision.kind === 'open') {\n    return { kind: 'accepted', scheduledAt: args.at, hours: decision.hours }\n  }",
+          "  if (decision.kind === 'open' || decision.kind === 'queue') {\n    return { kind: 'accepted', scheduledAt: args.at, hours: args.ceiling }\n  }",
+        ),
+      () => runExpectingFailure('pnpm', campaignUnit(CAMPAIGN_TEST)),
+    ),
+    'campaign-scheduled-outside-the-promotional-window',
+  )
+
+  /*
+    186e. The refusal carrying the HOURS instead of the next valid instant.
+
+    The mutation that leaves a working, readable refusal and makes it useless in the one case it matters:
+    an author told "07:00-21:00" at 22:30 on the night before a narrowed day schedules 07:00 and is
+    refused again, because the narrowing is a dated row they cannot see. `nextPromotionalOpen` already
+    resolves the overrides on every day it looks at, which is why the answer is an INSTANT.
+  */
+  checkRejectedBy(
+    'campaign: 186e a refusal that names the hours rather than the next valid instant is caught',
+    withEditedFile(
+      CAMPAIGN_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '      nextValidInstant: decision.releaseAt,',
+          '      nextValidInstant: args.at,',
+        ),
+      () => runExpectingFailure('pnpm', campaignUnit(CAMPAIGN_TEST)),
+    ),
+    'nextValidInstant',
+  )
+
+  /*
+    186f. The send-time boundary answering "open" for a closed window.
+
+    `campaignSendWindowVerdict` exists only because the SCHEDULE cannot answer for the next message: a
+    campaign scheduled at 20:55 is legitimate and nothing about it is wrong at 21:00. The mutation is the
+    one that makes the whole function inert while every other case still passes.
+  */
+  checkRejectedBy(
+    'campaign: 186f a 21:00 boundary that never halts is caught',
+    withEditedFile(
+      CAMPAIGN_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (decision.kind === 'open') return { kind: 'open', hours: decision.hours }",
+          "  if (decision.kind !== 'expire') return { kind: 'open', hours: args.ceiling }",
+        ),
+      () => runExpectingFailure('pnpm', campaignUnit(CAMPAIGN_TEST)),
+    ),
+    'campaignSendWindowVerdict',
+  )
+
+  /*
+    186g. The choke point's cap check forgetting what has already been spent.
+
+    `new CampaignSpend(capFils)` instead of `new CampaignSpend(capFils, spentFils)` compiles, because the
+    second argument defaults to zero — and this is the mutation in the class itself, which is where the
+    claim lives: a resumed campaign's choke point then believes nothing has been spent, every per-message
+    check passes, and the only thing still holding the cap is the database. That is the arrangement
+    C-AUTO-10 deliberately does NOT have (ADR 0108): the choke point's check stays and reads the row's
+    figure, so the cap is visible at the place a reader looks for it.
+  */
+  checkRejectedBy(
+    'campaign: 186g a choke-point cap check that forgets what has been spent is caught',
+    withEditedFile(
+      CHOKE_POINT_TS,
+      (text) => replaceOnce(text, '    this.spent = spentFils', '    this.spent = 0'),
+      () => runExpectingFailure('pnpm', campaignUnit(CHOKE_POINT_TEST)),
+    ),
+    'campaign_cap_exceeded',
+  )
+
+  /*
+    186h. A sent recipient settled with no gate decision.
+
+    The acceptance line is that a regulator question is answerable from one query, and the plausible
+    wrong implementation is a null: the gate allowed it, so there is nothing to record. The database
+    refuses the row (`campaign_recipient_sent_row_is_answerable`), which is what makes this case fail at
+    the INSERT rather than at an assertion somebody could delete.
+  */
+  checkRejectedBy(
+    'campaign: 186h a sent recipient row with no gate decision is caught',
+    withEditedFile(
+      SENDER_TS,
+      (text) => replaceOnce(text, "      gateDecision: 'allow',", '      gateDecision: null,'),
+      () => runExpectingFailure('pnpm', campaignIntegration(CAMPAIGN_ITEST)),
+    ),
+    'campaign_recipient_sent_row_is_answerable',
+  )
+
+  /*
+    186i. ZY753 removed from the migration.
+
+    The layer whose absence is invisible: the CHECK still bounds the column and the reservation is still
+    one statement, so every behavioural assertion about the cap passes. What stops being true is that
+    `spent_fils` has two writers — and the registry entry is what makes that findable, so `pnpm sqlstate`
+    is the gate that notices. This is also the control on the registry entry itself: an entry for a code
+    no migration raises is refused, which is the direction that lets the registry shrink.
+  */
+  checkRejectedBy(
+    'campaign: 186i the ZY753 raise removed from the migration is caught',
+    withEditedFile(
+      CAMPAIGN_SQL,
+      (text) =>
+        replaceOnce(text, "      using errcode = 'ZY753';", "      using errcode = 'ZY759';"),
+      () => runExpectingFailure('pnpm', ['sqlstate']),
+    ),
+    'ZY753',
+  )
+
+  /*
+    186j. A cap that binds and does not halt the campaign.
+
+    The quiet one, and the reason `claim_campaign_recipient` returns the recipient it HELD rather than
+    nothing: a worker that got nothing back cannot tell "the cap bound" from "there was nothing left".
+    With the halt removed the drain keeps claiming, each claim holds the next recipient with
+    `cap_exceeded`, the campaign stays `running` for ever and the recorded spend is correct the whole
+    time — so nothing looks wrong and nobody is told the budget ran out. The mutation is the plausible
+    simplification: the recipient is already held, so carry on.
+  */
+  checkRejectedBy(
+    'campaign: 186j a cap that binds without halting the campaign is caught',
+    withEditedFile(
+      SENDER_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "          reason: 'spend_cap_reached',\n          detail:",
+          "          reason: 'operator',\n          detail:",
+        ),
+      () => runExpectingFailure('pnpm', campaignIntegration(CAMPAIGN_ITEST)),
+    ),
+    'spend_cap_reached',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
