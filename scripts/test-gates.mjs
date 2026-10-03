@@ -60948,6 +60948,186 @@ export function chargebackNetEffectFils(`,
   )
 }
 
+// 192a-192z. (A-FIRST-10) The /analytics dashboard: every way a figure could come to be shown that
+//            nothing produced, and every way a gap could come to read as a nought.
+//
+//            This unit ships one screen and no new rows, so every defect available to it is a defect in a
+//            NUMBER or in the order numbers are printed in — and each of the six below leaves a page that
+//            renders, looks right and is wrong. A time-of-day chart sorted by hour is the one worth
+//            stating: it is the obvious thing to write, it produces a chart with all fifteen of the right
+//            buckets in it, and it puts midnight and 01:00 at the front with a nine-hour hole after them.
+//            Nothing errors. The reader sees a quiet evening.
+//
+//            The other five are the same shape. An attribute emitted as `0` for a panel with nothing
+//            measured, a share printed as 0% where there is no denominator, a panel dropped from the
+//            spine, a region that lost its label, and a permission widened to one the front desk holds:
+//            every one is a smaller diff than the comment explaining it.
+//
+//            192a to 192d run the render suite and are fast. 192e and 192f drive the integration suite,
+//            which needs a database, and are narrowed with `-t` so neither pays for the screenshot matrix.
+{
+  const PANEL = 'apps/web/app/(admin)/analytics/panels/panel.ts'
+  const TIME_OF_DAY = 'apps/web/app/(admin)/analytics/panels/time-of-day.ts'
+  const QUERIES = 'apps/web/app/(admin)/analytics/queries.ts'
+  const ROUTE = 'apps/web/app/(admin)/analytics/route.ts'
+  const RENDER_SUITE = 'apps/web/src/analytics-page-render.test.ts'
+  const PAGE_ITEST = 'apps/web/src/analytics-page.itest.ts'
+  const renderSuite = () => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', RENDER_SUITE]
+  const pageItest = (name) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    PAGE_ITEST,
+    '-t',
+    name,
+  ]
+
+  // The control for the whole block. Every case below asserts that a BROKEN tree is caught, and that says
+  // nothing unless the committed tree passes.
+  {
+    const committed = run('pnpm', renderSuite())
+    check(
+      'analytics: the committed render suite passes, which is the control for 192a to 192d',
+      !committed.failed,
+      `the /analytics render suite does not pass on the committed tree:\n${committed.output}`,
+    )
+  }
+
+  /*
+    192a. The hourly buckets sorted by hour.
+
+    The mutation nobody would review as a defect — a chart ought to be in order, and `11, 12, … 23, 0, 1`
+    does not look like one. It is: the premises is open across midnight, so the trading order IS the order,
+    and sorting puts the two quietest hours of the night at the front followed by a nine-hour gap the
+    business was shut for. Every bucket is present, every figure is right, and the chart is unreadable.
+  */
+  checkRejectedBy(
+    'analytics: 192a an hourly chart re-sorted into calendar order is caught',
+    withEditedFile(
+      TIME_OF_DAY,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const rows = panel.buckets\n    .map((bucket: HourBucket, index: number) => {',
+          '  const rows = [...panel.buckets]\n    .toSorted((a, b) => a.hour - b.hour)\n' +
+            '    .map((bucket: HourBucket, index: number) => {',
+        ),
+      () => runExpectingFailure('pnpm', renderSuite()),
+    ),
+    'does not re-sort what it is given',
+  )
+
+  /*
+    192b. A panel with nothing measured given a headline of nought.
+
+    `data-headline` absent is what says "nothing was measured"; `data-headline="0"` says the figure is
+    nought. The two are different facts (ADR 0002) and the attribute is what a test compares, so this
+    mutation makes a day with no data indistinguishable from a day the funnel failed — and it makes the
+    headline comparison pass by comparing nought against nought.
+  */
+  checkRejectedBy(
+    'analytics: 192b a no-data panel that emits a headline of nought is caught',
+    withEditedFile(
+      PANEL,
+      (text) =>
+        replaceOnce(
+          text,
+          '    ...(value === null ? [] : [`data-headline="${value}"`]),',
+          '    `data-headline="${value ?? 0}"`,',
+        ),
+      () => runExpectingFailure('pnpm', renderSuite()),
+    ),
+    'omits the attribute entirely for a panel with no figure',
+  )
+
+  /*
+    192c. A share printed for a row with no denominator.
+
+    One cell, and the row it appears on is the one the full outer join exists for: a tuple with a
+    conversion and no sessions. `0.0%` there reports that the source converted nobody, which is the
+    opposite of what the row holds, and `Math.round((n * 1000) / 0)` is `Infinity` rather than an error.
+  */
+  checkRejectedBy(
+    'analytics: 192c a share cell that prints 0% where there is no denominator is caught',
+    withEditedFile(
+      PANEL,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (denominator <= 0) return \'<td class="num">—</td>\'\n  const perMille = Math.round((numerator * 1000) / denominator)',
+          '  const perMille = denominator <= 0 ? 0 : Math.round((numerator * 1000) / denominator)',
+        ),
+      () => runExpectingFailure('pnpm', renderSuite()),
+    ),
+    'renders an em dash and never 0% for a row with no denominator',
+  )
+
+  /*
+    192d. A panel dropped from the spine.
+
+    The spine is what the page renders from AND what the suite counts, which is the arrangement that makes
+    "all nine panels render" a check. Dropping an id removes the panel from the page and from the count at
+    once, so every other assertion in the file still passes — the data-quality strip, which is the panel
+    that says whether anything else can be believed, simply is not there.
+  */
+  checkRejectedBy(
+    'analytics: 192d a spine that lost a panel, and with it the count that would notice, is caught',
+    withEditedFile(
+      QUERIES,
+      (text) => replaceOnce(text, "  'data-quality',\n] as const", '] as const'),
+      () => runExpectingFailure('pnpm', renderSuite()),
+    ),
+    'declares nine, which is the control for every case below',
+  )
+
+  /*
+    192e. The permission widened to one the front desk holds.
+
+    `settings:read` is in `RECEPTIONIST_PERMISSIONS`, so this one word opens a screen showing what every
+    visitor paid to every signed-in member of staff. Nothing errors, every figure is correct, and the
+    audit row that would have recorded the refusal is never written because there is no refusal.
+  */
+  checkRejectedBy(
+    'analytics: 192e a dashboard permission widened to one the receptionist holds is caught',
+    withEditedFile(
+      ROUTE,
+      (text) =>
+        replaceOnce(
+          text,
+          "export const ANALYTICS_PERMISSION: Permission = 'report:read'",
+          "export const ANALYTICS_PERMISSION: Permission = 'settings:read'",
+        ),
+      () => runExpectingFailure('pnpm', pageItest('answers 403 to a receptionist')),
+    ),
+    'answers 403 to a receptionist and writes the denial to audit_event',
+  )
+
+  /*
+    192f. The refusal that writes nothing.
+
+    The 403 stays, so the screen is still closed and every behavioural assertion about the refusal passes.
+    What goes is the only record that somebody tried — which is the half of the acceptance line that is
+    about the insider-threat trail rather than about access control, and the half whose absence looks
+    exactly like nobody having tried.
+  */
+  checkRejectedBy(
+    'analytics: 192f a refusal that answers 403 and records nothing is caught',
+    withEditedFile(
+      ROUTE,
+      (text) =>
+        replaceOnce(
+          text,
+          '      await withSql(async (sql) => await recordDenial(sql, principal))\n',
+          '',
+        ),
+      () => runExpectingFailure('pnpm', pageItest('answers 403 to a receptionist')),
+    ),
+    'answers 403 to a receptionist and writes the denial to audit_event',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

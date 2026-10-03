@@ -232,6 +232,36 @@ export const ROUTES = [
       'well.',
   },
   {
+    id: 'admin-analytics',
+    path: '/analytics',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      "A-FIRST-10's first-party funnel dashboard: nine panels over one trading date, every figure this " +
+      "build's own measurement rather than an advertising platform's. A handler answering text/html " +
+      'rather than a document, for the reason the till, the diary, the Messages inbox, the compliance ' +
+      'calendar and the SEO suggestion queue all give: a registry document must be served in BOTH ' +
+      'locales, which needs an Arabic admin document and the W-SYS-01 shell, and it would join a ' +
+      'screenshot matrix whose RTL half has to be a real Arabic route. Dynamic, and ?date=YYYY-MM-DD is ' +
+      'REQUIRED with no default: a page answering for "today" answers a different question every day, so ' +
+      'a link to it could not be cited and the pixel-diff acceptance line could not be repeated. NO ' +
+      'sampleParams, although the path takes a query: the trading dates that exist depend on which days ' +
+      'the calendar holds, and a sample date would be a URL the harness opened against a day that may ' +
+      'have no rows. It READS only - there is no POST - and it IS authenticated through ' +
+      '`guardAdminRoute`, refusing on the F07 matrix unless the role holds `report:read`, with the ' +
+      "refusal written to audit_event as `operation: 'denied'`. There is deliberately no ?role= and " +
+      'nothing but the date acted on from the query string, which is what keeps it on the right side of ' +
+      "W-SYS-11's scan. The /analytics prefix in ADMIN_GROUP_PREFIXES is what makes it noindex - it has " +
+      'been in that list since W-SITE-08, serving the header on the 404 this path used to be - and it ' +
+      'states noindex on its own response and in its own document as well. It shows no customer name, no ' +
+      'phone number and no therapist name: every figure on it is an aggregate over sessions, and the ' +
+      'money on it is a sum per origination tuple.',
+  },
+  {
     id: 'collect',
     path: '/api/collect',
     kind: 'handler',

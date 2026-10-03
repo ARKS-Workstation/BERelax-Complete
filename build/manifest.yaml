@@ -13276,7 +13276,12 @@ units:
       bot-flagged sessions from the funnel is deferred to A-FIRST-09 — DEFERRAL SATISFIED: its
       funnelCountRows excludes bot sessions by default and includes them behind an explicit parameter,
       and the steps are MATERIALISED either way so the verdict stays recoverable. The bot-filtered share on the analytics page
-      is deferred to A-FIRST-10, and the same figure on the operations dashboard is deferred to R-REP-07. Each
+      is deferred to A-FIRST-10 — DEFERRAL SATISFIED: the data-quality strip on /analytics renders it from
+      analytics.daily_traffic.bot_sessions over sessions, with both integers visible and `no data` rather
+      than 0% for a date with no sessions, and every other panel on that page excludes the flagged sessions
+      through the one predicate funnelCountRows and the session reads already use. It re-derives nothing:
+      no crawler name and no BOT_KINDS member appears anywhere under app/(admin)/analytics —
+      and the same figure on the operations dashboard is deferred to R-REP-07. Each
       must call classifyBot and store its verdict rather than re-deriving a flag — BOT_KINDS and
       AI_CRAWLER_BOT_KINDS are exported from @berelax/core and @berelax/shared for exactly that — and the scan in
       apps/web/src/crawler-policy.test.ts refuses a crawler name written at any of those call sites. Two shapes
@@ -13952,7 +13957,7 @@ units:
       and breakpoint split, time-of-day conversion across the 11:00–02:00 window, revenue by source joined
       to paid bookings, and a data-quality strip showing bot-filtered share and ref-capture rate.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - A-FIRST-09
@@ -13969,11 +13974,54 @@ units:
       visible, and renders 'no data' rather than 0% when no codes were issued
     - axe reports zero serious or critical violations, and screenshots at 3 viewports × 2 themes × 2 directions
       produce zero pixel diff on a second run
+    - 'NOTE: the screen is a route handler returning bytes (route.ts + render.ts), not a page.tsx. The
+      reason the till, the diary, the Messages inbox, the compliance calendar, the SEO suggestion queue and
+      A-MEAS-07''s revenue panel all record: apps/web/src/routes/registry.ts is in exact bijection with the
+      filesystem and requires every DOCUMENT to be served in BOTH locales, which would need an Arabic admin
+      document and the W-SYS-01 shell. The panels are .ts for the same reason, which is the deviation
+      A-MEAS-07 already recorded for panels/revenue-by-source.ts.'
+    - 'NOTE: ?date=YYYY-MM-DD is REQUIRED and has no default, which M-VAT-12''s ?period= records the reason
+      for: a page answering for "today" answers a different question every day, so a link to it could not be
+      cited and the pixel-diff acceptance line could not be repeated. ?dir=rtl mirrors the layout, which is
+      the till''s and the quick-book screen''s arrangement, and is what the RTL half of the capture matrix
+      renders.'
+    - 'NOTE: the acceptance list says Playwright and the suite is apps/web/src/analytics-page.itest.ts
+      rather than apps/web/e2e/analytics-page.spec.ts. It drives Playwright through H04''s
+      createCaptureHarness, which renders the document with page.setContent and needs no server — so the
+      allocated test port band is released unused. Driving a next start instead would have bought nothing:
+      the page is pure, and the three things a server could add (the response headers, the 303 for a
+      sessionless request and the 403 for a receptionist) are asserted against the route''s own GET called
+      directly with a minted ADMIN_SESSION_COOKIE.'
+    - 'NOTE: the revenue panel reads analytics.daily_source_revenue and is a DIFFERENT panel from A-MEAS-07''s
+      panels/revenue-by-source.ts. This one is money that arrived, joined to the attributed session; that one
+      is whether what was PUSHED to an advertising destination reconciles with internal truth. Two questions
+      that would be one number on a careless dashboard, so they are two panels and the page renders only the
+      first — the dispatch reconciliation belongs on A-MEAS-07''s own surface.'
+    - 'NOTE: the cohort the integration suite asserts against is its OWN, inserted inside a transaction that
+      is always rolled back, because analytics.event and analytics.funnel_step are append-only for every role
+      but berelax_retention (ZY065) — a cohort left behind would make every figure this file asserts grow and
+      the suite would pass once. The seed creates no analytics session, so "on the seeded fixture" is read as
+      "on the seeded CALENDAR": the trading date is the newest business_day that has closed, and the fifteen
+      hourly buckets are generated from that row rather than written down.'
+    - 'NOTE: migration 0160 and ADR 0114 are released unused. No row is added — every table this screen reads
+      exists (0096, 0125, 0150, 0151) — and no decision is locked that ADR 0002 (a gap is not a nought),
+      ADR 0007 (integer fils, the 11:00-02:00 trading day) and ADR 0066 (the visitor row is created at
+      consent, so a pre-consent landing contributes to no session) do not already state. SQLSTATE
+      ZY811-ZY820 is released unregistered: no migration here raises one, and an entry for a code nothing
+      raises is refused.'
     files:
-    - apps/web/app/(admin)/analytics/page.tsx
-    - apps/web/app/(admin)/analytics/panels/*.tsx
+    - apps/web/app/(admin)/analytics/route.ts
+    - apps/web/app/(admin)/analytics/render.ts
     - apps/web/app/(admin)/analytics/queries.ts
-    - apps/web/e2e/analytics-page.spec.ts
+    - apps/web/app/(admin)/analytics/panels/panel.ts
+    - apps/web/app/(admin)/analytics/panels/funnel.ts
+    - apps/web/app/(admin)/analytics/panels/tables.ts
+    - apps/web/app/(admin)/analytics/panels/time-of-day.ts
+    - apps/web/app/(admin)/analytics/panels/data-quality.ts
+    - apps/web/src/analytics-page-render.test.ts
+    - apps/web/src/analytics-page.itest.ts
+    - apps/web/src/routes/registry.ts
+    - scripts/test-gates.mjs
   - id: A-MEAS-01
     order: 114
     title: 'Egress guard: opaque category codes with an enumerating test'
