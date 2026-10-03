@@ -42,6 +42,9 @@ import {
   OBLIGATION_ESCALATION_OFFSETS_SETTING_KEY,
   OBLIGATION_REMINDER_OFFSETS_SETTING_KEY,
   OUTBOX_LAG_THRESHOLD_SETTING_KEY,
+  PARALLEL_RUN_WINDOW_END_SETTING_KEY,
+  PARALLEL_RUN_WINDOW_OPEN_QUESTION_ID,
+  PARALLEL_RUN_WINDOW_START_SETTING_KEY,
   PLACEHOLDER_WPS_AGENT_ID,
   PLACEHOLDER_WPS_EMPLOYER_ID,
   PROVISIONAL_EXPIRING_SOON_DAYS,
@@ -1719,6 +1722,62 @@ export const SETTINGS = [
         'marks the regulation and its executive regulations UNVERIFIED and names the breach notification ' +
         'deadline as one of the things to confirm. Which authority it is owed to is also not on file, ' +
         'which is why obligation.authority is null on both breach duties (Y1-entity).',
+    },
+  }),
+  define({
+    key: PARALLEL_RUN_WINDOW_START_SETTING_KEY,
+    tier: 'operational',
+    /*
+      An ISO date or THE EMPTY STRING, and the empty string is the decision.
+
+      Every other provisional setting in this registry carries the build's strictest reading of
+      something: a deadline, a threshold, a mode. A DATE has no strictest reading — every candidate is
+      equally made up — and this one decides which days the paper sheet and the system are compared
+      over. Blank is visibly unanswered and a plausible date is indistinguishable from a configured one
+      (brief rule 15), so the unset value is blank and `readParallelRunWindow` in `@berelax/db` refuses
+      rather than reconciling zero days: "0 days, no variance" reads exactly like a parallel run in
+      which everything agreed.
+
+      The empty string rather than null because `app_setting.value` is `not null` and the seeder writes
+      one row per definition — a null default is a setting that cannot be seeded at all, which is how
+      this was found: the global setup for the integration suite failed on the insert.
+    */
+    schema: z.union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]),
+    defaultValue: '',
+    label: 'Parallel-run window: first trading date',
+    help: 'The first trading date on which the paper day sheet and this system are both recording. Until this is set, the daily parallel-run reconciliation refuses to report any day rather than reporting no variance.',
+    // The owner's: it decides the period a cutover is judged over, and the manager is the person whose
+    // desk the comparison is about.
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: PARALLEL_RUN_WINDOW_OPEN_QUESTION_ID,
+      note:
+        'NOT SET, and not guessed. Nobody has said when the parallel run starts, and a plausible date ' +
+        'here would be indistinguishable from a configured one the day somebody read it (brief rule ' +
+        '15). The reconciliation refuses while it is unset; ZY741 refuses a reconciliation dated ' +
+        'outside the window a row names.',
+    },
+  }),
+  define({
+    key: PARALLEL_RUN_WINDOW_END_SETTING_KEY,
+    tier: 'operational',
+    // Two settings and not one: the run has a start and an end, and both decide which days the
+    // comparison is about. Before the start the system was not recording and after the end the paper
+    // sheet was not, so in both cases "they agree" is a statement about which was switched off.
+    schema: z.union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]),
+    defaultValue: '',
+    label: 'Parallel-run window: last trading date',
+    help: 'The last trading date on which both are recording. A reconciliation for a day outside the window is refused rather than reported, because the figure it would carry is a misleading zero.',
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: PARALLEL_RUN_WINDOW_OPEN_QUESTION_ID,
+      note:
+        'NOT SET, and not guessed, for the same reason as the start date. Nobody has named a cutover ' +
+        'window; the mechanism is complete and refuses to report until somebody does.',
     },
   }),
 ] as const

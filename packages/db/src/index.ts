@@ -2209,6 +2209,26 @@ export {
   provisionalOpeningBalances,
 } from './services/opening-balances.ts'
 export {
+  countSystemTreatments,
+  countUnreconciledDaysTo,
+  PARALLEL_RUN_AUDIT_ACTIONS,
+  PARALLEL_RUN_SQLSTATE,
+  PARALLEL_RUN_WINDOW_END_SETTING_KEY,
+  PARALLEL_RUN_WINDOW_OPEN_QUESTION_ID,
+  PARALLEL_RUN_WINDOW_START_SETTING_KEY,
+  type PaperCountInput,
+  type ParallelRunDecisionInput,
+  type ParallelRunVarianceRow,
+  type ParallelRunWindow,
+  parallelRunError,
+  type ReconciliationWritten,
+  readParallelRunVariance,
+  readParallelRunWindow,
+  recordPaperCount,
+  recordParallelRunDecision,
+  recordReconciliation,
+} from './services/parallel-run.ts'
+export {
   type ClosedPeriod,
   closeAccountingPeriod,
   type DatedCorrectionInput,
@@ -5522,4 +5542,45 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // ZY681-ZY684 of the band ZY681-ZY690 are used; ZY685-ZY690 are RELEASED unused and deliberately
 // unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
 //
-export const SCHEMA_VERSION = 148 as const
+// 153 is 0153_parallel_run.sql (H-MIG-10) — the parallel run: three tables, one view and six refusals,
+// and the whole file follows from one sentence. During a parallel run NOTHING in this system can see the
+// paper day sheet, so every figure the schema holds about it is somebody's assertion and is stored as
+// one. Mirrored in `packages/db/src/schema/parallel-run.ts`, so `pnpm db:drift` compares the two; the
+// view is deliberately not mirrored, because the drift check compares base tables and a mirror of it
+// would be a second statement of the arithmetic the view exists to hold in one place.
+//
+// **The paper count is a SEPARATE TABLE from the reconciliation, and that is the decision the rest
+// follows from.** The reconciliation is a MEASUREMENT the daily job makes; the paper count is a CLAIM a
+// person makes, having read a sheet of paper. The first version had them on one row, at which point the
+// job — `actor_kind = 'system'` — would have had to write the column whose entire value is that a named
+// person stood behind it. ZY742 is the 0128/ZY341 shape: a deferred constraint trigger demanding an
+// `audit_event` in the same transaction with `actor_kind = 'staff'` and `actor_id` not null, because a
+// row saying only *the paper said 37* is a figure nobody is answerable for.
+//
+// Separating them also decides what happens on a day inside the window with NO paper count: the job
+// emits nothing, rather than a row with `paper_count = 0`. A zero there is indistinguishable from "the
+// paper and the system agreed that nothing happened", and the days where they disagree are the whole
+// point of a parallel run (ADR 0070). ZY741 refuses a reconciliation dated outside the window the row
+// itself names, and it is a TRIGGER rather than a CHECK so the message can carry the two setting keys
+// and the open question — which is what a reader at 02:00 needs and what a CHECK violation cannot say.
+//
+// `difference` and `state` are in the VIEW `parallel_run_variance` and nowhere else, so there is one
+// statement of what the difference is and one of when a day counts as unreconciled, and nothing to hold
+// equal. 0138 persisted its counts and paid for it with ZY471; it had to, because its items are rows of
+// their own, and this one does not. The difference is SIGNED for 0138's reason one grain up: positive
+// means treatments the paper recorded that the system does not hold — work this business did and cannot
+// bill or report on — and negative means the reverse, and an absolute figure would make the two
+// indistinguishable.
+//
+// **The file decides no rollback, and the absence is the record.** `parallel_run_decision.decision` is a
+// free column over two values; no trigger computes it, no view recommends one and no job writes a row.
+// What the schema does instead is make the decision attributable (ZY744), permanent (ZY745) and
+// checkable against its own evidence (ZY746, holding `unreconciled_days` equal to the variance rows up
+// to `as_of_business_day` — needed because those rows are upsertable, so a day corrected afterwards
+// would otherwise change what the decision looks like it was taken in the light of). It also invents no
+// date: the window is two settings with NO default, and the job refuses while they are unset.
+//
+// ZY747 through ZY750 are released UNUSED and deliberately unregistered, because `pnpm sqlstate` refuses
+// an entry for a code no migration raises.
+//
+export const SCHEMA_VERSION = 153 as const

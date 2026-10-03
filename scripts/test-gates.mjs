@@ -58473,6 +58473,958 @@ export function chargebackNetEffectFils(`,
   }
 }
 
+// 183a-183z. (H-MIG-08) The reconciliation report shown to be unable to stop refusing: every way a
+//            variance could come to read as explained, every way two runs could come to compare equal
+//            for the wrong reason, and the one tolerance in the unit shown to be exactly one branch.
+//
+//            The whole unit is one sentence — a variance is tied to a named cause or it is unexplained,
+//            and an unexplained one fails — so every case here breaks the arithmetic that decides which
+//            of the two a difference is. The failure mode they are all aimed at is the same one: a report
+//            that still LOOKS complete, with a verdict line saying everything is accounted for, over a
+//            residual somebody would have had to go and find.
+//
+//            Four groups:
+//
+//              * **the residual.** 183a zeroes it, so a variance is annotated rather than explained.
+//                183b rounds it to the dirham, which is the tolerance ADR 0070 and ADR 0007 between them
+//                leave no room for — and is the single most likely "improvement" a later reader makes,
+//                because 99 fils looks like noise until it is a customer's balance. 183c lists a cause of
+//                zero, so every variance reads as partly accounted for. 183d removes the refusal of a
+//                fractional contribution, which is the same allowance arriving as data instead of code.
+//                183e makes the exit status read the count, so one unexplained variance exits 0.
+//              * **the comparison.** 183f makes the digest ignore the report, so two DIFFERENT reports
+//                compare equal — a determinism test that passes because it measures nothing (ADR 0002).
+//                183g makes the run ordering non-deterministic, which is the version of the same defect
+//                that survives a digest: identical data, different bytes, and the failure names neither
+//                the order nor the query.
+//              * **the two sides of the quarantine reconciliation.** 183h absorbs the quarantine
+//                difference into a named cause it has nothing to do with, after which the residual is
+//                zero and the verdict line says everything is accounted for. 183i makes `counted` read
+//                the enumeration instead of
+//                counting in SQL, which removes the second source entirely and leaves the report
+//                comparing a number with itself. Both are driven by the pairing suite, because the claim
+//                is about a planted row in PostgreSQL.
+//              * **the coverage maps.** 183j drops an importer, so its file would be reconciled against
+//                nothing and read as fully imported. 183k points a record relation at a table the
+//                importer does not declare. 183l renames the payload key a money total is summed from,
+//                which is how a file total silently reads zero. 183m narrows the quarantine relations, so
+//                a whole importer's quarantines stop being enumerated.
+//
+//            183n and 183o are the money cell: `Number()` instead of a strict digit run, which is
+//            H-MIG-07's recorded hundredfold error in the column that decides a liability, and the
+//            tolerance widened from the rejected state to every state. 183p and 183q are the two forms —
+//            the walk flattened so nested figures stop being rendered, and a null rendered as `0`, which
+//            is ADR 0070 in one character. 183r is the hand-over template with a figure planted in it
+//            (brief rule 15).
+//
+//            183y and 183z are the controls: every case above is satisfied by something FAILING, so one
+//            has to be satisfied by the real tree passing — the two pure suites and the pairing suite,
+//            all unedited.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const RECON_GENERATE = 'packages/migration/src/report/generate.ts'
+  const RECON_RENDER = 'packages/migration/src/report/render.ts'
+  const RECON_TEMPLATE = 'artifacts/migration/reconciliation-run-template.json'
+
+  const RECON_GENERATE_SUITE = 'packages/migration/src/report/generate.test.ts'
+  const RECON_RENDER_SUITE = 'packages/migration/src/report/render.test.ts'
+  const RECON_PAIR_SUITE = 'packages/fixtures/src/migration-reconciliation.itest.ts'
+
+  const reconPureSuites = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.config.ts',
+    RECON_GENERATE_SUITE,
+    RECON_RENDER_SUITE,
+  ]
+  const reconPairSuite = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    RECON_PAIR_SUITE,
+  ]
+
+  /**
+   * One anchored edit to a shipped module, then the suite that must fail because of it.
+   *
+   * Named for this block rather than reusing block 162's helper of the same shape, and the reason is
+   * mechanical: two blocks defining a helper of one shape is how git found the bodies as shared context
+   * and INTERLEAVED two blocks at a merge (block 133's note).
+   */
+  const breakRecon = (name, file, find, into, rule, args = reconPureSuites()) => {
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        file,
+        (source) => replaceOnce(source, find, into),
+        () => runExpectingFailure('pnpm', args),
+      ),
+      rule,
+    )
+  }
+
+  // ---- the residual ------------------------------------------------------------------------------
+
+  // 183a. The residual, zeroed. Every variance then reads as fully accounted for while the report still
+  //       prints its causes, which is the difference between explaining a variance and annotating it.
+  breakRecon(
+    'reconciliation: a residual that is always zero must be caught',
+    RECON_GENERATE,
+    `    unexplained: variance - accounted,`,
+    `    unexplained: 0,`,
+    'leaves the residual as unexplained',
+  )
+
+  // 183b. The residual rounded to the dirham. THE case this block exists for: 99 fils reads as noise
+  //       right up to the point where it is a customer's package balance, and ADR 0007's integer fils
+  //       plus ADR 0070's refusal of an unattributable figure leave no room for a tolerance at all.
+  breakRecon(
+    'reconciliation: a rounding allowance on the residual must be caught',
+    RECON_GENERATE,
+    `    unexplained: variance - accounted,`,
+    `    unexplained: Math.trunc((variance - accounted) / 100) * 100,`,
+    'leaves the residual as unexplained',
+  )
+
+  // 183c. A cause of zero, listed. Every variance then carries an explanation of nothing, and a reader
+  //       scanning for "was this accounted for" sees a populated list.
+  breakRecon(
+    'reconciliation: listing a cause that accounts for nothing must be caught',
+    RECON_GENERATE,
+    `    explained: Object.freeze(explained.filter((contribution) => contribution.figure !== 0)),`,
+    `    explained: Object.freeze([...explained]),`,
+    'leaves the residual as unexplained',
+  )
+
+  // 183d. The refusal of a fractional contribution, removed. The same rounding allowance as 183b,
+  //       arriving as data from a caller instead of as arithmetic in this file.
+  breakRecon(
+    'reconciliation: a fractional contribution admitted instead of refused must be caught',
+    RECON_GENERATE,
+    `    if (!Number.isInteger(contribution.figure)) {`,
+    `    if (false && !Number.isInteger(contribution.figure)) {`,
+    'refuses a fractional contribution rather than rounding it',
+  )
+
+  // 183e. The exit status reading the COUNT rather than its presence. They agree at 0 and at 1 and
+  //       disagree at 2 — exactly the coincidence that passes a test and ships.
+  breakRecon(
+    'reconciliation: an exit status that tolerates one unexplained variance must be caught',
+    RECON_GENERATE,
+    `  report.unexplainedVariances > 0 ? 1 : 0`,
+    `  report.unexplainedVariances > 1 ? 1 : 0`,
+    'is 0 when nothing is unexplained and 1 when anything is',
+  )
+
+  // ---- the comparison ----------------------------------------------------------------------------
+
+  // 183f. The digest, made blind to the report. Two runs then compare equal whatever the data did, which
+  //       is a determinism check that examined nothing (ADR 0002) — and it is the figure H-MIG-09's gate
+  //       holds three recorded runs against.
+  breakRecon(
+    'reconciliation: a content digest that ignores the report must be caught',
+    RECON_GENERATE,
+    `export const reportContentDigest = (report: ReconciliationReport): string => contentHash(report)`,
+    `export const reportContentDigest = (_report: ReconciliationReport): string => contentHash('')`,
+    'holds no instant anywhere, so two runs over one report compare equal',
+  )
+
+  // 183g. The run ordering, made non-deterministic. The version of the same defect a digest cannot
+  //       catch: identical data, different bytes, and the failure names neither the order nor the query.
+  breakRecon(
+    'reconciliation: a non-deterministic run order must be caught',
+    RECON_GENERATE,
+    `     order by r.importer, r.source_file_hash, r.id`,
+    `     order by random()`,
+    'produce byte-identical reports and the same digest',
+    reconPairSuite(),
+  )
+
+  // ---- the two sides of the quarantine reconciliation ---------------------------------------------
+
+  // 183h. The quarantine difference, ABSORBED into a named cause. The most likely wrong fix for a red
+  //       report, and the one that leaves it looking green: a record row nothing attests to is then
+  //       accounted for by a rejection it has nothing to do with, the residual is zero, and the verdict
+  //       line says every variance is tied to a named cause.
+  //
+  //       It is this and not the obvious "turn the provenance join into a LEFT JOIN", because that edit
+  //       is a NO-OP: the inner join to `import_row` one line later drops the row again. The first
+  //       version of this case made exactly that edit and reported FAIL about a report that was fine,
+  //       which is brief rule 20's hazard reached through a semantic rather than a textual anchor — the
+  //       edit DID change something, just not anything.
+  breakRecon(
+    'reconciliation: absorbing a quarantine difference into a named cause must be caught',
+    RECON_GENERATE,
+    `        importedFigure: entry.enumerated,
+      }),`,
+    `        importedFigure: entry.enumerated,
+        explained: [{ cause: 'rejected_rows', figure: entry.counted - entry.enumerated }],
+      }),`,
+    'appears in the variance section and makes the exit status non-zero',
+    reconPairSuite(),
+  )
+
+  // 183i. `counted` made to read the enumeration. The second source disappears and the report compares
+  //       a number with itself, which is the shape of every reconciliation that has ever been wrong.
+  breakRecon(
+    'reconciliation: a counted figure derived from the enumeration must be caught',
+    RECON_GENERATE,
+    `    counted: quarantineCountsByRelation.get(relation) ?? 0,`,
+    `    counted: quarantine.filter((row) => row.relation === relation).length,`,
+    'appears in the variance section and makes the exit status non-zero',
+    reconPairSuite(),
+  )
+
+  // ---- the coverage maps -------------------------------------------------------------------------
+
+  // 183j. An importer dropped from the record map. Its file is then reconciled against nothing and reads
+  //       as fully imported — which `generateReconciliationReport` refuses at runtime, and this is what
+  //       stops the refusal ever being reached.
+  breakRecon(
+    'reconciliation: an importer with no record relation must be caught',
+    RECON_GENERATE,
+    `  [STAFF_IMPORTER_NAME]: Object.freeze({
+    relation: 'public.imported_staff_row',
+    moneyColumn: null,
+  }),`,
+    ``,
+    'has a record relation for every importer in the build',
+  )
+
+  // 183k. A record relation the importer does not declare as a target. Provenance can never name it
+  //       (ZY194 refuses an undeclared target), so the imported count is zero for every run and the
+  //       whole file reads as a variance.
+  breakRecon(
+    'reconciliation: a record relation the importer does not declare must be caught',
+    RECON_GENERATE,
+    `    relation: 'public.imported_package_sale',
+    moneyColumn: 'price_paid_fils',`,
+    `    relation: 'public.package_template',
+    moneyColumn: 'price_paid_fils',`,
+    'names a record relation the importer actually declares as a target',
+  )
+
+  // 183l. The payload key a money total is summed from, renamed. This is how a file total silently reads
+  //       zero: nothing throws, the sum is over a key that is not there, and the variance is the whole
+  //       file against an import that was in fact correct.
+  breakRecon(
+    'reconciliation: a source total summed from a key the importer never stages must be caught',
+    RECON_GENERATE,
+    `    payloadKeys: Object.freeze(['pricePaidFils']),`,
+    `    payloadKeys: Object.freeze(['paidPriceFils']),`,
+    'sums the source total out of a key the importer actually stages',
+  )
+
+  // 183m. The quarantine relations, narrowed. A whole importer's quarantines then stop being enumerated
+  //       and stop being reconciled, and the report says nothing about them in either direction.
+  breakRecon(
+    'reconciliation: narrowing the quarantine relations must be caught',
+    RECON_GENERATE,
+    `  'public.imported_contact',
+  'public.imported_appointment',
+  'public.imported_staff_row',
+])`,
+    `  'public.imported_contact',
+  'public.imported_appointment',
+])`,
+    'enumerates quarantines only from relations that can hold one',
+  )
+
+  // ---- the money cell ----------------------------------------------------------------------------
+
+  // 183n. The fils reader, loosened to `Number`. `Number('400.00')` is 400 and an integer, so a cell
+  //       written in dirhams-and-cents reconciles at a hundredth of its value — H-MIG-07's recorded
+  //       defect, in the column that decides what a customer is owed.
+  breakRecon(
+    'reconciliation: a decimal money cell read with Number() must be caught',
+    RECON_GENERATE,
+    `  if (typeof value === 'string' && /^\\d+$/.test(value.trim())) return Number(value.trim())`,
+    `  if (typeof value === 'string') return Number(value.trim())`,
+    'refuses a decimal rather than reading a hundredth of it',
+  )
+
+  // 183o. The one tolerance in the unit, widened from `rejected` to every state. An applied row's cell
+  //       passed `validate`, so an unreadable value there is a disagreement between the validator and
+  //       the reader — and absorbed as null it makes the file total quietly smaller than the file.
+  breakRecon(
+    'reconciliation: tolerating an unreadable cell on an applied row must be caught',
+    RECON_GENERATE,
+    `    if (row.state === 'rejected') return null`,
+    `    if (row.state !== 'nothing-is-this') return null`,
+    'is tolerated on a rejected row and refused on every other state',
+  )
+
+  // ---- the two forms -----------------------------------------------------------------------------
+
+  // 183p. The generic walk, flattened. Every nested figure — every source file, every quarantined row —
+  //       then stops appearing in the human form while both forms still look complete, which is the
+  //       drift a hand-written field list produces and this walk exists to make impossible.
+  breakRecon(
+    'reconciliation: a renderer that stops reaching nested figures must be caught',
+    RECON_RENDER,
+    `      for (const [index, item] of value.entries()) walk(item, \`\${path}.\${index}\`)`,
+    `      out.push({ path, value: \`\${value.length} row(s)\` })`,
+    'states one figure per leaf of the machine-readable form',
+  )
+
+  // 183q. A null rendered as `0`. ADR 0070 in one character: the leave liability has no money figure
+  //       because every employment record is unpriced, and a zero there reads as a workforce owed
+  //       nothing for leave it has accrued.
+  breakRecon(
+    'reconciliation: rendering an absent figure as zero must be caught',
+    RECON_RENDER,
+    `  if (value === null) return ABSENT`,
+    `  if (value === null) return '0'`,
+    'renders an absent figure as a dash and never as a zero',
+  )
+
+  // ---- the hand-over template --------------------------------------------------------------------
+
+  // 183r. A figure planted in the template. Brief rule 15: a plausible row count in the hand-over shape
+  //       is indistinguishable from a measured one the day somebody reads it, and this artefact is the
+  //       thing a reader opens to find out what the report will say.
+  breakRecon(
+    'reconciliation: a figure invented in the hand-over template must be caught',
+    RECON_TEMPLATE,
+    `      "reconstructedPackages": null,`,
+    `      "reconstructedPackages": 12,`,
+    'states the shape and not one figure',
+  )
+
+  // ---- the controls ------------------------------------------------------------------------------
+
+  // 183y. The two pure suites, unedited: the variance decomposition, the residual, the exit status, both
+  //       coverage maps, the money cell's asymmetry, the two forms and the template's shape.
+  check(
+    "reconciliation: the unit's pure suites pass against the real tree",
+    !run('pnpm', reconPureSuites()).failed,
+  )
+
+  // 183z. The pairing suite, unedited: the report shown to change nothing it reports on, two generations
+  //       byte-identical, the per-file counts and totals, the quarantine enumerated with its provenance,
+  //       and the planted single-row discrepancy failing the report. It commits its probe rows and
+  //       removes them, and the plant is rolled back — see the suite's own header for why it must be.
+  check(
+    'reconciliation: the pairing suite passes against the real tree',
+    !run('pnpm', reconPairSuite()).failed,
+  )
+}
+
+// 184a-184z. (H-MIG-09) The three-dry-run gate shown to be able to FAIL, which is the whole unit: a gate
+//            over committed artefacts that has never been seen to refuse one is a file everybody trusts
+//            and nothing checks (ADR 0003).
+//
+//            Every case here constructs a FOURTH recorded run out of the committed third one, breaks one
+//            thing about it, and asserts `pnpm dry-runs` refuses it BY THE NAME of the rule. A fourth
+//            run rather than an edit to a committed one, because `withFixture` removes what it created
+//            and `withEditedFile` restores the bytes — and a gate case that left a tampered artefact
+//            behind would poison every later case in this file and the commit after it (brief rule 27).
+//
+//            Three groups:
+//
+//              * **the recorded run.** 184a plants an unexplained variance. 184b edits a figure WITHOUT
+//                recomputing the digest, which is the edit nobody would notice — `unexplainedVariances`
+//                from 1 to 0 is the figure the whole gate turns on, and the stored digest is why that
+//                edit is a failing build rather than a green one. 184c records no importer at all, which
+//                would otherwise satisfy every check above it with a dry run of nothing. 184d records a
+//                post-import check that did not pass, which is a clean reconciliation over books that
+//                are still wrong. 184e disagrees with its own file name, so it would be diffed against
+//                the wrong neighbour. 184f is not a recorded run at all, and the parse refuses it rather
+//                than reading `undefined` off every field it checks.
+//              * **the set.** 184g points the gate at a directory with fewer than three runs, which is
+//                the one rule that cannot be provoked by adding a file. 184h makes run 4 disagree with
+//                run 3 about a figure, which is the report diff doing the job the third acceptance line
+//                asks of it.
+//              * **the arithmetic underneath.** 184i lowers the minimum to one. 184j widens the reminted
+//                field list to excuse a changed `sourceFileHash` — the single most dangerous widening
+//                available, because that value changing means the file imported was not the file the
+//                last run imported. 184k makes every difference reminted. 184l drops the digest check.
+//
+//            184m is the driver's corpus, which has to be byte-stable across runs or run N+1 cannot be
+//            compared with run N at all: a clock reading anywhere in it is refused, with the fixture that
+//            puts one there.
+//
+//            184y and 184z are the controls: the unit's pure suite, and `pnpm dry-runs` itself, both
+//            against the real tree and the three committed runs.
+{
+  const DRY_RUNS_DIR = 'artifacts/migration'
+  const DRY_RUN_THREE = `${DRY_RUNS_DIR}/run-3.json`
+  const DRY_RUN_FOURTH = `${DRY_RUNS_DIR}/run-4.json`
+  const DRY_RUN_DIFF = 'packages/migration/src/report/diff.ts'
+  const DRY_RUN_DRIVER = 'scripts/migrate-dry-run-full.mjs'
+  const DRY_RUN_DIFF_SUITE = 'packages/migration/src/report/diff.test.ts'
+
+  const dryRunSuite = () => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', DRY_RUN_DIFF_SUITE]
+
+  /** The committed third run, as a value a case can break one field of. */
+  const recordedThird = () => JSON.parse(readFileSync(DRY_RUN_THREE, 'utf8'))
+
+  /**
+   * Writes a fourth recorded run built by `mutate`, then asserts `pnpm dry-runs` refuses it by `rule`.
+   *
+   * Named for this block rather than reusing block 183's helper of the same shape, and the reason is
+   * mechanical: two blocks defining a helper of one shape is how git found the bodies as shared context
+   * and INTERLEAVED two blocks at a merge (block 133's note).
+   */
+  const breakDryRun = (name, mutate, rule) => {
+    const run = recordedThird()
+    run.runNumber = 4
+    mutate(run)
+    checkRejectedBy(
+      name,
+      withFixture(DRY_RUN_FOURTH, JSON.stringify(run, null, 2), () =>
+        runExpectingFailure('pnpm', ['dry-runs']),
+      ),
+      rule,
+    )
+  }
+
+  /** One anchored edit to a shipped module, then the pure suite that must fail because of it. */
+  const breakDryRunModule = (name, file, find, into, rule, args = dryRunSuite()) => {
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        file,
+        (source) => replaceOnce(source, find, into),
+        () => runExpectingFailure('pnpm', args),
+      ),
+      rule,
+    )
+  }
+
+  // ---- the recorded run --------------------------------------------------------------------------
+
+  // 184a. An unexplained variance in the newest run. The condition the whole unit is named for, and the
+  //       gate has to refuse it however clean everything else in the file is.
+  breakDryRun(
+    'dry runs: an unexplained variance in a recorded run must be refused',
+    (run) => {
+      run.report.variances[0].unexplained = 1
+      run.report.unexplainedVariances = 1
+      // The stored digest necessarily goes stale too, because the edit is INSIDE the report — and the
+      // digest cannot be recomputed from here, since this file is plain node and `reportContentDigest`
+      // is TypeScript. That is not a weakness of the case: `checkRejectedBy` asserts the VARIANCE rule
+      // appears by name, so the case fails if that rule stops firing even though a second one does.
+    },
+    'recorded-run-must-have-no-unexplained-variance',
+  )
+
+  // 184b. A figure edited by hand with the digest left alone. The edit nobody would notice: a recorded
+  //       run is a file in the repository, and `unexplainedVariances` from 1 to 0 is one keystroke.
+  breakDryRun(
+    'dry runs: a hand-edited figure with a stale digest must be refused',
+    (run) => {
+      run.report.dedup.contactsMatched += 1
+    },
+    'recorded-run-digest-must-match-its-report',
+  )
+
+  // 184c. A run that imported nothing. It has no variance, so every check above this one passes — ADR
+  //       0002's failure mode arriving as a committed artefact rather than as a green tick.
+  breakDryRun(
+    'dry runs: a recorded run that ran no importer must be refused',
+    (run) => {
+      run.importersRun = []
+    },
+    'recorded-run-must-state-at-least-one-importer-that-ran',
+  )
+
+  // 184d. A post-import check that did not pass. A clean reconciliation over books that are still wrong,
+  //       which is what the fourth acceptance line is about and what a report alone cannot say.
+  breakDryRun(
+    'dry runs: a recorded run whose invariant census failed must be refused',
+    (run) => {
+      run.postImportChecks = [
+        { name: 'money invariant census', command: 'pnpm money-invariants', ok: false },
+      ]
+    },
+    'recorded-run-must-record-every-post-import-check-passing',
+  )
+
+  // 184e. A run whose recorded number disagrees with its file name. It would be diffed against the wrong
+  //       neighbour, and the comparison would report on a pair that never followed each other.
+  breakDryRun(
+    'dry runs: a recorded number disagreeing with the file name must be refused',
+    (run) => {
+      run.runNumber = 9
+    },
+    'consecutive-runs-must-differ-only-in-a-reminted-key',
+  )
+
+  // 184f. Not a recorded run at all. Every rule in the checker reads a field, so a loose parse would
+  //       make all of them pass over `undefined`.
+  checkRejectedBy(
+    'dry runs: a file that is not a recorded run must be refused rather than read loosely',
+    withFixture(DRY_RUN_FOURTH, '{ "runNumber": "four" }', () =>
+      runExpectingFailure('pnpm', ['dry-runs']),
+    ),
+    'runNumber is not a number',
+  )
+
+  // ---- the set -----------------------------------------------------------------------------------
+
+  // 184g. Fewer than three. The one rule that cannot be provoked by ADDING a file, which is why the
+  //       checker takes `--dir`: the alternative is a gate case that deletes a committed artefact out of
+  //       the working tree and restores it in a `finally`, and brief rule 27 is what that costs.
+  checkRejectedBy(
+    'dry runs: fewer than three recorded runs must fail the gate',
+    runExpectingFailure('pnpm', [
+      'exec',
+      'tsx',
+      'scripts/check-dry-runs.mjs',
+      '--dir',
+      'artifacts',
+    ]),
+    'at-least-three-dry-runs-must-be-recorded',
+  )
+
+  // 184h. Run 4 disagreeing with run 3 about a figure. This is the report diff doing what the third
+  //       acceptance line asks: two runs from the same clean database and the same corpus cannot differ
+  //       in a count, and the case asserts the diff rule by name rather than a non-zero exit.
+  breakDryRun(
+    'dry runs: two consecutive runs disagreeing about a figure must be refused',
+    (run) => {
+      run.report.sources[0].sourceRows += 1
+      // As in 184a the digest goes stale alongside; the assertion is on the DIFF rule by name.
+    },
+    'consecutive-runs-must-differ-only-in-a-reminted-key',
+  )
+
+  // ---- the arithmetic underneath -----------------------------------------------------------------
+
+  // 184i. The minimum lowered to one. One run proves the importers execute and nothing else; two prove
+  //       the result is reproducible; the third is what distinguishes that from two runs agreeing once.
+  breakDryRunModule(
+    'dry runs: lowering the three-run minimum must be caught',
+    DRY_RUN_DIFF,
+    `export const MINIMUM_RECORDED_DRY_RUNS = 3`,
+    `export const MINIMUM_RECORDED_DRY_RUNS = 1`,
+    'fails while fewer than three exist',
+  )
+
+  // 184j. The reminted list widened to excuse a changed `sourceFileHash`. The most dangerous widening
+  //       available: that value changing means the file imported was not the file the last run imported,
+  //       and it is opaque hex exactly like the two keys the list legitimately excuses.
+  breakDryRunModule(
+    'dry runs: excusing a changed source file hash as a reminted key must be caught',
+    DRY_RUN_DIFF,
+    `export const REMINTED_FIELDS: readonly string[] = Object.freeze(['runId', 'recordId'])`,
+    `export const REMINTED_FIELDS: readonly string[] = Object.freeze([
+  'runId',
+  'recordId',
+  'sourceFileHash',
+  'contentHash',
+])`,
+    'does not excuse a changed hash, which is opaque hex like the keys it does excuse',
+  )
+
+  // 184k. Every difference classified as reminted, so the diff reports nothing material ever.
+  breakDryRunModule(
+    'dry runs: a diff that reports nothing material must be caught',
+    DRY_RUN_DIFF,
+    `    material.push(difference)`,
+    `    reminted.push(difference)`,
+    'reports a changed count as material and names its path',
+  )
+
+  // 184l. The digest check dropped, after which a hand-edited figure is accepted — 184b's defect with
+  //       the guard removed rather than the artefact broken.
+  breakDryRunModule(
+    'dry runs: dropping the digest check must be caught',
+    DRY_RUN_DIFF,
+    `  if (recomputed !== run.contentDigest) {`,
+    `  if (false && recomputed !== run.contentDigest) {`,
+    'fails when a figure was edited by hand without re-recording',
+  )
+
+  // ---- the driver's corpus -----------------------------------------------------------------------
+
+  // 184m. A clock reading in the corpus. The corpus has to be byte-stable across runs or run N+1 cannot
+  //       be compared with run N at all, and the integration suites' own convention is the OPPOSITE — a
+  //       per-execution nonce, because they run against a shared database. Copying that convention into
+  //       this driver is therefore the likely mistake, and the symptom is a report diff that reports
+  //       every source file as changed.
+  {
+    const CLOCK = /\bDate\.now\(\)|\bnew Date\(\)\.getTime\(\)|\bperformance\.now\(\)/
+    const clean = CLOCK.test(readFileSync(DRY_RUN_DRIVER, 'utf8'))
+    const planted = withEditedFile(
+      DRY_RUN_DRIVER,
+      (source) =>
+        replaceOnce(source, `const CONTACT_NONCE = 20_261_003`, `const CONTACT_NONCE = Date.now()`),
+      () => CLOCK.test(readFileSync(DRY_RUN_DRIVER, 'utf8')),
+    )
+    check(
+      'dry runs: a clock reading in the driver corpus is detectable',
+      planted === true,
+      'the scan did not see a planted Date.now() in the corpus, so it proves nothing about the real file',
+    )
+    check(
+      'dry runs: the driver corpus holds no clock reading',
+      clean === false,
+      'the dry-run corpus reads a clock, so two runs import different bytes and cannot be compared',
+    )
+  }
+
+  // ---- the controls ------------------------------------------------------------------------------
+
+  // 184y. The pure suite, unedited: the diff's classification, the three-run minimum, each rule and its
+  //       control, and the parser's refusal of a file that is not a recorded run.
+  check(
+    "dry runs: the unit's pure suite passes against the real tree",
+    !run('pnpm', dryRunSuite()).failed,
+  )
+
+  // 184z. The gate itself, against the three committed runs. Every case above is satisfied by something
+  //       FAILING, so one has to be satisfied by the real artefacts passing.
+  check(
+    'dry runs: the gate passes over the three committed runs',
+    !run('pnpm', ['dry-runs']).failed,
+  )
+}
+
+// 185a-185z. (H-MIG-10) The parallel run shown to be unable to stop refusing: every way a day nobody
+//            counted could come to read as a day that agreed, and every way the cutover decision could
+//            come to be taken by the system.
+//
+//            The unit's whole subject is a comparison one side of which this build CANNOT see. So every
+//            case here breaks something that would make the paper side look measured when it was not, or
+//            the decision look attributable when nobody was behind it — and the failure mode they share
+//            is the quiet one: a variance table full of zeroes, which is exactly what a parallel run in
+//            which everything agreed also looks like.
+//
+//            Four groups:
+//
+//              * **the six refusals**, 185a to 185f, each deleted while it stays registered, so
+//                `pnpm sqlstate` reports the code by name. 185g is the other direction — a registry
+//                entry for a code the migration does not raise, which is what catches a refusal
+//                silently becoming a no-op.
+//              * **the misleading zero.** 185h lets the window be read as set when it is not, so the
+//                pass reconciles zero days and reports no variance. 185i makes the pass reconcile a day
+//                nobody has counted. 185j makes the difference absolute, which merges "work this
+//                business did and cannot bill" with "a treatment no sheet recorded".
+//              * **the decision.** 185k makes ZY746 reach the caller untranslated, after which "your
+//                evidence disagrees with the rows" is an unknown failure and the caller retries it.
+//              * **the pilot and the stopwatch.** 185l makes `not_a_defect` generate a fix unit, which
+//                is the category the taxonomy exists for; 185m defaults an unknown category instead of
+//                refusing it; 185n takes the unit ordinal from the log position, leaving a gap that
+//                reads as a deleted unit; 185o interpolates the percentile, answering a number nothing
+//                observed about how long a desk waited; 185p reports a verdict below the sample floor;
+//                185q puts a zero in the committed report beside `not_measured`.
+//
+//            185r is the port band, overlapped with another suite's — which does not present as a port
+//            bug (brief rule 18): the second `next start` cannot bind and the suite answers from the
+//            first one's server. 185s and 185t are the feedback generator: a log with no `items` array,
+//            and an item the taxonomy cannot file.
+//
+//            185y and 185z are the controls: every case above is satisfied by something FAILING, so one
+//            has to be satisfied by the real tree passing — the three pure suites and the pairing suite.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const PARALLEL_MIGRATION = 'packages/db/migrations/0153_parallel_run.sql'
+  const PARALLEL_SERVICE = 'packages/db/src/services/parallel-run.ts'
+  const PARALLEL_JOB = 'apps/worker/src/jobs/parallel-run-reconcile.ts'
+  const PARALLEL_REGISTRY = 'packages/db/src/sqlstate-registry.ts'
+  const PARALLEL_PORTS = 'packages/harness/src/ports.ts'
+  const PILOT_TAXONOMY = 'packages/shared/src/parallel-run.ts'
+  const PILOT_PLANNER = 'packages/core/src/pilot/feedback.ts'
+  const PILOT_SPEED = 'packages/core/src/pilot/walk-in-speed.ts'
+  const PILOT_FEEDBACK_LOG = 'artifacts/pilot/feedback.json'
+  const PILOT_SPEED_REPORT = 'artifacts/pilot/walk-in-speed.json'
+
+  const PARALLEL_PURE_SUITES = [
+    'packages/core/src/pilot/feedback.test.ts',
+    'packages/core/src/pilot/walk-in-speed.test.ts',
+    'packages/harness/src/ports.test.ts',
+    'apps/web/src/test-ports.test.ts',
+  ]
+  const PARALLEL_PAIR_SUITES = [
+    'packages/fixtures/src/parallel-run.itest.ts',
+    'apps/web/e2e/walk-in-speed.itest.ts',
+  ]
+
+  const parallelPureSuites = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.config.ts',
+    ...PARALLEL_PURE_SUITES,
+  ]
+  const parallelPairSuites = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    ...PARALLEL_PAIR_SUITES,
+  ]
+
+  /**
+   * One anchored edit to a shipped file, then the checker or suite that must fail because of it.
+   *
+   * Named for this block rather than reusing block 183's or 184's helper of the same shape, and the
+   * reason is mechanical: two blocks defining a helper of one shape is how git found the bodies as
+   * shared context and INTERLEAVED two blocks at a merge (block 133's note).
+   */
+  const breakParallel = (name, file, find, into, rule, args = parallelPairSuites()) => {
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        file,
+        (source) => replaceOnce(source, find, into),
+        () => runExpectingFailure('pnpm', args),
+      ),
+      rule,
+    )
+  }
+
+  /** A refusal code deleted from the migration while the registry still claims it. */
+  const unraise = (code) => {
+    checkRejectedBy(
+      `parallel run: deleting ${code} while it stays registered fails pnpm sqlstate`,
+      withEditedFile(
+        PARALLEL_MIGRATION,
+        (source) =>
+          replaceOnce(source, `    using errcode = '${code}';`, `    using errcode = 'ZL004';`),
+        () => runExpectingFailure('pnpm', ['sqlstate']),
+      ),
+      code,
+    )
+  }
+
+  // ---- the six refusals ---------------------------------------------------------------------------
+
+  // 185a. ZY741 — a reconciliation dated outside the window it names. Without it the pass can report a
+  //       day on which one of the two sides was switched off, and that row's zero reads as agreement.
+  unraise('ZY741')
+  // 185b. ZY742 — a paper count no named person is behind. Nothing here can see the sheet, so without
+  //       this the table records that somebody counted it.
+  unraise('ZY742')
+  // 185c. ZY743 — a paper count is append-only. A claim that can be rewritten is not a record of what
+  //       was claimed, and the figure a cutover decision rests on would move under it.
+  unraise('ZY743')
+  // 185d. ZY744 — a cutover decision no named person is behind, which records that the system decided.
+  unraise('ZY744')
+  // 185e. ZY745 — a decision is append-only. Changing one's mind is a new decision with its own
+  //       instant; editing the row leaves no record that the first was ever taken.
+  unraise('ZY745')
+  // 185f. ZY746 — the decision's evidence held to the rows. The variance rows are upsertable, so a day
+  //       corrected afterwards would otherwise change what the decision looks like it was taken on.
+  unraise('ZY746')
+
+  // 185g. The other direction: a registry entry for a code 0153 does not raise, which is what catches a
+  //       refusal that has silently become a no-op. Pointed at ZY741 because it is the one the
+  //       acceptance line names.
+  checkRejectedBy(
+    'parallel run: a registry entry for a code 0153 does not raise fails pnpm sqlstate',
+    withEditedFile(
+      PARALLEL_REGISTRY,
+      (source) => replaceOnce(source, `    code: 'ZY741',`, `    code: 'ZY747',`),
+      () => runExpectingFailure('pnpm', ['sqlstate']),
+    ),
+    'ZY741',
+  )
+
+  // ---- the misleading zero ------------------------------------------------------------------------
+
+  // 185h. The window read as set when it is not. The pass then reconciles the days between two blanks —
+  //       none of them — and reports no variance, which is indistinguishable from a parallel run in
+  //       which the paper and the system agreed every day. The acceptance line's own failure.
+  breakParallel(
+    'parallel run: reading an unset window as set must be caught',
+    PARALLEL_SERVICE,
+    `  if (start === null || end === null) {`,
+    `  if (false && (start === null || end === null)) {`,
+    'refuses to report at all while it is unset',
+  )
+
+  // 185i. The pass made to reconcile a day nobody has counted. There is no paper figure for it, so the
+  //       only thing a row could carry is a zero — and a zero is indistinguishable from agreement.
+  breakParallel(
+    'parallel run: reconciling a day with no paper count must be caught',
+    PARALLEL_JOB,
+    `    if (!day.hasPaperCount) {`,
+    `    if (false && !day.hasPaperCount) {`,
+    'emits nothing for a closed day nobody has counted',
+  )
+
+  // 185j. The difference made absolute by the READER. Positive means treatments the paper recorded that
+  //       the system does not hold — work this business did and cannot bill or report on; negative means
+  //       the reverse. An absolute figure merges the two, and only one of them loses money.
+  //
+  //       It breaks the reader and not the view's own expression, and the reason is a limit of this
+  //       harness rather than a choice: the gate runs against an ALREADY-MIGRATED database, so editing
+  //       `abs()` into 0153 changes a file and not a relation, and the suite goes on passing. (The first
+  //       version of this case did exactly that and reported FAIL about a view that was fine.) The
+  //       view's expression is asserted directly instead — `parallel-run.itest.ts` reads `difference`
+  //       off `parallel_run_variance` as well as through the writer's return value.
+  breakParallel(
+    'parallel run: an unsigned variance must be caught',
+    PARALLEL_SERVICE,
+    `    difference: row.difference,`,
+    `    difference: Math.abs(row.difference),`,
+    'is signed, and flags a non-zero difference per business day',
+  )
+
+  // ---- the decision -------------------------------------------------------------------------------
+
+  // 185k. ZY746 reaching the caller UNTRANSLATED, which is the half of that refusal this harness can
+  //       break: the trigger lives in a database the gate cannot re-migrate (see 185j), and the code
+  //       being deleted from the migration is 185f. A refusal whose code nothing translates arrives as
+  //       an unknown failure, and the caller that treats "your evidence disagrees with the rows" as an
+  //       unknown failure is the caller that retries the write.
+  breakParallel(
+    'parallel run: a ZY746 refusal reaching the caller untranslated must be caught',
+    PARALLEL_SERVICE,
+    `    case PARALLEL_RUN_SQLSTATE.decisionEvidenceDisagrees:`,
+    `    case 'ZY747':`,
+    'holds its unreconciled-day count to the rows it summarises',
+  )
+
+  // ---- the pilot and the stopwatch ----------------------------------------------------------------
+
+  // 185l. `not_a_defect` made to generate a fix unit. It is the category the taxonomy exists for:
+  //       without it every item becomes work, the build acquires a unit from each expectation nobody
+  //       had set, and the first response to a backlog like that is to stop recording feedback.
+  breakParallel(
+    'parallel run: making not_a_defect generate a fix unit must be caught',
+    PILOT_TAXONOMY,
+    `    category: 'not_a_defect',
+    label: 'It works as intended and nobody had said so',
+    fixUnit: false,`,
+    `    category: 'not_a_defect',
+    label: 'It works as intended and nobody had said so',
+    fixUnit: true,`,
+    'exactly two of them produce no unit',
+    parallelPureSuites(),
+  )
+
+  // 185m. An unknown category filed under a default instead of refused. The thing reading it writes a
+  //       unit into the build's plan, so a default files somebody's complaint under the wrong heading
+  //       and generates the wrong work.
+  breakParallel(
+    'parallel run: defaulting an unknown feedback category must be caught',
+    PILOT_PLANNER,
+    `    if (definition === null) {`,
+    `    if (false && definition === null) {`,
+    'refuses an unknown category by name',
+    parallelPureSuites(),
+  )
+
+  // 185n. The unit ordinal taken from the LOG position, so a `not_a_defect` item third in the log
+  //       leaves a gap at H-PILOT-03 — which reads as a unit somebody deleted.
+  breakParallel(
+    'parallel run: a fix unit id numbered by log position must be caught',
+    PILOT_PLANNER,
+    `      id: pilotFixUnitId(units.length + 1),`,
+    `      id: pilotFixUnitId(at + 1),`,
+    'turns every fixable item into a unit with an id',
+    parallelPureSuites(),
+  )
+
+  // 185o. The percentile interpolated. An interpolated p95 over twenty samples is a number between two
+  //       observations that nothing observed, and the claim is about how long the desk waited.
+  breakParallel(
+    'parallel run: an interpolated percentile must be caught',
+    PILOT_SPEED,
+    `  const rank = Math.max(1, Math.ceil((percentile / 100) * ordered.length))`,
+    `  const rank = Math.max(1, Math.round((percentile / 100) * ordered.length + 0.5))`,
+    'answers an observation and never a number between two',
+    parallelPureSuites(),
+  )
+
+  // 185p. A verdict below the sample floor. Three bookings at 10 ms each read as comfortably inside the
+  //       budget, and a p95 over three samples passes or fails on one of them.
+  breakParallel(
+    'parallel run: a speed verdict below the sample floor must be caught',
+    PILOT_SPEED,
+    `  if (samples.length < MINIMUM_WALK_IN_SAMPLES) {`,
+    `  if (false && samples.length < MINIMUM_WALK_IN_SAMPLES) {`,
+    'is not_measured below the sample floor',
+    parallelPureSuites(),
+  )
+
+  // 185q. A zero p95 beside `not_measured` in the committed report. It would pass a ten-second budget
+  //       with room to spare, which is ADR 0070 in the one place this unit produces a latency.
+  breakParallel(
+    'parallel run: a zero percentile in the committed speed report must be caught',
+    PILOT_SPEED_REPORT,
+    `  "p95Ms": null,`,
+    `  "p95Ms": 0,`,
+    'carries no percentile at all while it is not measured',
+  )
+
+  // ---- the port band ------------------------------------------------------------------------------
+
+  // 185r. The band overlapped with `flow-builder`'s. It does not present as a port bug (brief rule 18):
+  //       the second `next start` cannot bind, exits, and the suite's wait loop then answers from the
+  //       FIRST one's server — so the assertions run against another worktree's build.
+  breakParallel(
+    'parallel run: a test port band overlapping another suite must be caught',
+    PARALLEL_PORTS,
+    `  'walk-in-speed': { start: 22_700, width: 300 },`,
+    `  'walk-in-speed': { start: 19_100, width: 300 },`,
+    'test-port-bands-overlap',
+    parallelPureSuites(),
+  )
+
+  // ---- the feedback generator ---------------------------------------------------------------------
+
+  // 185s. A log with no `items` array. "No items" and "the file has no items array" are different
+  //       facts, and the second reported as the first is a pilot whose feedback silently produced
+  //       nothing.
+  checkRejectedBy(
+    'parallel run: a feedback log with no items array must be refused',
+    withEditedFile(
+      PILOT_FEEDBACK_LOG,
+      (source) => replaceOnce(source, `  "items": []`, `  "items": {}`),
+      () => runExpectingFailure('pnpm', ['exec', 'tsx', 'scripts/pilot-feedback-to-units.mjs']),
+    ),
+    'has no `items` array',
+  )
+
+  // 185t. An item the taxonomy cannot file. The generator exits non-zero and names the rule, rather
+  //       than writing a unit under a heading nobody chose.
+  checkRejectedBy(
+    'parallel run: a feedback item outside the taxonomy must be refused by name',
+    withEditedFile(
+      PILOT_FEEDBACK_LOG,
+      (source) =>
+        replaceOnce(
+          source,
+          `  "items": []`,
+          `  "items": [{ "id": "GATE-1", "category": "slow-ish", "summary": "gate fixture", ` +
+            `"reportedBy": "the gate", "surface": "quick-book" }]`,
+        ),
+      () => runExpectingFailure('pnpm', ['exec', 'tsx', 'scripts/pilot-feedback-to-units.mjs']),
+    ),
+    'pilot-feedback-category-must-be-one-of-the-taxonomy',
+  )
+
+  // ---- the controls ------------------------------------------------------------------------------
+
+  // 185y. The pure suites, unedited: the taxonomy, the planner, the percentile arithmetic, the band
+  //       registry and the claim that every band has exactly one claimant.
+  check(
+    "parallel run: the unit's pure suites pass against the real tree",
+    !run('pnpm', parallelPureSuites()).failed,
+  )
+
+  // 185z. The pairing suites, unedited: all six refusals, the signed variance, the day nobody counted,
+  //       the decision's evidence, and the committed speed report's integrity. Every case runs inside a
+  //       transaction it rolls back — see the suite's own header for why it must.
+  check(
+    'parallel run: the pairing suites pass against the real tree',
+    !run('pnpm', parallelPairSuites()).failed,
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -59330,6 +60282,7 @@ export function chargebackNetEffectFils(`,
     'pnpm alerts',
     'pnpm processors',
     'pnpm docs-set',
+    'pnpm dry-runs',
     'pnpm egress',
     // And the SAQ-A scan beside it, for the same reason in the other direction: it is the one check that
     // says no card number can reach anything this build renders, logs or stores, and its whole value is

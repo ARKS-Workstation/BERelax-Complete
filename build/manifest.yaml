@@ -22159,7 +22159,7 @@ units:
       from a single source of truth: per-file counts and totals against source, outstanding package liability,
       leave liability, dedup counts, every quarantined row, and a variance section that must be empty.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - H-MIG-03
@@ -22179,9 +22179,25 @@ units:
       a test
     files:
     - packages/migration/src/report/generate.ts
+    - packages/migration/src/report/generate.test.ts
     - packages/migration/src/report/render.ts
+    - packages/migration/src/report/render.test.ts
+    - packages/fixtures/src/migration-reconciliation.itest.ts
     - artifacts/migration/reconciliation-run-template.json
     - scripts/migrate-report.mjs
+    - docs/adr/0105-a-reconciliation-report-is-a-reading-and-a-variance-is-named-or-it-fails.md
+    notes:
+    - 'NOTE: no migration, no private SQLSTATE and no test port band. A reconciliation report is a reading
+      — it takes an Sql and never a UnitOfWork, writes nothing and starts no server — so migration 0152,
+      the band ZY721-ZY730 and the port band { start: 22_700, width: 300 } are RELEASED UNUSED and the
+      codes are deliberately unregistered (pnpm sqlstate refuses an entry for a code no migration raises).
+      SCHEMA_VERSION is untouched and no migration-ledger paragraph was added, there being no migration to
+      document. ADR 0105 records why.'
+    - 'NOTE: the zero-unexplained-variance claim is NOT asserted over the shared integration database.
+      The report reads the whole staging ledger, so it describes every other suite''s committed runs too,
+      and an assertion over the total would be an assertion about their fixtures. migration-reconciliation.itest.ts
+      asserts the figures of the sources it created and the planted discrepancy as a DELTA; the claim over
+      a database with nothing else in it is H-MIG-09''s, from a fresh database, three times.'
   - id: H-MIG-09
     order: 191
     title: Three dry runs, gated on zero unexplained variance
@@ -22189,7 +22205,7 @@ units:
       and records a numbered run report. Three recorded runs, the latest with no unexplained variance, or
       the gate fails.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - H-HARD-04
@@ -22210,6 +22226,30 @@ units:
     - artifacts/migration/run-2.json
     - artifacts/migration/run-3.json
     - scripts/check-dry-runs.mjs
+    - packages/migration/src/report/diff.ts
+    - packages/migration/src/report/diff.test.ts
+    - docs/adr/0106-a-dry-run-is-a-fresh-database-and-three-recorded-runs-or-the-gate-is-decoration.md
+    notes:
+    - 'NOTE: DEFERRED TO H-HARD-04 — the clean database is created by applying every migration from
+      nothing, not by restoring the restore-drill artefact, because scripts/restore-drill.mjs does not
+      exist (H-HARD-04 is todo) and the words "from the restore-drill artefact" cannot be satisfied by a
+      file that is not there. Running the driver as a CI step is deferred with it, for the same reason;
+      what CI runs is pnpm dry-runs, which reads the three committed runs and needs no database. The
+      restore drill''s own integration suite, named in the fourth acceptance line, is deferred to the
+      same unit; the domain-invariant half IS run — pnpm money-invariants against the post-import
+      database, with its verdict recorded on every run and checked by name.'
+    - 'NOTE: BLOCKED ON OWNER DATA — three importers and the opening trial balance are NOT rehearsed, and
+      every recorded run states which and why: packages (Y8-packages, the owner''s sign-off is a human act
+      with four values that may not be defaulted), appointments (Y8-visits), staff (Y8-staff, the leave
+      year anchor has no default) and opening-balances (Y8-opening-balances, attesting a boundary locks
+      the database behind it for ever). The corpus that IS rehearsed — probe and customers — is synthetic
+      and generated from packages/fixtures, so no figure in a committed run is a claim about this
+      business. A run that ran no importer at all is refused by name. ADR 0106 records all of it.'
+    - 'NOTE: no migration, no private SQLSTATE, no port band. Everything reads: the driver writes only
+      into a database it creates and drops, and the gate reads files. ZY731-ZY740 was not allocated and
+      none is used; SCHEMA_VERSION is unchanged and no ledger paragraph was added. One new pnpm verify
+      step, pnpm dry-runs, registered in gate case 29''s array and in .github/workflows/ci.yml in the
+      same commit.'
   - id: H-MIG-10
     order: 192
     title: Parallel run, staff pilot instrumentation and front-desk speed
@@ -22217,7 +22257,7 @@ units:
       the system, pilot feedback captured against a closed taxonomy and turned into manifest fix units,
       and the front-desk speed requirement measured rather than asserted.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-UI-01
@@ -22250,9 +22290,48 @@ units:
       outside the window rather than producing a misleading zero
     files:
     - apps/worker/src/jobs/parallel-run-reconcile.ts
-    - apps/web/e2e/walk-in-speed.spec.ts
+    - apps/web/e2e/walk-in-speed.itest.ts
     - scripts/pilot-feedback-to-units.mjs
     - artifacts/pilot/walk-in-speed.json
+    - artifacts/pilot/feedback.json
+    - packages/db/migrations/0153_parallel_run.sql
+    - packages/db/src/schema/parallel-run.ts
+    - packages/db/src/services/parallel-run.ts
+    - packages/shared/src/parallel-run.ts
+    - packages/core/src/pilot/feedback.ts
+    - packages/core/src/pilot/feedback.test.ts
+    - packages/core/src/pilot/walk-in-speed.ts
+    - packages/core/src/pilot/walk-in-speed.test.ts
+    - packages/fixtures/src/parallel-run.itest.ts
+    - docs/adr/0107-the-paper-side-is-a-named-persons-claim-and-the-cutover-decision-is-not-a-function-of-it.md
+    notes:
+    - 'NOTE: the declared file apps/web/e2e/walk-in-speed.spec.ts was written as walk-in-speed.itest.ts.
+      vitest.integration.config.ts''s include is `apps/**/*.itest.ts`, so a .spec.ts is a test nothing
+      runs — ADR 0002 in the file name.'
+    - 'NOTE: THE WALK-IN p95 IS NOT MEASURED, and artifacts/pilot/walk-in-speed.json records that rather
+      than a figure: verdict `not_measured`, p95Ms null — not 0, which would pass a ten-second budget
+      with room to spare. Brief rule 23: a wall-clock percentile taken in an agent container with
+      several agents on four cores is a figure about the container, and in a committed report it is
+      indistinguishable from a figure about the product. The suite measures under
+      WALK_IN_SPEED_MEASURE=1 on a machine somebody chose and skips loudly on stderr otherwise; its
+      report-integrity half ALWAYS runs and holds the artefact to the verdict the arithmetic gives for
+      the artefact''s own figures, so a hand-edited within_budget over three samples fails. This is the
+      unit''s own provisional note enforced: real-device results recorded as absent, not assumed
+      passing (Y12-pilot, Y14-devices).'
+    - 'NOTE: the pilot feedback log is EMPTY because the pilot has not run (Y12-pilot is an owner
+      verification task). The taxonomy, the planner and the generator are complete and are exercised
+      against a SYNTHETIC log whose every summary says so, so no fixture item can be mistaken for a
+      complaint somebody made. The generator prints a manifest fragment and does NOT edit
+      build/manifest.yaml.'
+    - 'NOTE: OPENS Y8-parallel-run-window. The window start and end are two settings with no date and a
+      BLANK default — a date has no strictest safe reading, and app_setting.value is not null so a
+      null-defaulted setting cannot be seeded at all, which the integration suite''s global setup found
+      by failing on the insert. The reconciliation refuses to run while either is unset rather than
+      reporting zero days.'
+    - 'NOTE: allocations USED — migration 0153, SQLSTATEs ZY741-ZY746, ADR 0107, gate block 185a-185z,
+      and the test port band { start: 22_700, width: 300 } claimed by the walk-in-speed suite.
+      ZY747-ZY750 are released unused and deliberately unregistered. SCHEMA_VERSION is 153 and the
+      ledger carries a paragraph opening `// 153 is 0153_parallel_run.sql`.'
   - id: Y-PAY-01
     order: 193
     title: Payment gateway port, adapter conformance suite and provider registry

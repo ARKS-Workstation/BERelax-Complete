@@ -1,0 +1,30 @@
+{
+  "$comment": [
+    "The staff pilot feedback log, EMPTY. H-MIG-10.",
+    "",
+    "The pilot has not run (Y12-pilot is an owner verification task: 'staff pilot; report what the front",
+    "desk complains about'), so there is no feedback. An invented complaint here would be",
+    "indistinguishable from a reported one the day somebody read it, and it would generate a manifest fix",
+    "unit for work nobody asked for (brief rule 15).",
+    "",
+    "Each item is { id, category, summary, reportedBy, surface }. `category` is one of the eight in",
+    "PILOT_FEEDBACK_CATEGORIES (packages/shared/src/parallel-run.ts) and an unknown one is REFUSED by name",
+    "rather than filed under a default: the thing reading it writes a unit into the build's plan.",
+    "",
+    "Six of the eight categories become a fix unit. `device_or_hardware` does not, because a receipt",
+    "printer or an OTP autofill is not something this build can change (Y14-devices). `not_a_defect` does",
+    "not either, and it is the category that earns the taxonomy: without it every item becomes a unit, the",
+    "build acquires work from each expectation nobody had set, and the first response to a backlog like",
+    "that is to stop recording feedback. Both are REPORTED per item, never dropped.",
+    "",
+    "  tsx scripts/pilot-feedback-to-units.mjs --file artifacts/pilot/feedback.json",
+    "",
+    "prints one manifest fragment per fixable item, says which items produced none and why, and exits",
+    "non-zero if any item was refused. The mechanism is asserted against a synthetic log in",
+    "packages/core/src/pilot/feedback.test.ts — synthetic, and labelled as such in every summary, so no",
+    "fixture item can be mistaken for a complaint somebody made."
+  ],
+  "pilotRan": false,
+  "openQuestions": ["Y12-pilot"],
+  "items": []
+}

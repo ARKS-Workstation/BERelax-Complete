@@ -4,7 +4,7 @@
 
 # ADR index
 
-91 records, generated from the front matter of each one. Every column below is read
+94 records, generated from the front matter of each one. Every column below is read
 out of the record it describes, so a row cannot be wrong without the record being wrong — which is
 the whole reason this file is not maintained by hand. For the argument behind any of them, read
 [README.md](README.md) and then the record.
@@ -102,3 +102,6 @@ the whole reason this file is not maintained by hand. For the argument behind an
 | [0099](0099-the-documentation-set-is-generated-and-checked-or-it-is-decoration.md) | the processor register is held against the services actually wired up, and every page in the documentation set is generated or checked | accepted | 2026-10-03 | H-HARD-09 | docs/01 decisions — none; this is the mechanism behind docs/04 §8's processor register and |
 | [0100](0100-a-webhook-is-unauthenticated-until-it-verifies-and-replay-protection-is-not-idempotency.md) | a webhook is an UNAUTHENTICATED REQUEST until it verifies, and replay protection is not idempotency | accepted | 2026-10-03 | Y-PAY-04 | docs/01 decisions — none. It stands on ADR 0005 (a real provider outside production is |
 | [0101](0101-a-repair-is-an-applied-event-and-the-watermark-is-the-last-finished-run.md) | a repair is an APPLIED EVENT, and the watermark is the last FINISHED run | accepted | 2026-10-03 | Y-PAY-05 | docs/01 decisions — none. It stands on ADR 0007 (integer fils), ADR 0008 (append-only |
+| [0105](0105-a-reconciliation-report-is-a-reading-and-a-variance-is-named-or-it-fails.md) | a reconciliation report is a READING, its run instant lives outside the compared content, and a variance is named or it fails | accepted | 2026-10-03 | H-MIG-08 | docs/01 decisions — none new. It is the reporting-shaped consequence of |
+| [0106](0106-a-dry-run-is-a-fresh-database-and-three-recorded-runs-or-the-gate-is-decoration.md) | a dry run is a FRESH database, a recorded run carries its own digest, and the gate must be able to refuse one | accepted | 2026-10-03 | H-MIG-09 | docs/01 decisions — none new. It is the rehearsal-shaped consequence of |
+| [0107](0107-the-paper-side-is-a-named-persons-claim-and-the-cutover-decision-is-not-a-function-of-it.md) | the paper side of a parallel run is a named person's CLAIM, a day outside the window has no figure, and the cutover decision is not a function of either | accepted | 2026-10-03 | H-MIG-10 | docs/01 decisions — none new. It is the cutover-shaped record of docs/12's parallel-run step |

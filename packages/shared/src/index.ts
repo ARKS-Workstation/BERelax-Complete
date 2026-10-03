@@ -441,6 +441,25 @@ export {
   PERSONAL_DATA_BREACH,
 } from './incident-register.ts'
 export {
+  PARALLEL_RUN_DECISIONS,
+  PARALLEL_RUN_WINDOW_END_SETTING_KEY,
+  PARALLEL_RUN_WINDOW_OPEN_QUESTION_ID,
+  PARALLEL_RUN_WINDOW_SETTING_KEYS,
+  PARALLEL_RUN_WINDOW_START_SETTING_KEY,
+  type ParallelRunDecisionValue,
+  PILOT_DEVICE_OPEN_QUESTION_ID,
+  PILOT_FEEDBACK_CATEGORIES,
+  PILOT_FEEDBACK_CATEGORY_VALUES,
+  PILOT_FEEDBACK_FIX_CATEGORIES,
+  PILOT_FIX_UNIT_PREFIX,
+  PILOT_OPEN_QUESTION_ID,
+  type PilotFeedbackCategoryDefinition,
+  pilotFeedbackCategory,
+  pilotFixUnitId,
+  WALK_IN_SPEED_BUDGET_MS,
+  WALK_IN_SPEED_PERCENTILE,
+} from './parallel-run.ts'
+export {
   addressLines,
   addressOneLine,
   directionsLinkFor,
