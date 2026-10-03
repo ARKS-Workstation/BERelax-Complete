@@ -51,6 +51,7 @@ import {
   REBUILD_OBLIGATION_NOTICES_JOB,
   SEND_OBLIGATION_NOTICE_JOB,
 } from './jobs/obligation-reminders.ts'
+import { OFFLINE_CONVERSIONS_JOB_DEFINITION } from './jobs/offline-conversions.ts'
 import {
   PACKAGE_EXPIRY_ACTOR,
   PACKAGE_EXPIRY_AGENT,
@@ -529,6 +530,13 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
   // already happened. What has to be watched is the absence of a drain. Its declared interval in 0137 is
   // 300 seconds, which is what makes the watchdog's "no success within twice the interval" mean something.
   ANALYTICS_DISPATCH_JOB_DEFINITION,
+  // A-MEAS-05's producer, nightly at 03:17 — after trading closes at 02:00, so the trading date it uploads
+  // is COMPLETE. A conversion is not a figure that can be topped up: it is a new statement with its own
+  // event_id, so a pass over a day still in progress would upload the evening as a correction to the
+  // morning. It reports to `analytics_dispatch`' agent rather than declaring a second one, because the two
+  // passes are one pipeline — and the limit of sharing is stated in the job's own header and handed to
+  // A-MEAS-06, which owns the heartbeat and the watchdog for this dispatcher.
+  OFFLINE_CONVERSIONS_JOB_DEFINITION,
 ]
 
 /**

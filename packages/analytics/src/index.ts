@@ -35,6 +35,7 @@ export {
   analyticsEventId,
   EVENT_ID_LENGTH,
   EVENT_ID_SEPARATOR,
+  ORIGINAL_STATEMENT_REVISION,
 } from './event-id.ts'
 export {
   ANALYTICS_MAX_ATTEMPTS,

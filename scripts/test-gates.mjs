@@ -52403,8 +52403,8 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'dispatch identity: an event id that ignores the funnel stage is caught',
     brokenUnit(
       EVENT_ID,
-      '  return [subject.kind, aggregateId, stage].join(EVENT_ID_SEPARATOR)',
-      '  return [subject.kind, aggregateId].join(EVENT_ID_SEPARATOR)',
+      '      ? [subject.kind, aggregateId, stage]',
+      '      ? [subject.kind, aggregateId]',
       EVENT_ID_SUITE,
     ),
     'a different id',
@@ -52423,8 +52423,8 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'dispatch identity: a canonical form that drops its separators is caught',
     brokenUnit(
       EVENT_ID,
-      '  return [subject.kind, aggregateId, stage].join(EVENT_ID_SEPARATOR)',
-      "  return [subject.kind, aggregateId, stage].join('')",
+      '  return parts.join(EVENT_ID_SEPARATOR)',
+      "  return parts.join('')",
       EVENT_ID_SUITE,
     ),
     'cannot appear in any kind or any stage',
@@ -52581,6 +52581,228 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       'dispatch gate: and the egress guard answers clean on the real tree',
       !egress.failed,
       egress.output,
+    )
+  }
+}
+
+// 170a-170z. (A-MEAS-05) The offline conversion loop: every way a corrected figure could come to be an
+//            EDIT rather than a statement, and every way a sum could stop being zero.
+//
+// The defects this block is about are all arithmetic that still renders. A void written as zero, a credit
+// pushed with the wrong sign, a correction sent as a second absolute figure: none of them errors, none
+// fails a type, and each one leaves an advertising account optimising on a number this business never
+// took. The ledger is therefore a pure function with a committed arithmetic, and each mutation below has
+// to be caught by a case that names the claim.
+//
+// Two of them are about IDENTITY rather than money, and they are the subtler half. A correction that
+// derives the same `event_id` as the figure it corrects is discarded by the platform as a duplicate — so
+// the wrong number stays and the correction LOOKS like it worked, which is worse than it failing.
+{
+  const LEDGER = 'packages/core/src/analytics/conversion-value.ts'
+  const LEDGER_SUITE = 'packages/core/src/analytics/conversion-value.test.ts'
+  const EVENT_ID = 'packages/analytics/src/event-id.ts'
+  const EVENT_ID_SUITE = 'packages/analytics/src/event-id.test.ts'
+  const PASS = 'apps/worker/src/jobs/offline-conversions.ts'
+  const READS = 'packages/db/src/repositories/offline-conversions.ts'
+  const OFFLINE_ITEST = 'apps/worker/src/jobs/offline-conversions.itest.ts'
+
+  const unitFails = (...files) =>
+    runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const itestFails = (...files) =>
+    runExpectingFailure('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      ...files,
+    ])
+  const brokenUnit = (file, find, into, ...suites) =>
+    withEditedFile(
+      file,
+      (source) => replaceOnce(source, find, into),
+      () => unitFails(...suites),
+    )
+  const brokenItest = (file, find, into) =>
+    withEditedFile(
+      file,
+      (source) => replaceOnce(source, find, into),
+      () => itestFails(OFFLINE_ITEST),
+    )
+
+  // 170a. The no-show void written as nothing. The conversion then stands at its full value for ever and
+  //       the ledger sums to the booking rather than to zero — a treatment nobody had, reported as
+  //       revenue, in somebody else's advertising account.
+  checkRejectedBy(
+    'offline conversions: a no-show void worth nothing is caught',
+    brokenUnit(
+      LEDGER,
+      "    push('no_show_void', -conversionLedgerNetFils(statements), outcome.noShow.atIso)",
+      "    push('no_show_void', 0, outcome.noShow.atIso)",
+      LEDGER_SUITE,
+    ),
+    'sums to EXACTLY zero fils',
+  )
+
+  // 170b. The credit note's SIGN. A refund pushed as a positive value is a second sale, and the figure is
+  //       exactly right in magnitude — which is what makes it survive a review.
+  checkRejectedBy(
+    'offline conversions: a credit note pushed as a positive value is caught',
+    brokenUnit(
+      LEDGER,
+      "    push('credit_note', -credited.grossFils, credited.atIso)",
+      "    push('credit_note', credited.grossFils, credited.atIso)",
+      LEDGER_SUITE,
+    ),
+    'negative value equal to the credit',
+  )
+
+  // 170c. The correction sent as a second ABSOLUTE figure rather than as a delta. The platform's number
+  //       for the conversion is the SUM over the ids it has seen, so this doubles the conversion — and
+  //       both rows look like perfectly ordinary conversions.
+  checkRejectedBy(
+    'offline conversions: a correction sent as an absolute figure rather than a delta is caught',
+    brokenUnit(
+      LEDGER,
+      "    push('invoice_correction', outcome.initialFils - pushed, outcome.occurredAtIso)",
+      "    push('invoice_correction', outcome.initialFils, outcome.occurredAtIso)",
+      LEDGER_SUITE,
+    ),
+    'reaches the invoice gross',
+  )
+
+  // 170d. The provisional `Y11-vat-package` position: a package SALE pushes zero and the value is
+  //       recognised at redemption. Pushing the sale price reports the whole package as revenue on the day
+  //       it was sold, which is the position that question has not answered.
+  checkRejectedBy(
+    'offline conversions: a package sale pushing a value is caught',
+    brokenUnit(
+      LEDGER,
+      '      // Zero, and stated rather than omitted. See the header.\n      valueFils: 0,',
+      '      valueFils: 1,',
+      LEDGER_SUITE,
+    ),
+    'pushes zero at the sale',
+  )
+
+  // 170e. And the other direction: a sale with NO statement at all. A sale that pushed nothing is
+  //       indistinguishable from a sale the pass never saw, which is the distinction A-MEAS-07's whole
+  //       classification rests on — `missing` against `intentionally_not_pushed`.
+  checkRejectedBy(
+    'offline conversions: a package sale that writes no statement at all is caught',
+    brokenUnit(
+      LEDGER,
+      '  if (redemption === undefined) return statements',
+      '  if (redemption === undefined) return []',
+      LEDGER_SUITE,
+    ),
+    'rather than as no conversion at all',
+  )
+
+  // 170f. `never now()`, which the database cannot say on its own: `occurred_at <= decided_at` (0137) is
+  //       satisfied by EQUALITY, and equality is exactly what a clock read in the wrong place produces.
+  //       Relax the strict comparison and an offline upload dates itself on the night the worker ran.
+  checkRejectedBy(
+    'offline conversions: an event instant equal to the pass instant is caught',
+    brokenUnit(LEDGER, '  if (at < pass) return', '  if (at <= pass) return', LEDGER_SUITE),
+    'refuses an instant equal to the pass',
+  )
+
+  // 170g. The identity half. A correction that derives the same id as the figure it corrects is discarded
+  //       by the platform as a duplicate, so the wrong number stays and the correction looks like it
+  //       worked — and nothing in this build would say otherwise.
+  checkRejectedBy(
+    'offline conversions: a correction sharing the original id is caught',
+    brokenUnit(
+      EVENT_ID,
+      '      : [subject.kind, aggregateId, stage, `r${revision}`]',
+      '      : [subject.kind, aggregateId, stage]',
+      EVENT_ID_SUITE,
+    ),
+    'its own id',
+  )
+
+  // 170h. And the same defect measured where it bites: over real dispatch rows. Two statements that share
+  //       an id are ONE row, because the idempotency index absorbs the second — so the ledger read back
+  //       from the table is a figure short, which is the shape the platform would also hold.
+  checkRejectedBy(
+    'offline conversions: a shared correction id collapses the stored ledger, and that is caught',
+    withEditedFile(
+      EVENT_ID,
+      (source) =>
+        replaceOnce(
+          source,
+          '      : [subject.kind, aggregateId, stage, `r${revision}`]',
+          '      : [subject.kind, aggregateId, stage]',
+        ),
+      () => itestFails(OFFLINE_ITEST),
+    ),
+    'every statement must have written its own row',
+  )
+
+  // 170i. The session. A-FIRST-08 owns the attribution and nothing in this schema joins a session to a
+  //       booking, so a conversion with none is COUNTED and skipped. A pass that went ahead would push a
+  //       conversion under somebody else's consent decision — which the gate cannot catch, because the
+  //       session it was handed really did grant everything.
+  checkRejectedBy(
+    'offline conversions: a conversion uploaded without an attribution on file is caught',
+    brokenItest(PASS, '    if (sessionId === null) {', '    if (false as boolean) {'),
+    'counts a conversion with no analytics session',
+  )
+
+  // 170j. The action source. The value a default reaches is `website`, so the defect reports a walk-in as
+  //       a web order — a figure rather than an error.
+  checkRejectedBy(
+    'offline conversions: an action source defaulted instead of counted is caught',
+    brokenItest(
+      PASS,
+      '    if (conversion.bookingSource === null) {',
+      '    if (false as boolean) {',
+    ),
+    'counts a conversion with no booking channel',
+  )
+
+  // 170k. The trading DATE. Trading runs 11:00-02:00, so an instant cast to a date moves every sale after
+  //       midnight onto the previous day — and the conversions with it, into the wrong attribution window.
+  checkRejectedBy(
+    'offline conversions: an instant accepted where a trading date belongs is caught',
+    brokenItest(
+      READS,
+      '  if (/^\\d{4}-\\d{2}-\\d{2}$/.test(tradingDate)) return',
+      '  if (true) return',
+    ),
+    'refuses an instant where a trading DATE belongs',
+  )
+
+  // 170l. The vacuity control, and it is not a formality: every case above asserts that a MUTATED tree
+  //       fails, and a tree that fails for its own reasons satisfies all of them.
+  {
+    const suites = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.config.ts',
+      LEDGER_SUITE,
+      EVENT_ID_SUITE,
+    ])
+    check(
+      'offline conversions: the unmutated ledger suites pass, so every case above measured its mutation',
+      !suites.failed,
+      suites.output,
+    )
+    const itest = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      OFFLINE_ITEST,
+    ])
+    check(
+      'offline conversions: and the integration suite passes on the real tree',
+      !itest.failed,
+      itest.output,
     )
   }
 }

@@ -6,6 +6,7 @@ import {
   EVENT_ID_LENGTH,
   EVENT_ID_SEPARATOR,
   ANALYTICS_AGGREGATE_KINDS as KINDS,
+  ORIGINAL_STATEMENT_REVISION,
 } from './event-id.ts'
 import { ANALYTICS_AGGREGATE_KINDS } from './index.ts'
 
@@ -14,7 +15,7 @@ import { ANALYTICS_AGGREGATE_KINDS } from './index.ts'
  *
  * The acceptance line is *"the same booking yields one event_id used by both the client tag and the
  * server push; a test asserts equality and that the id is stable across retries"*. The equality across
- * the two SURFACES is asserted in `packages/fixtures/src/analytics-dispatch.itest.ts`, which computes the
+ * the two SURFACES is asserted in `apps/worker/src/jobs/analytics-dispatch.itest.ts`, which computes the
  * id the way a tag loader would and compares it with the one stored on the dispatch row. What is asserted
  * here is the property that makes that possible: the id is a pure function of three declared facts, and
  * nothing else can change it.
@@ -123,5 +124,37 @@ describe('the vocabulary is re-exported rather than restated', () => {
   it('is the same tuple the barrel exports', () => {
     // A second list of kinds would drift; this is the check that holds the barrel and the module equal.
     expect([...ANALYTICS_AGGREGATE_KINDS]).toEqual([...KINDS])
+  })
+})
+
+describe('the statement revision (A-MEAS-05)', () => {
+  const subject = { kind: 'invoice', aggregateId: BOOKING, stage: 'paid' } as const
+
+  it('leaves the ORIGINAL id untouched, which is what the on-page tag derives', () => {
+    // The one non-obvious decision in the module. A revision written into every id would have
+    // re-identified every event already pushed, and the tag knows nothing about corrections.
+    expect(analyticsEventId({ ...subject, revision: ORIGINAL_STATEMENT_REVISION })).toBe(
+      analyticsEventId(subject),
+    )
+    expect(analyticsEventCanonicalForm({ ...subject, revision: 0 })).toBe(
+      analyticsEventCanonicalForm(subject),
+    )
+  })
+
+  it('gives every correction its own id, so the platform does not discard it as a duplicate', () => {
+    const ids = [0, 1, 2, 3].map((revision) => analyticsEventId({ ...subject, revision }))
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('separates the revision component, so it cannot merge with an aggregate id', () => {
+    expect(analyticsEventCanonicalForm({ ...subject, revision: 2 })).toBe(
+      `invoice${EVENT_ID_SEPARATOR}${BOOKING}${EVENT_ID_SEPARATOR}paid${EVENT_ID_SEPARATOR}r2`,
+    )
+  })
+
+  it('refuses a fractional or negative revision rather than deriving an unorderable id', () => {
+    for (const revision of [-1, 1.5]) {
+      expect(() => analyticsEventId({ ...subject, revision })).toThrow(/whole non-negative/)
+    }
   })
 })

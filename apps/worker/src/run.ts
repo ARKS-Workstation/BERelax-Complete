@@ -20,6 +20,7 @@ import {
   setObligationNoticeEnqueue,
   setObligationNoticeRuntime,
 } from './jobs/obligation-reminders.ts'
+import { setOfflineConversionSql } from './jobs/offline-conversions.ts'
 import { setReceiptSources } from './jobs/reconcile-dlr.ts'
 import { setReportingRefreshSql } from './jobs/reporting-refresh.ts'
 import { setRetentionPurgeSql } from './jobs/retention-purge.ts'
@@ -127,6 +128,10 @@ async function main(): Promise<void> {
   // stand-in and a value captured at boot would survive a restart-free configuration change while the log
   // line went on claiming a real push.
   setAnalyticsDispatchSql(sql)
+  // A-MEAS-05's producer, before `startWorkers` for the same reason. It takes its trading date from the
+  // calendar through `tradingDateAt` rather than from arithmetic on the clock, so it needs the connection
+  // before its first fire rather than at import.
+  setOfflineConversionSql(sql)
   // `singletonKey` is the notice id, so a pass overlapping the previous one does not queue the same notice
   // twice. It is not the guarantee — the notice's own `state = 'pending'` and 0060's
   // `obligation_notice_one_send_per_step` are — but it keeps the queue from filling with work the first

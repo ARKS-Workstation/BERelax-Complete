@@ -463,6 +463,7 @@ export {
   withdrawAnalyticsConsent,
 } from './repositories/analytics-consent.ts'
 export {
+  ANALYTICS_DISPATCH_SQLSTATE,
   analyticsDispatchStateCounts,
   DISPATCH_ATTEMPT_OUTCOMES,
   type DispatchAttemptOutcome,
@@ -1119,6 +1120,12 @@ export {
   NUMBERING_LEDGER_COLUMNS,
   type NumberingGap,
 } from './repositories/numbering.ts'
+export {
+  type OfflineConversionFacts,
+  offlineInvoiceConversions,
+  offlineNoShowConversions,
+  offlinePackageConversions,
+} from './repositories/offline-conversions.ts'
 export {
   generateOtpCode,
   hashOtpCode,

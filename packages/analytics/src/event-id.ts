@@ -75,7 +75,27 @@ export interface AnalyticsEventSubject {
   /** The aggregate's own id. A uuid in every current case; typed as text because the digest does not care. */
   readonly aggregateId: string
   readonly stage: FunnelStage
+  /**
+   * Which STATEMENT about this conversion this is. 0 is the original; a correction is 1, 2, … (A-MEAS-05).
+   *
+   * A corrected conversion value is a new statement and not an edit — append-only, with its own instant —
+   * because A-MEAS-07 reconciles exactly the fact that a wrong number was pushed, and a dispatch rewritten
+   * to the corrected figure makes every variance zero (ZY451 refuses it in the database). A new statement
+   * needs a new identity or the platform deduplicates it against the figure it corrects and discards it
+   * silently, which is the worst of the three outcomes: the wrong number stays and nothing says so.
+   *
+   * **Revision 0 contributes NOTHING to the canonical form**, and that is the one non-obvious decision in
+   * this module. The original statement's id has to be the value the on-page tag derives, and the tag knows
+   * nothing about corrections — it has a booking and a stage and nothing else. So the id of the first
+   * statement is unchanged by this field existing, and a correction, which only ever happens server-side,
+   * carries the component. A revision written into every id would have re-identified every event already
+   * pushed, which is the same failure as shortening the digest.
+   */
+  readonly revision?: number
 }
+
+/** The statement number of an original conversion. A correction is this plus one, and so on. */
+export const ORIGINAL_STATEMENT_REVISION = 0
 
 /**
  * The canonical form the digest is taken over. Exported so the test can assert the separator claim.
@@ -114,7 +134,23 @@ export function analyticsEventCanonicalForm(subject: AnalyticsEventSubject): str
       { details: { kind: subject.kind } },
     )
   }
-  return [subject.kind, aggregateId, stage].join(EVENT_ID_SEPARATOR)
+  const revision = subject.revision ?? ORIGINAL_STATEMENT_REVISION
+  if (!Number.isInteger(revision) || revision < ORIGINAL_STATEMENT_REVISION) {
+    throw new AppError(
+      'validation',
+      `A conversion statement was asked for at revision ${revision}, which is not a whole non-negative ` +
+        'number. A fractional revision yields a stable id for a statement nobody can order, so the ' +
+        'corrections of one conversion would have no sequence and the ledger no last word.',
+      { details: { revision, kind: subject.kind, stage } },
+    )
+  }
+  // Revision 0 appends nothing — see `revision`'s own note: the original's id is what the on-page tag
+  // derives, and the tag has no correction to know about.
+  const parts =
+    revision === ORIGINAL_STATEMENT_REVISION
+      ? [subject.kind, aggregateId, stage]
+      : [subject.kind, aggregateId, stage, `r${revision}`]
+  return parts.join(EVENT_ID_SEPARATOR)
 }
 
 /**
