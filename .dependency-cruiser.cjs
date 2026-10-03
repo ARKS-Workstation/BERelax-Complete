@@ -325,6 +325,34 @@ module.exports = {
       },
     },
     {
+      name: 'gbp-consistency-check-is-read-only',
+      comment:
+        'packages/google/src/seo/gbp-consistency.ts may not reach ' +
+        'packages/google/src/adapters/business-information-write.ts, which holds the only path to a ' +
+        'Business Profile PATCH. G-SEO-06s acceptance line asks for exactly this: the checker is ' +
+        '"read-only by construction", and construction means the write cannot be referenced rather than ' +
+        'is not currently called. ' +
+        'WHY IT MATTERS MORE THAN IT LOOKS. The checker reports that the profile and the premises row ' +
+        'disagree. The obvious next feature is a button that fixes it, and the obvious implementation is ' +
+        'the checker calling the write while it already has both values in hand - at which point an ' +
+        'agent-driven pass writes to the business Google profile with no human in between. The write ' +
+        'adapter exists and is reached from the SCREEN, where a person approves the change: ' +
+        'applyApprovedHours takes the periods a human approved as an argument and refuses a payload ' +
+        'wider than its mask, because docs/10 SS7 says a naive whole-object PATCH wipes the Ramadan ' +
+        'specialHours. ' +
+        'A `reachable` rule rather than a direct-dependency one, because the hazard is a hop: a helper ' +
+        'module that re-exported the write would satisfy a direct rule while leaving the checker one ' +
+        'import from the PATCH. Tests are exempt - business-information-write.test.ts has to import the ' +
+        'adapter to exercise it, and a test ships nowhere. ' +
+        'The known-bad fixture is in scripts/test-gates.mjs and asserts this rule fires BY NAME.',
+      severity: 'error',
+      from: { path: '^packages/google/src/seo/gbp-consistency\\.ts$' },
+      to: {
+        path: '^packages/google/src/adapters/business-information-write\\.ts$',
+        reachable: true,
+      },
+    },
+    {
       name: 'no-lucide-outside-the-icon-wrapper',
       comment:
         'Only packages/ui/src/icon.tsx may import Lucide. docs/08 §7 asks for it "behind a wrapped ' +

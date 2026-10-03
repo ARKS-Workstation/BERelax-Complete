@@ -54642,6 +54642,353 @@ export function chargebackNetEffectFils(`,
   }
 }
 
+// 165a-165z. (G-SEO-06) The GBP-versus-website check: the cage that keeps it read-only shown to be alive,
+// the narrow updateMask shown to be what saves the Ramadan hours, the grouping shown to be what stops
+// seven rows for one mistake, and the sliding window shown to be the only shape of limiter that holds.
+//
+// The subject of this block is a check that is ALLOWED TO KNOW LESS THAN IT SEEMS TO. There is no Business
+// Profile API access (docs/10 §4, Y3-gbp-api), so the Google side of every comparison at launch is a named
+// human's claim — and the three ways that goes wrong are all invisible to a test that only asks whether a
+// finding was produced: the claim loses its author and reads as an observation, the form pre-fills itself
+// from the premises row so the check compares the site against itself, or the checker grows the button that
+// "just fixes it" and an agent starts writing to the business's Google profile.
+//
+// The fourth is the limiter, and it is the one that is wrong by default: a refilling bucket and a fixed
+// window both satisfy "at most six per minute" for the window they happen to measure and neither satisfies
+// it for every window. Case 165h is what makes the difference measurable rather than argued.
+{
+  const CHECKER = 'packages/google/src/seo/gbp-consistency.ts'
+  const COMPARE = 'packages/core/src/seo/gbp-consistency.ts'
+  const COMPARE_SUITE = 'packages/core/src/seo/gbp-consistency.test.ts'
+  const WRITE = 'packages/google/src/adapters/business-information-write.ts'
+  const WRITE_SUITE = 'packages/google/src/adapters/business-information-write.test.ts'
+  const BUCKET = 'packages/google/src/rate-limit/token-bucket.ts'
+  const BUCKET_SUITE = 'packages/google/src/rate-limit/token-bucket.test.ts'
+  const FAKE = 'packages/providers/src/google/fake-google.ts'
+  const SCREEN = 'apps/web/app/(admin)/agents/seo/gbp-snapshot/render.ts'
+  const SCREEN_SUITE = 'apps/web/src/gbp-snapshot-render.test.ts'
+  const CHECKER_SUITE = 'packages/google/src/seo/gbp-consistency.test.ts'
+  const NAP_SUITE = 'packages/fixtures/src/seo-nap-literals.test.ts'
+  const CHECK_ITEST = 'packages/google/src/seo/gbp-consistency.itest.ts'
+  const runUnit = (...files) =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const runItest = (...files) =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', ...files])
+  const cruise = () =>
+    run('pnpm', ['exec', 'depcruise', '--config', '.dependency-cruiser.cjs', 'packages', 'apps'])
+
+  // 165a. THE case the acceptance criterion names: the checker must not be able to REACH the write. The
+  // fixture adds the import the day somebody builds the "fix it" button, and the rule has to fire by name
+  // — it can only ever fire on a fixture, because the committed tree satisfies it, so this is the only
+  // evidence it is alive (ADR 0003).
+  withEditedFile(
+    CHECKER,
+    (source) =>
+      replaceOnce(
+        source,
+        "import { LOCATION_READ_MASK } from '../adapters/business-information.ts'",
+        "import { LOCATION_READ_MASK } from '../adapters/business-information.ts'\n" +
+          "import { applyApprovedHours } from '../adapters/business-information-write.ts'\n" +
+          'void applyApprovedHours',
+      ),
+    () =>
+      checkRejectedBy(
+        'boundaries: a consistency checker that can reach the Business Profile write is caught',
+        cruise(),
+        'gbp-consistency-check-is-read-only',
+      ),
+  )
+
+  // 165b. And its control. Without it 165a is satisfied by a rule that condemns the checker however it is
+  // written, which would be a rule nobody could make pass — worse than no rule, because it reads as proof.
+  {
+    const clean = cruise()
+    check(
+      'boundaries: the committed checker satisfies the read-only rule',
+      !clean.failed && clean.output.includes('no dependency violations found'),
+      clean.output,
+    )
+  }
+
+  // 165c. The payload-wider-than-its-mask refusal, removed. This is the naive whole-object PATCH, and it
+  // is the only one of the three refusals that DESTROYS data rather than failing: a field mask clears a
+  // named field the payload does not carry, so a request assembled from a whole getLocation answer wipes
+  // every field the read mask did not cover — the Ramadan specialHours among them (docs/10 §7).
+  withEditedFile(
+    WRITE,
+    (source) =>
+      replaceOnce(source, '  if (beyond.length > 0) {', '  if (beyond.length > 0 && false) {'),
+    () =>
+      checkRejectedBy(
+        'gbp write: a payload wider than its updateMask that is no longer refused is caught',
+        runUnit(WRITE_SUITE),
+        'which its updateMask does not name',
+      ),
+  )
+
+  // 165d. The approved-field allowlist, widened to everything. `'*'` is the whole-object PATCH and
+  // `storefrontAddress` is this system overwriting the business's address on Google, when the NAP
+  // authority runs the other way (ADR 0085 decision 6).
+  withEditedFile(
+    WRITE,
+    (source) =>
+      replaceOnce(
+        source,
+        "export const UPDATABLE_FIELDS: readonly string[] = ['regularHours']",
+        "export const UPDATABLE_FIELDS: readonly string[] = ['regularHours', 'storefrontAddress', '*']",
+      ),
+    () =>
+      checkRejectedBy(
+        'gbp write: an updateMask allowlist that admits the whole object is caught',
+        runUnit(WRITE_SUITE),
+        // The TEST's name, not the refusal's sentence: vitest elides a long source line in its code
+        // frame, so a long expected string is not in the output even when the right case failed.
+        'refuses a mask this build has not approved',
+      ),
+  )
+
+  // 165e. The read-modify-write turned into a write: the payload built from the location that was just
+  // read. The mask is still narrow, so Google accepts it today — and it is one mask edit from sending
+  // every stale field it now carries. This is the shape a reviewer cannot see at the call site.
+  withEditedFile(
+    WRITE,
+    (source) =>
+      replaceOnce(
+        source,
+        '  const payload: Partial<GbpLocation> = { regularHours: { periods: update.periods } }',
+        '  const payload: Partial<GbpLocation> = { ...before, regularHours: { periods: update.periods } }',
+      ),
+    () =>
+      checkRejectedBy(
+        'gbp write: a patch assembled from the whole location it just read is caught',
+        runUnit(WRITE_SUITE),
+        'which its updateMask does not name',
+      ),
+  )
+
+  // 165f. The FAKE, made lenient. This is the control that keeps every "the special hours survive"
+  // assertion meaning something: a fake that merged instead of replacing would pass them all with the
+  // narrow mask removed, so the fake's clearing behaviour is itself a thing that has to be seen to matter.
+  withEditedFile(
+    FAKE,
+    (source) =>
+      replaceOnce(
+        source,
+        '        if (supplied === undefined) delete next[field]',
+        '        if (supplied === undefined) void field',
+      ),
+    () =>
+      checkRejectedBy(
+        'gbp write: a fake that cannot wipe a masked field, which would make the whole claim vacuous, is caught',
+        runUnit(WRITE_SUITE),
+        'specialHours',
+      ),
+  )
+
+  // 165g. The grouping, removed: one finding per DAY. Seven identical rows for one wrong closing time is
+  // ADR 0085's cry-wolf failure in its purest form — a reader cannot tell seven copies of one problem from
+  // seven problems — and the acceptance criterion is stated as a COUNT for exactly this reason.
+  withEditedFile(
+    COMPARE,
+    (source) =>
+      replaceOnce(
+        source,
+        '    const key = `${siteText}\\u0000${gbpText}`',
+        '    const key = `${siteText}\\u0000${gbpText}\\u0000${dayOfWeek}`',
+      ),
+    () =>
+      checkRejectedBy(
+        'gbp consistency: a comparison that reports one finding per day rather than per disagreement is caught',
+        runUnit(COMPARE_SUITE),
+        'reports exactly two findings for a whole-week hours divergence',
+      ),
+  )
+
+  // 165h. The limiter's shape, which is the measured half of ADR 0087. A continuously refilling bucket
+  // admits one call every windowMs/limit, so twenty submissions produce ELEVEN inside the first minute at
+  // 6/min — over the cap the criterion names and over the cap Google enforces. The fixture evicts by
+  // elapsed share rather than by the oldest admitted call, which is that bucket exactly.
+  withEditedFile(
+    BUCKET,
+    (source) =>
+      replaceOnce(
+        replaceOnce(
+          source,
+          '      await this.clock.waitUntil(oldest + this.windowMs)',
+          '      await this.clock.waitUntil(oldest + Math.floor(this.windowMs / this.limit))',
+        ),
+        '    while (this.window.length > 0 && (this.window[0] as number) + this.windowMs <= now) {',
+        '    while (\n      this.window.length > 0 &&\n      (this.window[0] as number) + Math.floor(this.windowMs / this.limit) <= now\n    ) {',
+      ),
+    () =>
+      // BOTH halves, because a refilling bucket is a refill rate AND an eviction rule: shortening only
+      // the wait leaves the window unevicted and the limiter spins instead of over-admitting, which fails
+      // for the wrong reason and proves nothing about the shape.
+      checkRejectedBy(
+        'rate limit: a refilling bucket that admits more than the cap inside one minute is caught',
+        runUnit(BUCKET_SUITE),
+        'admits the cap immediately',
+      ),
+  )
+
+  // 165i. The queue, turned into a drop. A limiter that discards is a limiter that throws away an edit a
+  // human approved, and the symptom is a change that silently did not happen — which is why the acceptance
+  // line asks for a FINAL DELIVERY COUNT rather than for a queue length.
+  withEditedFile(
+    BUCKET,
+    (source) =>
+      replaceOnce(
+        source,
+        '      const oldest = this.window[0] as number',
+        '      if (this.admittedCalls.length > 0) return\n      const oldest = this.window[0] as number',
+      ),
+    () =>
+      checkRejectedBy(
+        'rate limit: a limiter that drops a queued call instead of delivering it is caught',
+        runUnit(BUCKET_SUITE),
+        'toHaveLength',
+      ),
+  )
+
+  // 165j. The slot taken BEFORE the wait: the task attempted early. "Never attempted early" cannot be
+  // proved by a passing count — a limiter that ran everything immediately and then slept would produce
+  // the same twenty deliveries — so the suite asserts the instant each task SAW, and this is the fixture
+  // that moves it.
+  withEditedFile(
+    BUCKET,
+    (source) =>
+      replaceOnce(
+        source,
+        '      await this.acquire(queuedAtMs)\n      return await task()',
+        '      const running = task()\n      await this.acquire(queuedAtMs)\n      return await running',
+      ),
+    () =>
+      checkRejectedBy(
+        'rate limit: a limiter that starts the call before its slot arrives is caught',
+        runUnit(BUCKET_SUITE),
+        'attempted',
+      ),
+  )
+
+  // 165k. The provenance hedge, removed from the manual arm. This is the epistemic claim of the whole unit
+  // (ADR 0087 decision 1): a snapshot is a named human's CLAIM, and a sentence that described it the way it
+  // describes an API read would make the weaker evidence carry the stronger claim — with nothing in a
+  // finding to tell the two apart.
+  withEditedFile(
+    COMPARE,
+    (source) =>
+      replaceOnce(
+        source,
+        "  return provenance.authority === 'business_information_v1'",
+        "  return provenance.authority !== 'xx_never'",
+      ),
+    () =>
+      checkRejectedBy(
+        'gbp consistency: a manual snapshot described as an observation is caught',
+        runUnit(COMPARE_SUITE),
+        'rather than an observation',
+      ),
+  )
+
+  // 165l. The form, pre-filled from the premises row. The one failure a lint cannot see: a form that shows
+  // the website's own hours beside an empty field is answered by pressing Enter, and the check then reports
+  // "consistent" about a profile nobody looked at. Both the checker's own suite and the screen's assert the
+  // negative, and this fixture is what proves either of them would notice.
+  withEditedFile(
+    CHECKER,
+    (source) =>
+      replaceOnce(
+        source,
+        "    fields.push({ name: `open-${row.dayOfWeek}`, label: `${day}: opens`, kind: 'time_of_day' })",
+        "    fields.push({\n      name: `open-${row.dayOfWeek}`,\n      label: `${day}: opens (${row.openTime})`,\n      kind: 'time_of_day',\n    })",
+      ),
+    () =>
+      checkRejectedBy(
+        'gbp snapshot: a form pre-filled with the website’s own figures is caught',
+        runUnit(CHECKER_SUITE),
+        'carries no value from the website side',
+      ),
+  )
+
+  // 165m. The NAP scan's google half, emptied. The checker and the write adapter are the two modules in
+  // this build with the strongest reason to hold a copy of the hours — comparing the premises against the
+  // profile is literally what one of them does — and a scan that walked only `packages/core/src/seo`
+  // reported a clean tree while the module whose subject IS NAP consistency answered about its own literal.
+  withEditedFile(
+    CHECKER,
+    (source) => `${source}\nconst __gateOpens = '11:00'\nvoid __gateOpens\n`,
+    () =>
+      checkRejectedBy(
+        'NAP scan: an opening-hour literal in the GBP checker is caught',
+        runUnit(NAP_SUITE),
+        'holds no literal of an opening-hour time',
+      ),
+  )
+
+  // 165n. And the write adapter, which is the other named file. Two files share one list, and a list with
+  // only one of them exercised is how the other quietly stops being scanned.
+  withEditedFile(
+    WRITE,
+    (source) => `${source}\nconst __gatePhone = '+971501234567'\nvoid __gatePhone\n`,
+    () =>
+      checkRejectedBy(
+        'NAP scan: a telephone literal in the Business Profile write adapter is caught',
+        runUnit(NAP_SUITE),
+        'holds no literal of a telephone number',
+      ),
+  )
+
+  // 165o. The screen's permission check, removed from the render. The fields are greyed from the SAME
+  // predicate the POST refuses on, and a screen offering a control the server refuses is the defect the
+  // suggestions handler records one layer out.
+  withEditedFile(
+    SCREEN,
+    (source) =>
+      replaceOnce(
+        source,
+        "  const disabled = mayRecord ? '' : ' disabled'",
+        "  const disabled = ''\n  void mayRecord",
+      ),
+    () =>
+      checkRejectedBy(
+        'gbp snapshot: a form offered to a role that may not record a claim is caught',
+        runUnit(SCREEN_SUITE),
+        'shows the fields read-only and offers no button',
+      ),
+  )
+
+  // 165y. Every case above is satisfied by something failing, so this one is satisfied by the real tree:
+  // the five suites pass as committed. Without it the fourteen cases above are consistent with suites that
+  // were already red.
+  {
+    const real = runUnit(
+      COMPARE_SUITE,
+      CHECKER_SUITE,
+      WRITE_SUITE,
+      BUCKET_SUITE,
+      SCREEN_SUITE,
+      NAP_SUITE,
+    )
+    check(
+      'the committed GBP comparison, checker, write adapter, limiter, screen and NAP scan all pass',
+      !real.failed,
+      real.output,
+    )
+  }
+
+  // 165z. And the database suite, which is where the two claims a pure test cannot reach are made: the
+  // website side really comes from `premises_hours` and the price in force, and the recorded claim really
+  // lands in append-only `audit_event` with the actor who made it.
+  {
+    const pair = runItest(CHECK_ITEST)
+    check(
+      'gbp consistency: the premises read, both modes and the recorded claim pass against the real database',
+      !pair.failed,
+      pair.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

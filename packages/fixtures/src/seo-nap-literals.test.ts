@@ -44,7 +44,30 @@ import { describe, expect, it } from 'vitest'
  * is deliberately not exported.
  */
 
-const ROOT = new URL('../../core/src/seo/', import.meta.url).pathname
+/**
+ * The directories this scan walks, and why there are two.
+ *
+ * G-SEO-04's acceptance line names `packages/core/src/seo/`. G-SEO-06's names *"the checker or its write
+ * adapter"*, which live in `packages/google` — and they are the two modules in this build with the
+ * strongest reason to hold a copy of the hours, because comparing the premises against the Google profile
+ * is literally what one of them does. A scan that covered only core would have reported a clean tree while
+ * the module whose whole subject is NAP consistency answered "consistent" about its own literal.
+ *
+ * The google half is a FILE LIST rather than a directory walk, deliberately. `packages/google/src/seo/`
+ * holds G-SEO-01's snapshot passes and G-SEO-05's drafting pass, none of which is about NAP, and widening
+ * the walk to them would be a rule whose failures are mostly about modules it was not written for — the
+ * shape `seo-site-analysis-must-take-the-untrusted-envelope` records as worse than no rule. The pair of
+ * files is asserted to EXIST below, so a rename does not quietly empty the list.
+ */
+const ROOTS = [
+  { root: new URL('../../core/src/seo/', import.meta.url).pathname, files: 'walk' as const },
+  {
+    root: new URL('../../google/src/', import.meta.url).pathname,
+    files: ['seo/gbp-consistency.ts', 'adapters/business-information-write.ts'],
+  },
+]
+
+const ROOT = ROOTS[0]?.root as string
 
 /** One thing a module may not hold a literal of, and the pattern that finds it. */
 const FORBIDDEN: readonly { readonly what: string; readonly pattern: RegExp }[] = [
@@ -101,11 +124,37 @@ const sourceFiles = (): readonly string[] =>
     .filter((file) => !file.includes('.fixtures/'))
     .sort()
 
-describe('packages/core/src/seo holds no NAP literal', () => {
+/** Every file the scan reads, as `{root, file}` pairs, across both declared roots. */
+const scanned = (): readonly { readonly root: string; readonly file: string }[] => {
+  const all: { root: string; file: string }[] = []
+  for (const entry of ROOTS) {
+    if (entry.files === 'walk') {
+      for (const file of sourceFiles()) all.push({ root: entry.root, file })
+    } else {
+      for (const file of entry.files) all.push({ root: entry.root, file })
+    }
+  }
+  return all
+}
+
+describe('the SEO analyses and the GBP checker hold no NAP literal', () => {
   it('reads a non-trivial number of modules, so a glob that matched nothing is a failure', () => {
     // ADR 0002 as the first assertion: a scan over zero files passes every rule below it, and that is
     // exactly how `pnpm boundaries` once reported success over zero modules.
     expect(sourceFiles().length).toBeGreaterThan(10)
+    expect(scanned().length).toBeGreaterThan(sourceFiles().length)
+  })
+
+  it('reads every named file, so a rename does not quietly empty the google half', () => {
+    // A named file list is only a scan while the files are there. A rename would otherwise turn this
+    // half into zero assertions, which reads exactly like a clean tree.
+    for (const entry of scanned()) {
+      expect(
+        readFileSync(`${entry.root}${entry.file}`, 'utf8').length,
+        `${entry.file} is named by this scan and could not be read. Fix the list rather than leaving ` +
+          'a rule that walks nothing.',
+      ).toBeGreaterThan(0)
+    }
   })
 
   it('names only exemptions that still need one', () => {
@@ -124,12 +173,13 @@ describe('packages/core/src/seo holds no NAP literal', () => {
   for (const forbidden of FORBIDDEN) {
     it(`holds no literal of ${forbidden.what}`, () => {
       const offenders: string[] = []
-      for (const file of sourceFiles()) {
-        if (exempt.has(file)) continue
-        const source = readFileSync(`${ROOT}${file}`, 'utf8')
+      for (const entry of scanned()) {
+        if (exempt.has(entry.file)) continue
+        const source = readFileSync(`${entry.root}${entry.file}`, 'utf8')
         const lines = source.split('\n')
         lines.forEach((line, index) => {
-          if (forbidden.pattern.test(line)) offenders.push(`${file}:${index + 1}  ${line.trim()}`)
+          if (forbidden.pattern.test(line))
+            offenders.push(`${entry.file}:${index + 1}  ${line.trim()}`)
         })
       }
       expect(

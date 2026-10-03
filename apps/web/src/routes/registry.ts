@@ -172,6 +172,38 @@ export const ROUTES = [
       'on it is an aggregate.',
   },
   {
+    id: 'seo-gbp-snapshot',
+    path: '/agents/seo/gbp-snapshot',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'G-SEO-06s GBP-versus-website consistency check, and the manual snapshot it degrades to. There is ' +
+      'no Business Profile API access in this build (docs/10 SS4, OPEN-QUESTIONS Y3-gbp-api), so the ' +
+      'degraded mode is the ORDINARY path rather than an error state - docs/10 SS6: a fallback designed ' +
+      'as something you hope not to need is a fallback you never finish. The screen compares ' +
+      'premises_hours and the price in force against what the profile shows, and when the API cannot ' +
+      'answer it takes what a named person says they saw, recorded as an append-only audit_event with ' +
+      'who said so and when. It deliberately does NOT pre-fill the Google column with this sites own ' +
+      'figures: a pre-filled form is answered by pressing Enter, and the check would then report ' +
+      'consistent about a profile nobody looked at. A handler rather than a document for the reason the ' +
+      'suggestions queue, the diary, the pipeline board, the Messages inbox, the template editor, the ' +
+      'compliance calendar, the duplicate queue, the quick-book screen and the review paste form all ' +
+      'give: a registry document must be served in BOTH locales, which needs an Arabic admin document ' +
+      'and the W-SYS-01 shell. It WRITES - one POST records one claim - and it IS authenticated through ' +
+      '`guardAdminRoute`, with the POST additionally refusing on the F07 matrix unless the role holds ' +
+      '`integration:connect`; the GET is readable to any admin session, because a divergence is ' +
+      'something a manager should be able to see. There is deliberately no ?role= and no value acted on ' +
+      'from the query string beyond ?done=recorded, which is what keeps it on the right side of ' +
+      'W-SYS-11s scan. Dynamic because the claim it records carries an instant and the comparison is a ' +
+      'read of rows that change. Not indexable and not in the sitemap: it is under the /agents prefix ' +
+      'in ADMIN_GROUP_PREFIXES, and it states noindex on its own response as well. It shows no TRN, no ' +
+      'customer name and no therapist name: the figures on it are opening hours and published prices.',
+  },
+  {
     id: 'seo-suggestions',
     path: '/agents/seo/suggestions',
     kind: 'handler',

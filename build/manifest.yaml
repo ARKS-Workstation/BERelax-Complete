@@ -20607,7 +20607,7 @@ units:
       the human-approved write path that exists elsewhere is read-modify-write with a narrow updateMask,
       because a naive PATCH wipes Ramadan specialHours.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - G-CONN-05
@@ -20635,11 +20635,36 @@ units:
       finding count is unchanged between modes)'
     - 'NAP comes only from the premises row: a grep test asserts no literal address, phone number or opening-hour
       string appears in the checker or its write adapter'
+    - 'NOTE (G-SEO-06, this unit): the provisional note above says to take the canonical WhatsApp number
+      from the prototype (052 510 8633) per Y1-nap. That was REVERSED. OPEN-QUESTIONS Y1-nap now answers
+      **neither**: premises.phone_whatsapp holds WHATSAPP-PENDING-Y1-NAP and is_placeholder_text() refuses
+      it, because promoting one candidate would publish a number that may not reach the business and would
+      be indistinguishable from one the owner had confirmed (B-CAT-06 reversed it). So the checker does NOT
+      compare the WhatsApp number: a comparison against a placeholder would report a divergence on every
+      run about a value nobody has confirmed, which is the cry-wolf finding ADR 0085 is about. ADR 0087
+      records the decision.'
+    - 'NOTE (G-SEO-06, this unit): the files list names
+      apps/web/app/(admin)/agents/seo/gbp-snapshot/page.tsx. The screen is route.ts + handler.ts +
+      render.ts + view.ts instead, for ADR 0086 reason: apps/web/src/routes/registry.ts requires every
+      DOCUMENT to be served in both locales, which needs the Arabic admin document W-SYS-01 has not built.'
+    - 'NOTE (G-SEO-06, this unit): the API arm compares HOURS only. Business Information v1 carries no
+      service prices - a profile prices live in a priceLists resource docs/10 §7 does not cover and nothing
+      in this build has ever read - so a price divergence is the manual snapshot to report. The acceptance
+      line "finding count is unchanged between modes" is therefore asserted over the hours divergence both
+      arms can see, in gbp-consistency.itest.ts; feeding the website own prices into the API arm would have
+      made every price agree with itself.'
+    - 'NOTE (G-SEO-06, this unit): there is NO new table. The manual snapshot is recorded as an append-only
+      audit_event (google.gbp_snapshot.recorded) carrying the staff actor and the instant they say they
+      looked, which is what "who made it and when" needs; a table of its own would be a second answer to
+      what the profile said on a given day, with nothing holding the two equal. No migration and no
+      SQLSTATE was used, so the ZY411-ZY420 band is RELEASED unregistered - an entry for a code no
+      migration raises is refused.'
     files:
     - packages/google/src/seo/gbp-consistency.ts
     - packages/google/src/adapters/business-information-write.ts
     - apps/web/app/(admin)/agents/seo/gbp-snapshot/page.tsx
     - packages/google/src/seo/gbp-consistency.test.ts
+
   - id: G-SEO-07
     order: 174
     title: Weekly plain-English report by Resend, five prioritised actions

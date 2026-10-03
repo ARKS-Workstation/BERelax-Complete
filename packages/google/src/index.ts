@@ -348,6 +348,24 @@ export {
   type SeoModelAnswer,
 } from './seo/draft-suggestions.ts'
 export {
+  type GbpCheckMode,
+  type GbpConsistencyDeps,
+  type GbpConsistencyOutcome,
+  type GbpManualSnapshot,
+  type GbpSnapshotDay,
+  type GbpSnapshotForm,
+  type GbpSnapshotFormField,
+  type GbpSnapshotPrice,
+  googleHoursFrom,
+  manualSnapshotForm,
+  recordManualSnapshot,
+  runGbpConsistencyCheck,
+  snapshotHoursFrom,
+  snapshotPricesFrom,
+  websiteHoursFrom,
+  websitePricesFrom,
+} from './seo/gbp-consistency.ts'
+export {
   assertWindowRespectsLag,
   type CollectOptions,
   collectGscSnapshot,
@@ -359,6 +377,7 @@ export {
   positionCenti,
   toWarehouseRow,
 } from './seo/gsc-snapshot.ts'
+
 export {
   runGscNightlySnapshot,
   SEO_GSC_SNAPSHOT_AGENT,

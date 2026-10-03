@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**172 / 211 units complete.**
+**173 / 211 units complete.**
 
 ## Next up
 
@@ -191,7 +191,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 170 | `G-SEO-03` | Query-side deterministic analyses: CTR outliers, content gaps, cannibalisation | `G-SEO-01` | — | — |
 | [x] | 171 | `G-SEO-04` | Site-side deterministic analyses: coverage anomalies, internal links, structured data | `G-SEO-01`, `W-SITE-01`, `W-SITE-02`, `W-SITE-03`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07`, `W-SITE-08`, `W-SITE-09`, `W-SITE-10`, `W-SITE-11` | — | — |
 | [x] | 172 | `G-SEO-05` | Suggestion store with before/after and rollback, LLM drafting, red-team gate | `G-AGT-01`, `G-SEO-02`, `G-SEO-03`, `G-SEO-04` | — | — |
-| [ ] | 173 | `G-SEO-06` | GBP-versus-website consistency check, degrading to a manual snapshot | `G-CONN-05`, `G-SEO-04` | — | Y3-gbp-api, Y1-nap |
+| [x] | 173 | `G-SEO-06` | GBP-versus-website consistency check, degrading to a manual snapshot | `G-CONN-05`, `G-SEO-04` | — | Y3-gbp-api, Y1-nap |
 | [ ] | 174 | `G-SEO-07` | Weekly plain-English report by Resend, five prioritised actions | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `G-AGT-02`, `G-SEO-05`, `G-SEO-06` | — | — |
 | [ ] | 175 | `H-HARD-01` | Security headers, CSP and public-endpoint rate limiting | `A-FIRST-01`, `A-FIRST-02`, `A-FIRST-03`, `A-FIRST-04`, `A-FIRST-05`, `A-FIRST-06`, `A-FIRST-07`, `A-FIRST-08`, `A-FIRST-09`, `A-FIRST-10`, `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `H05`, `W-SITE-01`, `W-SITE-02`, `W-SITE-03`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07`, `W-SITE-08`, `W-SITE-09`, `W-SITE-10`, `W-SITE-11` | — | — |
 | [x] | 176 | `H-HARD-02` | Dependency, secret, licence and container scanning in CI | `F02`, `H05` | — | — |
