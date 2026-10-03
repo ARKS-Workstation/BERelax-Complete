@@ -59425,6 +59425,763 @@ export function chargebackNetEffectFils(`,
   )
 }
 
+// 180a-180z. (A-FIRST-08) First touch and last touch: every way an attribution could come to be a
+//            CONFIDENT answer derived from nothing, and every way it could quietly stop being written.
+//
+// The defects this unit is about divide into two kinds, and the second is the one that costs years.
+//
+// The loud kind is a wrong answer: a first touch that moves, a last touch taken from a session that began
+// after the booking, an offline walk-in counted as attributed. Each of those is a figure somebody can
+// argue with.
+//
+// The quiet kind is an attribution that stops existing, or one whose evidence is dropped out from under
+// it. Nothing writes the row and every test still passes, because the suites call the writer directly. A
+// foreign key is added to `analytics.session` because it looks like an improvement, and ninety days later
+// the retention purge either stops or takes the attribution with it. A paid booking nobody attributed is
+// dropped from the coverage denominator, so the figure rises towards 100% as the attribution gets worse.
+// Those three are what 180i, 180j and 180k are for, and none of them fails loudly in the direction a
+// reader would expect.
+{
+  const RULE = 'packages/core/src/analytics/attribution.ts'
+  const RULE_SUITE = 'packages/core/src/analytics/attribution.test.ts'
+  const MIGRATION = 'packages/db/migrations/0149_attribution_columns.sql'
+  const WRITER = 'packages/db/src/repositories/attribution.ts'
+  const BOOKING = 'packages/db/src/repositories/create-booking.ts'
+  const MIRROR = 'packages/db/src/schema/attribution.ts'
+  const REGISTRY = 'packages/db/src/merge-participants.ts'
+  const POLICY = 'packages/core/src/privacy/rights-policy.ts'
+  const STATIC_SUITE = 'packages/db/src/attribution.test.ts'
+
+  const unitFails = (...files) =>
+    runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const brokenUnit = (file, find, into, ...suites) =>
+    withEditedFile(
+      file,
+      (source) => replaceOnce(source, find, into),
+      () => unitFails(...suites),
+    )
+
+  // 180a. The first-touch comparator loses its tie-break. Two sessions of one visitor can share a
+  //       `started_at` to the millisecond — a tab restored into two windows is the real case — and the
+  //       answer then depends on the order the rows arrived in, which is the one thing "write-once"
+  //       claims it does not.
+  checkRejectedBy(
+    'attribution: a first-touch order that is not total is caught',
+    brokenUnit(
+      RULE,
+      '  if (left.occurredAtMs !== right.occurredAtMs) return left.occurredAtMs - right.occurredAtMs\n  return left.sessionReference < right.sessionReference ? -1 : 1',
+      '  return left.occurredAtMs - right.occurredAtMs',
+      RULE_SUITE,
+    ),
+    'breaks a tie on the session reference',
+  )
+
+  // 180b. The last touch loses its bound. The most recent session in the table is then the answer, and
+  //       the page a customer lands on after booking is usually the confirmation — so the error is
+  //       self-reinforcing rather than random, and it re-attributes completed sales in one direction.
+  checkRejectedBy(
+    'attribution: a last touch with no pre-booking bound is caught',
+    brokenUnit(
+      RULE,
+      '  const eligible = candidates.filter((touch) => touch.occurredAtMs <= bookingCreatedAtMs)',
+      '  const eligible = [...candidates]',
+      RULE_SUITE,
+    ),
+    'never takes a session that started after the booking',
+  )
+
+  // 180c. `offline` counted as an attributed source. Every walk-in then counts towards coverage, and a
+  //       day of walk-ins reports 100% attribution — which is the figure that makes the whole unit
+  //       pointless rather than merely wrong.
+  checkRejectedBy(
+    'attribution: an offline walk-in counted towards coverage is caught',
+    brokenUnit(
+      RULE,
+      '  return source !== OFFLINE_SOURCE && source !== UNKNOWN_SOURCE',
+      '  return true',
+      RULE_SUITE,
+    ),
+    'counts neither offline nor unknown',
+  )
+
+  // 180d. A window with no paid booking answering 0% instead of "no figure". ADR 0002's rule applied to
+  //       a share: 0% coverage on a day nothing was sold says the marketing failed.
+  checkRejectedBy(
+    'attribution: a coverage share of zero bookings rendered as 0% is caught',
+    brokenUnit(
+      RULE,
+      "      kind: 'no_paid_bookings',",
+      "      kind: 'coverage' as 'no_paid_bookings',",
+      RULE_SUITE,
+    ),
+    'no figure at all for a window with no paid booking',
+  )
+
+  // 180e. `offline` dropped from the basis list, which is what a reader tidying a derived constant would
+  //       do. The CHECK in 0149 would then admit a basis the type system does not.
+  checkRejectedBy(
+    'attribution: a basis list that no longer admits offline is caught',
+    brokenUnit(
+      RULE,
+      "Object.freeze([...ORIGINATION_BASES, 'offline'])",
+      'Object.freeze([...ORIGINATION_BASES])',
+      RULE_SUITE,
+    ),
+    'origination’s four plus offline',
+  )
+
+  // 180f. The origination shape stated twice instead of once. One table's CHECK stops calling the shared
+  //       function, and the two tables then drift into one accepting a row the other refuses — the
+  //       brief's "a second statement of a fact drifts", in the place it would be hardest to notice.
+  checkRejectedBy(
+    'attribution: a second hand-written copy of the origination rule is caught',
+    brokenUnit(
+      MIGRATION,
+      '  constraint booking_attribution_origination_well_formed\n    check (attribution_origination_is_well_formed(basis, source, medium, session_reference, how_heard)),',
+      "  constraint booking_attribution_origination_well_formed\n    check (basis in ('utm', 'click_id', 'referrer', 'direct', 'offline')),",
+      STATIC_SUITE,
+    ),
+    'IMMUTABLE function both tables',
+  )
+
+  // 180g. ZY691 widened to `<=`, which permits an equal-instant overwrite — every re-run of a resolver
+  //       rewriting the claim it had already made, with nothing to say it had changed.
+  checkRejectedBy(
+    'attribution: a first touch that may be replaced at the same instant is caught',
+    brokenUnit(
+      MIGRATION,
+      '  if new.occurred_at < old.occurred_at then',
+      '  if new.occurred_at <= old.occurred_at then',
+      STATIC_SUITE,
+    ),
+    'EARLIER and nothing else',
+  )
+
+  // 180h. The merge fold losing the predicate that makes it a fold. Without it the survivor's claim is
+  //       overwritten with the loser's whatever the order, which ZY691 then refuses — so every merge of
+  //       two attributed customers fails, and the message names an attribution rule rather than a merge.
+  checkRejectedBy(
+    'attribution: a merge fold that does not compare the two claims is caught',
+    brokenUnit(
+      MIGRATION,
+      '     and l.occurred_at < s.occurred_at;',
+      '     and l.occurred_at is not null;',
+      STATIC_SUITE,
+    ),
+    'folds the earlier first touch',
+  )
+
+  // 180i. A foreign key to `analytics.session`. The quiet one: it looks like an improvement, passes every
+  //       test for ninety days, and then either blocks `analytics.run_retention` or cascades away the
+  //       claim the unit exists to preserve.
+  checkRejectedBy(
+    'attribution: a foreign key into the analytics store is caught',
+    brokenUnit(
+      MIGRATION,
+      '  constraint customer_attribution_customer_fk\n    foreign key (customer_id) references customer (id) on update cascade on delete cascade,',
+      '  constraint customer_attribution_customer_fk\n    foreign key (customer_id) references customer (id) on update cascade on delete cascade,\n  constraint customer_attribution_session_fk\n    foreign key (session_reference) references analytics.session (session_id),',
+      STATIC_SUITE,
+    ),
+    'no foreign key to analytics.session',
+  )
+
+  // 180j. The write removed from the booking transaction. Nothing then writes an attribution row at all,
+  //       `attribution.itest.ts` stays green because it calls the writer directly, and the symptom is a
+  //       coverage figure that reads as a marketing failure.
+  checkRejectedBy(
+    'attribution: a booking transaction that writes no attribution is caught',
+    brokenUnit(
+      BOOKING,
+      '  await recordBookingAttribution(uow.sql, {',
+      '  await Promise.resolve({',
+      STATIC_SUITE,
+    ),
+    'inside the booking transaction',
+  )
+
+  // 180k. A paid booking with no attribution dropped from the denominator. The coverage figure then
+  //       rises towards 100% as the attribution gets worse, which is the direction nobody investigates.
+  checkRejectedBy(
+    'attribution: an unattributed paid booking dropped from the denominator is caught',
+    brokenUnit(
+      WRITER,
+      "    select coalesce(ba.source, 'unknown') as source",
+      '    select ba.source as source',
+      STATIC_SUITE,
+    ),
+    'rather than dropping it',
+  )
+
+  // 180l. The merge registry losing the participant. A table carrying a customer id that the registry
+  //       does not account for leaves the loser's attribution on a tombstone nothing reads — and the
+  //       integration catalogue is the only thing that finds it, so the static claim is asserted too.
+  checkRejectedBy(
+    'attribution: an unregistered merge participant is caught',
+    brokenUnit(
+      REGISTRY,
+      "    table: 'customer_attribution',",
+      "    table: 'customer_attribution_unregistered',",
+      STATIC_SUITE,
+    ),
+    'a merge must account for it',
+  )
+
+  // 180m. The erasure classification removed. An unclassified customer-scoped column REFUSES every
+  //       customer erasure — the failure the deferral NOTEs on A-FIRST-01, A-FIRST-05 and A-FIRST-07 each
+  //       named by hand.
+  checkRejectedBy(
+    'attribution: an unclassified customer column is caught',
+    brokenUnit(
+      POLICY,
+      "    key: 'public.customer_attribution.customer_id',",
+      "    key: 'public.customer_attribution.customer_id_unclassified',",
+      STATIC_SUITE,
+    ),
+    'public.customer_attribution.customer_id',
+  )
+
+  // 180n. The first-touch upsert losing the predicate that makes it converge. Every pass would then
+  //       rewrite the claim, ZY691 would refuse, and a booking would fail on an attribution rule.
+  checkRejectedBy(
+    'attribution: a first-touch upsert that does not converge is caught',
+    brokenUnit(
+      WRITER,
+      '     where excluded.occurred_at < customer_attribution.occurred_at',
+      '     where true',
+      STATIC_SUITE,
+    ),
+    'converge rather than accumulate',
+  )
+
+  // 180o. The control the whole block rests on. Every case above breaks something and demands a named
+  //       failure; this one demands that the unbroken tree PASSES, so a suite that had come to fail for
+  //       its own reasons could not make all fourteen of them report success.
+  {
+    const unit = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.config.ts',
+      RULE_SUITE,
+      STATIC_SUITE,
+    ])
+    check('attribution: and both suites pass on the real tree', !unit.failed, unit.output)
+  }
+
+  // 180p. The mirror's own warning. Somebody assembling a write from the Drizzle definitions is exactly
+  //       who would add the foreign key 180i is about, so the definitions have to say why there is none.
+  checkRejectedBy(
+    'attribution: a Drizzle mirror that does not warn about the missing key is caught',
+    brokenUnit(
+      MIRROR,
+      '*   1. **`sessionReference` is NOT a foreign key and never will be.**',
+      '*   1. **`sessionReference` points at the analytics session.**',
+      STATIC_SUITE,
+    ),
+    'NOT a foreign key and never will be',
+  )
+}
+
+// 181a-181z. (A-FIRST-09) The funnel and the rollups: every way a figure could come to be higher than the
+//            truth, and every way a rollup could come to drift from the rows it was computed from.
+//
+// This unit's defects are all FIGURES, and almost every one of them is a figure that is too HIGH. That is
+// not a coincidence: a funnel exists to be shown to somebody, and the numbers that flatter are the ones
+// nobody questions. `booking_created ÷ landing` is more than double the real rate and is what every
+// advertising dashboard reports. A no-show left in the show-adjusted denominator makes the till look like
+// it loses bookings; one left OUT of the exclusion makes the diary look like it converts. A bot's landing
+// counted as a session inflates the denominator and flatters nothing — which is why the bot case is the one
+// that would be found, and why the others need a gate.
+//
+// The second kind is a rollup that drifts from the rows underneath it. A rollup that accumulates doubles
+// every figure on its second run; one keyed on a calendar date moves a night's trade across two dates; one
+// written for a day that has not closed publishes half a day as a whole one. None of the three errors.
+{
+  const COUNTS = 'packages/core/src/analytics/funnel-counts.ts'
+  const COUNTS_SUITE = 'packages/core/src/analytics/funnel-counts.test.ts'
+  const MIGRATION = 'packages/db/migrations/0150_analytics_rollups.sql'
+  const WRITER = 'packages/db/src/repositories/analytics-rollup.ts'
+  const PASS = 'apps/worker/src/jobs/analytics-rollup.ts'
+  const STATIC_SUITE = 'packages/db/src/analytics-rollup.test.ts'
+
+  const unitFails = (...files) =>
+    runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const brokenUnit = (file, find, into, ...suites) =>
+    withEditedFile(
+      file,
+      (source) => replaceOnce(source, find, into),
+      () => unitFails(...suites),
+    )
+
+  // 181a. Conversion taken from `booking_created` instead of `paid`. The figure every ad platform shows,
+  //       more than double the real one, and not revenue.
+  checkRejectedBy(
+    'funnel: conversion computed from booking_created rather than paid is caught',
+    brokenUnit(
+      COUNTS,
+      '  const paid = counts[TERMINAL_STAGE]\n  return rate(\n    paid.entered,\n    landing.entered,',
+      "  const paid = counts['booking_created']\n  return rate(\n    paid.entered,\n    landing.entered,",
+      COUNTS_SUITE,
+    ),
+    'NEVER booking_created over landing',
+  )
+
+  // 181b. The show-adjusted denominator left unadjusted. The no-shows stay in, and a spa that fills its
+  //       diary and gets people through the door reads as one that loses four bookings in ten.
+  checkRejectedBy(
+    'funnel: a show-adjusted rate that does not exclude the no-shows is caught',
+    brokenUnit(
+      COUNTS,
+      '    confirmed.entered - confirmed.excluded,',
+      '    confirmed.entered,',
+      COUNTS_SUITE,
+    ),
+    'excludes a no-show from the denominator',
+  )
+
+  // 181c. A fold that assigns instead of totalling. The read is grouped by origination as well as by
+  //       stage, so every stage arrives several times and the answer becomes whichever tuple sorted last
+  //       — a number that looks right and is a fraction of the truth.
+  checkRejectedBy(
+    'funnel: a count fold that overwrites rather than totals is caught',
+    brokenUnit(
+      COUNTS,
+      '      entered: current.entered + row.entered,',
+      '      entered: row.entered,',
+      COUNTS_SUITE,
+    ),
+    'TOTALS rows for one stage',
+  )
+
+  // 181d. A window with no landings answering 0% instead of "no figure". ADR 0002's rule applied to a
+  //       rate: 0% conversion on a day nobody visited reports a funnel failure that did not happen.
+  checkRejectedBy(
+    'funnel: a conversion rate of 0% for a day with no landing is caught',
+    brokenUnit(
+      COUNTS,
+      "  denominator <= 0\n    ? { kind: 'no_denominator', why }",
+      "  denominator < 0\n    ? { kind: 'no_denominator', why }",
+      COUNTS_SUITE,
+    ),
+    'no figure at all for a window with no landing',
+  )
+
+  // 181e. A stage missing from the empty counts, which makes the first read of it `undefined` rather than
+  //       zero. A missing stage and a stage with no arrivals are different facts, and only one of them is
+  //       a bucket that is empty for ever.
+  checkRejectedBy(
+    'funnel: an incomplete set of empty counts is caught',
+    brokenUnit(
+      COUNTS,
+      'Object.fromEntries(FUNNEL_STAGES.map((stage) => [stage, EMPTY_FUNNEL_STAGE_COUNT]))',
+      "Object.fromEntries(\n    FUNNEL_STAGES.filter((stage) => stage !== 'attended').map((stage) => [\n      stage,\n      EMPTY_FUNNEL_STAGE_COUNT,\n    ]),\n  )",
+      COUNTS_SUITE,
+    ),
+    'hold every stage of the taxonomy',
+  )
+
+  // 181f. ZY701 removed. A session that produced two bookings then contributes two `booking_created`
+  //       rows, and the funnel reports a conversion rate above the share of people who converted.
+  checkRejectedBy(
+    'rollup: a funnel step a session can reach twice is caught',
+    brokenUnit(
+      MIGRATION,
+      'create trigger funnel_step_one_per_session\n  before insert or update on analytics.funnel_step',
+      'create trigger funnel_step_one_per_session\n  before delete on analytics.funnel_step',
+      STATIC_SUITE,
+    ),
+    'before insert or update on analytics.funnel_step',
+  )
+
+  // 181g. ZY701's self-exclusion removed, so every UPDATE finds its own row and is refused. The symptom
+  //       is not a wrong figure: it is a re-materialisation that cannot correct anything.
+  checkRejectedBy(
+    'rollup: a one-step-per-session rule that refuses its own row is caught',
+    brokenUnit(
+      MIGRATION,
+      '     and f.funnel_step_id <> new.funnel_step_id',
+      '     and true',
+      STATIC_SUITE,
+    ),
+    'funnel_step_id <> new.funnel_step_id',
+  )
+
+  // 181h. ZY702 judging the day against `now()` instead of `clock_timestamp()`. `now()` is the
+  //       TRANSACTION's start, so a long backfill judges every day it touches against the instant the
+  //       backfill began — and the days it then accepts are exactly the ones that had not closed.
+  checkRejectedBy(
+    'rollup: a closed-day check read from the transaction clock is caught',
+    brokenUnit(
+      MIGRATION,
+      '  if clock_timestamp() >= v_closes_at then',
+      '  if now() >= v_closes_at then',
+      STATIC_SUITE,
+    ),
+    'clock_timestamp() >= v_closes_at',
+  )
+
+  // 181i. ZY702 declared on one of the three tables. A rule on `daily_traffic` says nothing about the
+  //       funnel or the revenue, and those two are the figures somebody is shown.
+  checkRejectedBy(
+    'rollup: a closed-day check missing from the revenue table is caught',
+    brokenUnit(
+      MIGRATION,
+      'create trigger daily_source_revenue_day_has_closed\n  before insert or update on analytics.daily_source_revenue',
+      'create trigger daily_source_revenue_day_has_closed\n  before delete on analytics.daily_source_revenue',
+      STATIC_SUITE,
+    ),
+    'before insert or update on analytics.daily_source_revenue',
+  )
+
+  // 181j. A third statement of "which trading date is this instant". The quiet one: it looks like an
+  //       improvement, and it disagrees with the two the database enforces on exactly the dates somebody
+  //       overrode the hours for — the days it matters most (ADR 0066).
+  checkRejectedBy(
+    'rollup: a second trading-date resolver in the migration is caught',
+    brokenUnit(
+      MIGRATION,
+      'begin;\n',
+      "begin;\n\ncreate function analytics.rollup_trading_date(p_at timestamptz) returns date\nlanguage sql immutable as $$ select (p_at - interval '11 hours')::date $$;\n",
+      STATIC_SUITE,
+    ),
+    'read off the basis 0116 stored',
+  )
+
+  // 181k. The gap cohort stopping being counted — read as `trading` for every session, so nine hours of
+  //       daytime browsing reads as trade and `Y5-funnel-gap-bucket` becomes unanswerable rather than
+  //       open.
+  checkRejectedBy(
+    'rollup: a gap cohort counted as daytime trade is caught',
+    brokenUnit(
+      WRITER,
+      "           count(*) filter (where s.trading_date_basis <> 'trading')::text as gap_entered",
+      '           0::text as gap_entered',
+      STATIC_SUITE,
+    ),
+    'is read off the basis 0116 stored',
+  )
+
+  // 181l. A rollup that accumulates. The delete before each insert is what makes two runs byte-identical;
+  //       without it the second run doubles every figure, and nothing errors.
+  checkRejectedBy(
+    'rollup: a recompute that accumulates rather than replacing is caught',
+    brokenUnit(
+      WRITER,
+      '  await sql`delete from analytics.daily_traffic where trading_date = ${input.tradingDate}::date`',
+      '  // the delete this rollup needs',
+      STATIC_SUITE,
+    ),
+    'replaces each rollup rather than accumulating',
+  )
+
+  // 181m. The terminal step taken from something other than the ledger. A funnel that counted its own
+  //       idea of paid agrees with the invoice until the first refund.
+  checkRejectedBy(
+    'rollup: a paid step not taken from the settled invoice is caught',
+    brokenUnit(
+      WRITER,
+      '       where st.outstanding_fils <= 0\n       group by a.session_id',
+      '       where true\n       group by a.session_id',
+      STATIC_SUITE,
+    ),
+    'reads the terminal stage from the LEDGER',
+  )
+
+  // 181n. A funnel vocabulary restated inside `packages/db`. The mapping is core's and is total by
+  //       compilation; a copy in SQL is the drift that makes an event collected and never counted.
+  checkRejectedBy(
+    'rollup: an event name written as a literal in packages/db is caught',
+    brokenUnit(
+      WRITER,
+      "       and (not m.entry_only or (e.properties ->> 'entry') = 'true')",
+      "       and (e.event_name = 'page_view' or not m.entry_only)",
+      STATIC_SUITE,
+    ),
+    'must not be a literal in packages/db',
+  )
+
+  // 181o. The pass's DELETE grant removed. The re-materialisation is then not expressible at all, and the
+  //       alternative a writer reaches for is accumulating — which is 181l from the other end.
+  checkRejectedBy(
+    'rollup: a funnel_step the pass may not replace is caught',
+    brokenUnit(
+      MIGRATION,
+      'grant delete on analytics.funnel_step to berelax_app;',
+      '-- no delete grant',
+      STATIC_SUITE,
+    ),
+    'DELETE on funnel_step alone',
+  )
+
+  // 181p. The expired-ref purge losing its grant, which is A-FIRST-07's deferral quietly undone: the
+  //       codes accumulate for ever and nothing says so, because the pass's own log line reports zero.
+  checkRejectedBy(
+    'rollup: a ref-code purge the pass may not perform is caught',
+    brokenUnit(
+      MIGRATION,
+      'grant delete on whatsapp_ref to berelax_app;',
+      '-- no delete grant',
+      STATIC_SUITE,
+    ),
+    'DELETE on whatsapp_ref',
+  )
+
+  // 181q. The pass moved after A-MEAS-07's reconciliation, which then compares against an internal side
+  //       this pass has not produced and reports every dispatch as a push with nothing behind it.
+  checkRejectedBy(
+    'rollup: a pass scheduled after the reconciliation it feeds is caught',
+    brokenUnit(PASS, "  cron: '35 2 * * *',", "  cron: '35 5 * * *',", STATIC_SUITE),
+    'before A-MEAS-05 uploads',
+  )
+
+  // 181r. The control the whole block rests on. Every case above breaks something and demands a named
+  //       failure; this one demands that the unbroken tree PASSES, so a suite that had come to fail for
+  //       its own reasons could not make the other seventeen report success.
+  {
+    const unit = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.config.ts',
+      COUNTS_SUITE,
+      STATIC_SUITE,
+    ])
+    check('rollup: and both suites pass on the real tree', !unit.failed, unit.output)
+  }
+}
+
+// 182a-182z. (A-MEAS-06) The heartbeat, the dead letter and the alert's sender: every way a failure could
+//            come to look like health, and every way a permanent failure could come to disappear.
+//
+// This unit's whole subject is the shape of failure docs/10 §6 names — *a pg-boss job failure is not
+// evidence anybody has seen* — so every defect here is a thing that errors NOWHERE.
+//
+// A heartbeat without `next_run_at` reads as healthy for an agent that has stopped, because "last run two
+// minutes ago" is true of an agent whose next run was due an hour ago. A dispatch that gives up by its
+// attempt counter passing a ladder reads as a row due for retry. A dead letter that can be deleted makes
+// A-MEAS-07 reconcile a day whose money is short. An alert declared promotional would leave under the
+// `AD-` identity, which is suspended by marketing mistakes — so an incident notification would stop
+// arriving because somebody sent one blast too many. None of the four raises anything.
+{
+  const MIGRATION = 'packages/db/migrations/0151_agent_heartbeat.sql'
+  const HEARTBEAT = 'packages/db/src/repositories/agents.ts'
+  const DISPATCH = 'packages/db/src/repositories/analytics-dispatch.ts'
+  const CONSUMER = 'apps/worker/src/jobs/analytics-dispatch.ts'
+  const WATCHDOG = 'apps/worker/src/jobs/agent-watchdog.ts'
+  const CONSOLE = 'apps/web/app/(admin)/agents/queries.ts'
+  const STATIC_SUITE = 'packages/db/src/agent-heartbeat.test.ts'
+
+  const unitFails = (...files) =>
+    runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const brokenUnit = (file, find, into, ...suites) =>
+    withEditedFile(
+      file,
+      (source) => replaceOnce(source, find, into),
+      () => unitFails(...suites),
+    )
+
+  // 182a. The pairing made one-sided, which is the direction a writer actually forgets: an attempt
+  //       recorded with no next run. The console then cannot tell a slow agent from a stopped one, and
+  //       nothing says so.
+  checkRejectedBy(
+    'heartbeat: a next_run_at that need not accompany a run is caught',
+    brokenUnit(
+      MIGRATION,
+      'check ((last_run_at is null) = (next_run_at is null))',
+      'check (next_run_at is null or last_run_at is not null)',
+      STATIC_SUITE,
+    ),
+    'BOTH directions',
+  )
+
+  // 182b. `next_run_at` derived from somewhere other than the agent's own declared interval. A third
+  //       statement of when the next run is due is the one a console shows while the watchdog doubles a
+  //       different number.
+  checkRejectedBy(
+    'heartbeat: a next run derived from anything but the declared interval is caught',
+    brokenUnit(
+      HEARTBEAT,
+      '              select d.expected_interval_seconds from agent_definition d',
+      '              select 900',
+      STATIC_SUITE,
+    ),
+    'derived from the agent’s own declared interval',
+  )
+
+  // 182c. The two written by separate statements, so one can land without the other. The CHECK refuses
+  //       the pair being broken, which means the SECOND statement fails — a heartbeat that is not written
+  //       at all, on the path that exists to record that something happened.
+  checkRejectedBy(
+    'heartbeat: a next run written by a second statement is caught',
+    brokenUnit(
+      HEARTBEAT,
+      '        next_run_at = ${atIso}::timestamptz',
+      '        last_failure_at = last_failure_at',
+      STATIC_SUITE,
+    ),
+    'next_run_at = ',
+  )
+
+  // 182d. The dead-letter state removed from 0125's bijection, so a refused row can carry no reason —
+  //       and "did we send anything we should not have" becomes unanswerable for exactly the rows that
+  //       never went.
+  checkRejectedBy(
+    'dead letter: a state outside the reason bijection is caught',
+    brokenUnit(
+      MIGRATION,
+      "check ((state in ('suppressed', 'cancelled_consent_withdrawn', 'failed', 'dead_letter'))\n         = (reason is not null))",
+      "check ((state in ('suppressed', 'cancelled_consent_withdrawn', 'failed'))\n         = (reason is not null))",
+      STATIC_SUITE,
+    ),
+    'keep 0125’s bijection total',
+  )
+
+  // 182e. A dead letter permitted with no provider error. The only record of WHY a conversion will never
+  //       go out, and without it the row is indistinguishable from a consumer that stopped running.
+  checkRejectedBy(
+    'dead letter: one that carries no provider error is caught',
+    brokenUnit(
+      MIGRATION,
+      "alter table analytics_dispatch add constraint analytics_dispatch_dead_letter_carries_its_error\n  check ((state = 'dead_letter') <= (last_error is not null));",
+      '-- no error required',
+      STATIC_SUITE,
+    ),
+    'keep 0125’s bijection total',
+  )
+
+  // 182f. ZY711 removed. A-MEAS-07 then reconciles a day whose money is short as agreeing, because a
+  //       conversion the platform never heard about has become a conversion nobody enqueued.
+  checkRejectedBy(
+    'dead letter: one that can be deleted is caught',
+    brokenUnit(
+      MIGRATION,
+      'create trigger analytics_dispatch_dead_letter_is_not_deletable\n  before delete on analytics_dispatch',
+      'create trigger analytics_dispatch_dead_letter_is_not_deletable\n  before update on analytics_dispatch',
+      STATIC_SUITE,
+    ),
+    'before delete on analytics_dispatch',
+  )
+
+  // 182g. ZY711 widened from the STATE to the TABLE. It would then refuse every delete, including the
+  //       ones a retention purge and a fixture rely on — a rule that fires on everything is a rule
+  //       somebody removes.
+  checkRejectedBy(
+    'dead letter: a refusal scoped to the table rather than the state is caught',
+    brokenUnit(MIGRATION, "  if old.state <> 'dead_letter' then", '  if false then', STATIC_SUITE),
+    "if old.state <> 'dead_letter' then",
+  )
+
+  // 182h. `dead_letter` reached by the KIND of refusal rather than by the budget. A malformed payload
+  //       would then dead-letter on its first attempt, inside a budget that had four tries left — and the
+  //       conversion is abandoned for a reason the far end might have fixed in the meantime.
+  checkRejectedBy(
+    'dead letter: a state reached by the kind of refusal rather than the budget is caught',
+    brokenUnit(
+      CONSUMER,
+      'const budgetExhausted = dispatch.attempts + 1 >= ANALYTICS_MAX_ATTEMPTS',
+      'const budgetExhausted = !TRANSPORT_REFUSAL_IS_RETRYABLE[refusal]',
+      STATIC_SUITE,
+    ),
+    'exhausting the BUDGET and not by the kind of refusal',
+  )
+
+  // 182i. The writer's own branch removed, so an exhausted budget leaves the row `failed` again — 0137's
+  //       invisible give-up, restored with a state that exists and is never written.
+  checkRejectedBy(
+    'dead letter: a writer that never reaches the state is caught',
+    brokenUnit(DISPATCH, "        ? 'dead_letter'", "        ? 'failed'", STATIC_SUITE),
+    'exhausting the BUDGET',
+  )
+
+  // 182j. The console's reader removed. The rows are still written, ZY711 still protects them, and
+  //       nobody is told — which is the defect one level down from a watchdog nothing watches, and the
+  //       reason the state exists at all.
+  checkRejectedBy(
+    'dead letter: a queue the console no longer reads is caught',
+    brokenUnit(
+      CONSOLE,
+      '  const deadLetters = await deadLetteredDispatches(sql, {',
+      '  const deadLetters = await Promise.resolve([] as never[]).then((rows) => ({ rows, _: {',
+      STATIC_SUITE,
+    ),
+    'two named readers',
+  )
+
+  // 182k. The count removed from the alert. Somebody woken about a silent dispatcher is then told nothing
+  //       about the conversions that have permanently given out, which is the half of the incident that
+  //       needs a different action.
+  checkRejectedBy(
+    'dead letter: a count missing from the alert detail is caught',
+    brokenUnit(
+      WATCHDOG,
+      '        deadLetteredDispatches: deadLetters.length,',
+      '        deadLetteredCount: deadLetters.length,',
+      STATIC_SUITE,
+    ),
+    'two named readers',
+  )
+
+  // 182l. The alert declared promotional. It would then leave under the `AD-` identity, which is the one
+  //       a marketing mistake suspends — so incident notifications would stop arriving because somebody
+  //       sent one blast too many, which is exactly the coupling ADR 0016 exists to break.
+  checkRejectedBy(
+    'alert: a promotional agent alert is caught',
+    brokenUnit(
+      WATCHDOG,
+      "export const AGENT_ALERT_MESSAGE_CLASS: MessageClass = 'transactional'",
+      "export const AGENT_ALERT_MESSAGE_CLASS: MessageClass = 'promotional'",
+      STATIC_SUITE,
+    ),
+    'declared once as transactional',
+  )
+
+  // 182m. The class made a parameter. The constant then documents an intention instead of deciding
+  //       anything, and the first call site in a hurry chooses.
+  checkRejectedBy(
+    'alert: a sender resolution that takes the class as a parameter is caught',
+    brokenUnit(
+      WATCHDOG,
+      '    messageClass: AGENT_ALERT_MESSAGE_CLASS,',
+      "    messageClass: 'promotional',",
+      STATIC_SUITE,
+    ),
+    'no parameter for a caller’s preference',
+  )
+
+  // 182n. The second agent's heartbeat row dropped. `agentsWithHeartbeat` INNER JOINS, so the agent
+  //       becomes one the watchdog cannot see at all — 0107's defect, which nothing static caught until
+  //       a suite read the table.
+  checkRejectedBy(
+    'agent: a definition with no heartbeat row is caught',
+    brokenUnit(
+      MIGRATION,
+      "insert into agent_heartbeat (agent_key)\nvalues ('offline_conversions')",
+      "insert into agent_run (agent_key, outcome)\nvalues ('offline_conversions', 'succeeded')",
+      STATIC_SUITE,
+    ),
+    'arrives with both rows',
+  )
+
+  // 182o. The second agent given the consumer's five-minute interval. The watchdog's 2x window is then
+  //       twenty minutes for a pass that runs once a day, so it alerts every morning — and an alert that
+  //       fires every morning is one somebody switches off.
+  checkRejectedBy(
+    'agent: a daily pass declared at the consumer’s interval is caught',
+    brokenUnit(MIGRATION, '   86400, 0)', '   300, 0)', STATIC_SUITE),
+    'OWN daily interval',
+  )
+
+  // 182p. The control the whole block rests on. Every case above breaks something and demands a named
+  //       failure; this one demands that the unbroken tree PASSES, so a suite that had come to fail for
+  //       its own reasons could not make the other fifteen report success.
+  {
+    const unit = run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', STATIC_SUITE])
+    check('agent heartbeat: and the suite passes on the real tree', !unit.failed, unit.output)
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

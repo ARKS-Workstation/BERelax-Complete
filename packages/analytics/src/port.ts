@@ -60,7 +60,7 @@ export type AnalyticsActionSource = (typeof ANALYTICS_ACTION_SOURCES)[number]
  * plain `string`, which makes a renamed source a runtime `undefined` instead of a tsc error — and an
  * `undefined` action source is the field Meta rejects the whole batch for.
  */
-export const BOOKING_SOURCES = ['online', 'front_desk', 'phone', 'walk_in'] as const
+export const BOOKING_SOURCES = ['online', 'front_desk', 'phone', 'walk_in', 'import'] as const
 export type BookingSource = (typeof BOOKING_SOURCES)[number]
 
 /**
@@ -77,13 +77,25 @@ export type BookingSource = (typeof BOOKING_SOURCES)[number]
  * platform vocabulary has one word for both, and collapsing them here rather than in the consumer is what
  * keeps the internal distinction intact.
  */
-export const BOOKING_SOURCE_ACTION_SOURCE: Readonly<Record<BookingSource, AnalyticsActionSource>> =
-  Object.freeze({
-    online: 'website',
-    front_desk: 'physical_store',
-    phone: 'phone_call',
-    walk_in: 'physical_store',
-  })
+/**
+ * `import` is deliberately ABSENT from the table below, and that is the decision rather than an omission.
+ *
+ * Migration 0130 (H-MIG-05) widened `booking_source_check` to admit `import`, because a reconstructed
+ * visit is history the live status machine may not touch. The legacy file does not say where such a
+ * booking was taken, so there is no action source to declare: mapping it to any of the three would
+ * report a visit from before this system existed as a conversion that happened now, in somebody else's
+ * advertising account. `actionSourceFor` therefore refuses it by the path that already refuses an
+ * undeclared source, and `Exclude<..., 'import'>` keeps the table total over the sources a LIVE booking
+ * may have — so a sixth source still stops this file compiling until somebody decides what it is.
+ */
+export const BOOKING_SOURCE_ACTION_SOURCE: Readonly<
+  Record<Exclude<BookingSource, 'import'>, AnalyticsActionSource>
+> = Object.freeze({
+  online: 'website',
+  front_desk: 'physical_store',
+  phone: 'phone_call',
+  walk_in: 'physical_store',
+})
 
 /** The action source for a booking source that arrived as a plain `string`, or a named refusal. */
 export function actionSourceFor(bookingSource: string): AnalyticsActionSource {

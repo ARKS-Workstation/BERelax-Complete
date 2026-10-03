@@ -12942,7 +12942,8 @@ units:
       analytics.session.session_id. A second analytics.whatsapp_ref would be a second statement of one fact.
       The itest asserts the table exists in `public` so the absence reads as a decision.'
     - 'NOTE: no customer or booking reference exists anywhere in this schema, and the itest asserts it by
-      pattern. That is deferred to A-FIRST-08, whose own acceptance line names attribution onto customer and
+      pattern. That is deferred to A-FIRST-08 — DEFERRAL SATISFIED: the reference runs the
+      other way and no analytics column was added. A-FIRST-08''s own acceptance line names attribution onto customer and
       booking and the merge repointing — a customer_id here would enter C-CRM-05''s merge participant
       registry and C-CRM-10''s erasure catalogue on this commit with no unit owning either decision, and an
       unclassified column in the latter REFUSES every customer erasure. packages/fixtures/src/analytics-privacy.itest.ts
@@ -13236,7 +13237,9 @@ units:
       no branch on the verdict anywhere in it (apps/web/app/api/collect/ingest.test.ts asserts the
       absence structurally and collect.itest.ts asserts a declared crawler''s events are STORED and
       flagged); excluding
-      bot-flagged sessions from the funnel is deferred to A-FIRST-09; the bot-filtered share on the analytics page
+      bot-flagged sessions from the funnel is deferred to A-FIRST-09 — DEFERRAL SATISFIED: its
+      funnelCountRows excludes bot sessions by default and includes them behind an explicit parameter,
+      and the steps are MATERIALISED either way so the verdict stays recoverable. The bot-filtered share on the analytics page
       is deferred to A-FIRST-10, and the same figure on the operations dashboard is deferred to R-REP-07. Each
       must call classifyBot and store its verdict rather than re-deriving a flag — BOT_KINDS and
       AI_CRAWLER_BOT_KINDS are exported from @berelax/core and @berelax/shared for exactly that — and the scan in
@@ -13408,13 +13411,18 @@ units:
       fbp/fbc COLUMNS remain open and are A-MEAS-03''s, which forwards them; A-MEAS-02 added none, for the
       reason it added no event_id — a column with no producer is indistinguishable from a column whose
       producer stopped working.'
-    - 'NOTE: deferred to A-FIRST-09 — funnel_step rows. This unit writes analytics.visitor, .session,
+    - 'NOTE: deferred to A-FIRST-09 — DEFERRAL SATISFIED: materialiseFunnelSteps writes all eight steps,
+      the collected four from the events and the domain four from the bookings A-FIRST-08 attributes, with
+      the `paid` step read from a settled invoice. What follows is the deferral as it stood: funnel_step
+      rows. This unit writes analytics.visitor, .session,
       .attribution, .event and .pre_consent_landing and no funnel step: A-FIRST-09''s own summary is
       "materialise funnel_step rows from analytics and domain events". What this unit does for it is decide
       the page_view `entry` flag, which A-FIRST-02 deferred here in so many words — it is overwritten
       server-side on the session''s first page view, because a browser has never been told which session it
       is in and a client claiming entry on its fourth page view would give one session four landings.'
-    - 'NOTE: deferred to A-FIRST-09 — which trading date daytime traffic belongs to (Y5-funnel-gap-bucket).
+    - 'NOTE: deferred to A-FIRST-09 — DEFERRAL SATISFIED: it ACTS on the question by counting the cohort
+      (daily_traffic.gap_sessions, daily_funnel.gap_entered, read off this basis) and resolving nothing;
+      the business decision stays open and is now re-bucketable. The deferral as it stood: which trading date daytime traffic belongs to (Y5-funnel-gap-bucket).
       This unit could not defer it entirely, because analytics.session.trading_date is NOT NULL with a real
       key to business_day and trading runs 11:00-02:00, so an instant between 02:00 and 11:00 belongs to no
       trading date while web traffic carries on. The row is filed under the next date the calendar opens and
@@ -13723,7 +13731,7 @@ units:
       touch the most recent pre-booking session, offline bookings carrying source 'offline' plus the how-heard
       fallback, and customer merge repointing attribution to the survivor.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - A-FIRST-05
@@ -13749,11 +13757,64 @@ units:
       the survivor with exactly one first-touch row
     - attribution coverage — the share of paid bookings with a non-offline, non-unknown source — is computed
       and equals the hand-counted value on the seeded fixture
+    - 'NOTE: the denormalised columns are on two CHILD tables, public.customer_attribution and
+      public.booking_attribution, and not on customer and booking themselves. The decisive reason is
+      that a NOT NULL attribution column cannot be added to either parent without inventing one: both
+      already hold rows, so the statement fails on a non-empty table and a DEFAULT writes an attribution
+      onto every customer the business already has — customer_acquisition_source (0053) already says
+      "choosing walk_in for them would be an invented attribution" (brief rule 15). A child row''s
+      ABSENCE is the honest statement and source is then NOT NULL for every row that exists, which is
+      what the acceptance line asks for. The other two reasons are that a customer-scoped column enters
+      C-CRM-05''s merge registry and C-CRM-10''s erasure catalogue one classification at a time, and that
+      widening customer by seven columns widens every read and every DTO audience behind it. ADR 0102.'
+    - 'NOTE: the first touch is the CUSTOMER''s and the last touch is the BOOKING''s — two subjects, two
+      tables. A person is found once, so on the booking one customer would have three first touches; a
+      person books repeatedly, so on the customer a second booking would overwrite the first booking''s
+      last touch, and that figure is the denominator of every "which channel produced this sale" report.
+      They may disagree, which is why there are two and not one column.'
+    - 'NOTE: two files beyond the declared list. packages/db/src/attribution.test.ts reads 0149 and
+      asserts its structural claims, for the reason analytics-dispatch.test.ts exists for 0137 — a
+      trigger deleted from a migration is invisible to a database that already has it, so the integration
+      suite stays green on a tree that no longer creates it. packages/fixtures/src/attribution-coverage.itest.ts
+      is where the coverage figure and the rule-said-twice equality are proved: packages/db may not import
+      packages/core (ADR 0001), so the ordering that picks the two touches is written as `order by …
+      limit 1` in the repository and as firstTouchOf/lastTouchBeforeOf in core, and fixtures is the one
+      package allowed to import both and hold them equal. Coverage also needs a PAID booking, and paid is
+      a fact in the ledger, so the fixture needs an invoice and therefore core''s VAT split.'
+    - 'NOTE: the deferral A-FIRST-07, A-FIRST-05 and A-FIRST-01 each recorded is discharged. analytics
+      still holds no customer or booking reference — analytics.itest.ts asserts that by pattern and the
+      assertion still passes — because the reference runs the other way: public.customer_attribution
+      carries the customer id and public.booking_attribution the booking id, both classified in
+      C-CRM-10''s erasure catalogue (delete_row and inherits_parent respectively, with the statement that
+      carries the first one out) and the first registered in C-CRM-05''s merge participant registry on
+      this commit. booking_whatsapp_ref_capture.attributed_session_id (0127) is the join a desk booking''s
+      attribution reads, exactly as A-FIRST-07 built it for.'
+    - 'NOTE: A-MEAS-03''s and A-MEAS-05''s injected AnalyticsSessionResolver now has something behind it:
+      the offline-conversions handler resolves the session through attributedSessionForBooking. It is
+      still a REFUSAL rather than a choice, which is what ADR 0091 and ADR 0092 insisted on — the answer
+      is the session the booking''s own last touch names, written by the transaction that produced the
+      booking, and null for every walk-in and telephone booking that carried no ref code. The pass counts
+      those refusals exactly as it counted the shipped resolver''s. NO_ATTRIBUTION_ON_FILE is kept and is
+      what A-MEAS-05''s own suite uses to assert the refusal path.'
+    - 'NOTE: a bot-flagged session is NOT excluded from the candidate set, and that is a decision rather
+      than an omission. ADR 0062''s rule is that the classifier''s verdict is stored and never acted on,
+      and the one unit the exclusion was deferred to is A-FIRST-09''s funnel, which counts traffic.
+      analytics.visitor exists only at consent (ADR 0066) and a crawler does not answer a consent banner,
+      so a bot flag under a consented visitor is a false positive — and dropping that session would
+      silently move the customer''s first touch.'
+    - 'NOTE: no test port band was needed. This unit starts no server: its round trip is a migration, two
+      repositories and two integration suites against PostgreSQL. The allocated band { start: 22_400,
+      width: 300 } is therefore RELEASED unused for all three of this agent''s units, and a declared but
+      unused band fails apps/web/src/test-ports.test.ts.'
     files:
-    - packages/db/migrations/NNNN_attribution_columns.sql
+    - packages/db/migrations/0149_attribution_columns.sql
     - packages/core/src/analytics/attribution.ts
+    - packages/core/src/analytics/attribution.test.ts
     - packages/db/src/repositories/attribution.ts
+    - packages/db/src/schema/attribution.ts
+    - packages/db/src/attribution.test.ts
     - packages/db/src/attribution.itest.ts
+    - packages/fixtures/src/attribution-coverage.itest.ts
   - id: A-FIRST-09
     order: 112
     title: Funnel to PAID and the nightly rollups on business_day
@@ -13761,7 +13822,7 @@ units:
       excluded from conversion and bots excluded by default, plus the nightly daily_traffic, daily_funnel
       and daily_source_revenue rollups keyed on business_day and retained indefinitely.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - A-FIRST-02
@@ -13795,10 +13856,57 @@ units:
       remain present and unchanged
     - daily_source_revenue is integer fils taken from paid invoice lines, and its gross minus VAT reconciles
       to the invoice to the fils
+    - 'NOTE: the three rollups and analytics.funnel_step already existed, created by 0096 (A-FIRST-01)
+      against this unit by name, and their keys are right: every rollup is keyed on trading_date with a
+      real foreign key into public.business_day. So migration 0150 adds only what 0096 could not know —
+      the two gap counts, the two refusals and the two privileges a re-materialisation and the ref purge
+      need — and re-keys nothing. `nightly_rollups` already has its agent_definition and agent_heartbeat
+      rows from 0021, which declared the agent before any job existed precisely so a scheduled pass could
+      not be added without a heartbeat; this is that job, so no agent arrives here either. ADR 0103.'
+    - 'NOTE: Y5-funnel-gap-bucket is acted on by COUNTING the cohort and by resolving nothing.
+      daily_traffic.gap_sessions and daily_funnel.gap_entered are read off analytics.session.trading_date_basis,
+      the column 0116 created and ZY222 holds against business_day''s own instants in both directions, so
+      the cohort is visible and re-bucketable the day the business answers. An
+      analytics.rollup_trading_date(timestamptz) function was written, applied to a database and REMOVED
+      before the migration was finished: two statements of "which trading date does this instant belong
+      to" already exist and both are enforced — analytics.session.trading_date by ZY222 and
+      appointment.trading_date by a foreign key (0024) — and a third, consulted only by the rollups, would
+      disagree with both on exactly the dates somebody overrode the hours for. The counts sit BESIDE the
+      totals rather than in a key 0096 owns, which would turn one day into four rows and make A-FIRST-10,
+      R-REP-07 and A-MEAS-07 each sum them before showing a day.'
+    - 'NOTE: three files beyond the declared list, and one of them is where half the acceptance is proved.
+      packages/db/src/analytics-rollup.test.ts reads 0150 and asserts its structural claims, for the
+      reason analytics-dispatch.test.ts exists for 0137. packages/db/src/repositories/analytics-rollup.ts
+      holds the statements, because a repository is where a statement lives.
+      apps/worker/src/jobs/analytics-rollup.itest.ts is where the FUNNEL''s own arithmetic is proved — the
+      500-session fixture, the eight counts, the conversion rate, the no-show exclusion and the bot
+      parameter — because those need COLLECTED_EVENT_FUNNEL and APPOINTMENT_STATUS_FUNNEL from
+      @berelax/core and packages/db may never import core (ADR 0001). A copy of either mapping in a db
+      suite would be the second statement of the funnel the whole design exists to prevent. A-MEAS-05 and
+      A-MEAS-07 each recorded the same reason for the same move. packages/db/src/rollup.itest.ts holds
+      everything that is a property of the schema: ZY701, ZY702, the gap counts, the recompute''s
+      idempotence, the 01:30 filing, the revenue reconciliation and the dropped raw partition.'
+    - 'NOTE: a bot''s funnel steps are MATERIALISED and excluded at the COUNT, not at collection. ADR
+      0062''s rule is that the classifier''s verdict is stored and never acted on, and the two queries then
+      differ by exactly the seeded bot count because they are the same rows with one predicate moved —
+      the only arrangement in which that difference is a measurement rather than a claim. Filtering at the
+      materialisation is irreversible: a crawler re-classified as a human could never be counted back in,
+      because the raw events it would have to be rebuilt from are purged at ninety days.'
+    - 'NOTE: a booking with no attributed analytics session contributes NO funnel step, which is the shape
+      rather than a gap — the funnel measures web journeys and a walk-in has none. Its revenue is still
+      attributed, because daily_source_revenue reads booking_attribution (A-FIRST-08) directly and an
+      offline booking carries source=offline. So the till''s takings and the funnel''s denominator are
+      different populations on purpose.'
+    - 'NOTE: no test port band was needed; the allocated band is released unused. See A-FIRST-08''s note —
+      the same band covered all three of this agent''s units and none of them starts a server.'
     files:
-    - packages/db/migrations/NNNN_analytics_rollups.sql
+    - packages/db/migrations/0150_analytics_rollups.sql
     - apps/worker/src/jobs/analytics-rollup.ts
+    - apps/worker/src/jobs/analytics-rollup.itest.ts
     - packages/core/src/analytics/funnel-counts.ts
+    - packages/core/src/analytics/funnel-counts.test.ts
+    - packages/db/src/repositories/analytics-rollup.ts
+    - packages/db/src/analytics-rollup.test.ts
     - packages/db/src/rollup.itest.ts
   - id: A-FIRST-10
     order: 113
@@ -14278,7 +14386,11 @@ units:
       test across the full fils range the catalogue uses
     - a package redemption pushes conversion value at redemption while the package sale pushes zero, matching
       the Y11-vat-package provisional position
-    - 'NOTE: deferred to A-FIRST-08 — the analytics SESSION a till conversion belongs to. Nothing in this
+    - 'NOTE: deferred to A-FIRST-08 — DEFERRAL SATISFIED: the handler now resolves the session through
+      attributedSessionForBooking, and it still REFUSES rather than choosing — the answer is the session
+      the booking''s own last touch names, and null for every walk-in and telephone booking with no ref
+      code, which the pass counts. NO_ATTRIBUTION_ON_FILE is kept as this suite''s refusal-path control.
+      What follows is the deferral as it stood: the analytics SESSION a till conversion belongs to. Nothing in this
       schema joins an analytics session to a booking, so the pass takes the session from an injected
       resolver whose shipped implementation answers ''nothing on file'' for every conversion, and the pass
       COUNTS the refusals rather than choosing one: a session picked here would push a conversion under
@@ -14293,14 +14405,20 @@ units:
       end because nothing in this build announces a conversion at booking time yet, so there is no earlier
       figure on file to correct. The discounted-invoice acceptance line is satisfied where it is decided
       instead: the repository reads invoice.gross_total and never appointment.gross_price_fils.'
-    - 'NOTE: deferred to A-FIRST-09 — the DATA half of the invoiced and package reads. invoice refuses
+    - 'NOTE: deferred to A-FIRST-09 — DEFERRAL SATISFIED: its suites build real documents and payments
+      inside a transaction they ROLL BACK, which removes exactly what they wrote and needs no declaration
+      in suite-table-declarations.ts — the answer to the difficulty this note records. The deferral as it
+      stood: the DATA half of the invoiced and package reads. invoice refuses
       DELETE for every role (ZI003) and TRUNCATE as the owner is the only legal removal, which is a
       declaration in packages/db/src/suite-table-declarations.ts and a statement wide enough to take other
       suites'' rows with it; package_sale is the same shape. A suite may delete only rows it created
       (ADR 0050), so writing a document in this unit''s suite would mean leaving one behind for ever. All
       three reads ARE asserted to run against the real schema, to filter by trading date and to refuse an
       instant where a date belongs, and the no-show read has a real walk-in fixture.'
-    - 'NOTE: handed to A-MEAS-06 — a second agent_definition and agent_heartbeat row for this pass. It
+    - 'NOTE: handed to A-MEAS-06 — DEFERRAL SATISFIED: migration 0151 brings `offline_conversions`, its
+      agent_definition and its agent_heartbeat row, with an interval of 86400 seconds rather than the
+      consumer''s 300, and this pass now reports to it. The handover as it stood: a second
+      agent_definition and agent_heartbeat row for this pass. It
       reports to analytics_dispatch'' agent because the two passes are one pipeline, and the limit is that
       the consumer writes a heartbeat every five minutes, so this pass failing for a week is invisible to a
       per-agent watchdog. A second agent needs a migration number this unit was allocated none of.'
@@ -14322,7 +14440,7 @@ units:
       alerts when an enabled agent has had no success within twice its expected interval; and a permanently
       failed dispatch lands in a visible dead-letter state rather than disappearing.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - A-FIRST-09
@@ -14340,11 +14458,55 @@ units:
       and appears in the agent-console query; a test asserts the row is never deleted
     - the alert routes through the messaging compliance gate as transactional class and cannot be sent under
       the AD- promotional sender id, asserted by test
+    - 'NOTE: the three frozen-clock claims were ALREADY proved against the real table, by G-AGT-01''s
+      cases in apps/worker/src/jobs/agent-watchdog.itest.ts, and against `nightly_rollups` — one of the
+      two agents this entry names. Restating them for the second agent would be one claim asserted
+      twice, so what this unit added beside them is the half that was genuinely new: that BOTH analytics
+      agents are in the set the watchdog evaluates, and that all four fields are written on the success
+      path and the failure path for each. Through withAgentRun and not recordHeartbeat, because the
+      acceptance is about a RUN — a test calling the writer directly would prove nothing about the
+      wrapper that is supposed to call it either way.'
+    - 'NOTE: the schema half of "writes all four fields on every run" is a CHECK pairing next_run_at to
+      last_run_at in BOTH directions. A claim about a writer is a thing somebody forgets, so an attempt
+      recorded without the next run''s instant is refused — for the two analytics agents, for the other
+      eleven and for a psql session. Its value is the agent''s own expected_interval_seconds, the same
+      figure the watchdog doubles; a cron expression is deliberately not consulted because pnpm jobs
+      already holds the registry''s expression and that interval equal. The cost is paid by two fixtures:
+      agent-watchdog.itest.ts and google-connection-health.itest.ts set a heartbeat directly and now
+      write the field the schema requires, which is the small cost ADR 0066 records for a fixture that
+      has to be consistent with its schema. ADR 0104.'
+    - 'NOTE: a ZY712 was written, applied to a database and REMOVED, and the removal is recorded rather
+      than hidden. It would have refused a heartbeat whose last_success_at moved BACKWARDS, by ZY452''s
+      argument about the attempt counter. Sixteen cases of the existing watchdog suite failed the moment
+      it applied, because every one of them simulates silence by moving that column back — and that is
+      not a test problem: agent_heartbeat is the CURRENT state of an agent rather than a ledger, and an
+      earlier instant moves the answer towards OVERDUE, which is the safe direction. So ONE code is used
+      of the band and ZY712 through ZY720 are released unregistered.'
+    - 'NOTE: three files beyond the declared list. packages/db/src/agent-heartbeat.test.ts reads 0151 and
+      asserts its structural claims, for the reason analytics-dispatch.test.ts exists for 0137.
+      apps/web/src/agent-console.itest.ts proves the console query against a real database, and it is on
+      the WEB side because apps/worker does not import from apps/web — send-scheduled-step.itest.ts
+      records the same separation from the other direction. apps/web/app/(admin)/agents/queries.ts is a
+      query MODULE and not a route, which is A-MEAS-07''s recorded precedent: routes/registry.ts is in
+      exact bijection with the filesystem and requires every document in both locales, and there is no
+      agent console document yet.'
+    - 'NOTE: the alert is not SENT to anybody in this build, and the class is declared anyway. There is
+      no on-call contact on file (Y13-oncall) and an alert is an agent_alert row plus an outbox event, so
+      what is asserted is the two things that decide the outcome when a send path arrives:
+      AGENT_ALERT_MESSAGE_CLASS is transactional, and agentAlertSenderIdentity reads it from that
+      constant with no parameter for a class — so the AD- identity is unreachable for this traffic by
+      construction. assertSenderIdRegistry refuses a transactional slot carrying the prefix, and
+      resolveSenderIdentity does not fall back to the other slot, which is what sender-identity.ts
+      exists to prevent. Nothing new was invented: no sender id, no recipient and no provider.'
+    - 'NOTE: no test port band was needed; the allocated band is released unused for this unit as for the
+      other two. See A-FIRST-08''s note.'
     files:
-    - packages/db/migrations/NNNN_agent_heartbeat.sql
+    - packages/db/migrations/0151_agent_heartbeat.sql
     - apps/worker/src/jobs/agent-watchdog.ts
-    - apps/web/app/(admin)/agents/queries.ts
     - apps/worker/src/jobs/agent-watchdog.itest.ts
+    - apps/web/app/(admin)/agents/queries.ts
+    - apps/web/src/agent-console.itest.ts
+    - packages/db/src/agent-heartbeat.test.ts
   - id: A-MEAS-07
     order: 120
     title: 'Dispatch reconciliation: internal truth versus what was pushed'
@@ -14366,7 +14528,11 @@ units:
       renders an explicit unreconciled state and the API returns Unreconciled rather than a number — asserted
       at both layers'
     - 'the job is idempotent per business_day: two runs produce identical rows'
-    - 'NOTE: deferred to A-FIRST-09 — the INTERNAL side of the comparison. "Internal paid conversions from
+    - 'NOTE: deferred to A-FIRST-09 — DEFERRAL SATISFIED: internalPaidConversions reads the day''s settled
+      documents and the handler derives each event id through analyticsEventId, the same function the
+      enqueuer uses, so the two sides cannot be two different digests. NO_INTERNAL_TRUTH_ON_FILE is kept,
+      because a day the rollup has not run for must still read as *the internal side is missing*. The
+      deferral as it stood: the INTERNAL side of the comparison. "Internal paid conversions from
       the rollups" is that unit''s funnel materialisation and is not built, so the pass takes the internal
       side from an injected resolver whose shipped implementation answers ''nothing on file'' and then
       writes NOTHING for that day, counting it in the log line. A reconciliation written from an empty

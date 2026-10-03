@@ -99,6 +99,11 @@ beforeEach(async () => {
     update agent_heartbeat
     set last_run_at = ${NOW_ISO}::timestamptz - interval '1 minute',
         last_success_at = ${NOW_ISO}::timestamptz - interval '1 minute',
+        -- The fourth field (0151). agent_heartbeat_next_run_accompanies_a_run pairs it to last_run_at
+        -- in both directions, so a fixture that set one without the other is REFUSED — which is the
+        -- constraint doing its job, and the small cost ADR 0066 records for any fixture that has to be
+        -- consistent with the schema it writes into.
+        next_run_at = ${NOW_ISO}::timestamptz + interval '1 day',
         last_failure_at = null, last_error = null, last_outcome = 'succeeded', consecutive_failures = 0
   `
   await sql`

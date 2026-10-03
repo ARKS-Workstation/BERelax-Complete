@@ -2626,6 +2626,94 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['assert_reconciliation_watermark_advances'],
     translators: ['packages/db/src/repositories/reconciliation.ts'],
   },
+  // ZY691-ZY692 are A-FIRST-08's, of the band ZY691-ZY700; ZY693 through ZY700 are left free and
+  // deliberately absent, because an entry for a code no migration raises is direction 3.
+  //
+  // Both are TRIGGERS rather than CHECKs: the first compares NEW against OLD and the second reads another
+  // table's row, and a CHECK can do neither.
+  //
+  // ZY691 is the one the unit rests on, and the shape of the rule is the decision. "A first touch is
+  // write-once" stated as a refusal of every UPDATE is not available, because a customer MERGE has to be
+  // able to carry the loser's EARLIER first touch onto the survivor — so the rule is the one that makes
+  // both true at once: the claim may move backwards in time and never forwards. A resolver re-run over a
+  // longer session history then converges on the same row rather than moving it, which is what makes
+  // "replay the sessions in any order and get the same answer" a property of the schema.
+  //
+  // ZY692 is about a wrong answer that is SELF-REINFORCING rather than random. A session that began after
+  // a booking cannot have produced it, and the page a customer lands on next is usually the confirmation —
+  // so an unbounded last touch re-attributes completed sales to whatever followed them, consistently and
+  // in one direction. A CHECK cannot state it: the booking's creation instant is a row in another table.
+  {
+    code: 'ZY691',
+    rule: 'A customer first touch may only be replaced by an EARLIER one.',
+    migration: '0149',
+    raisedBy: ['assert_first_touch_only_moves_earlier'],
+    translators: ['packages/db/src/repositories/attribution.ts'],
+  },
+  {
+    code: 'ZY692',
+    rule: "A booking's last touch may not be dated after the booking it is attributed to.",
+    migration: '0149',
+    raisedBy: ['assert_last_touch_precedes_its_booking'],
+    translators: ['packages/db/src/repositories/attribution.ts'],
+  },
+  // ZY701-ZY702 are A-FIRST-09's, of the band ZY701-ZY710; ZY703 through ZY710 are left free and
+  // deliberately absent, because an entry for a code no migration raises is direction 3.
+  //
+  // ZY701 is about what the funnel's first bucket IS. It is a count of SESSIONS, which is what makes
+  // every rate below it meaningful, and `landing` is already one per session because the ingest
+  // overwrites the `entry` flag server-side (ADR 0066). The other seven stages had no such guard, and the
+  // ones that needed it are the domain steps: a session that produced two bookings would contribute two
+  // `booking_created` rows and two `confirmed` rows, and the funnel would then report a conversion rate
+  // above the share of people who converted. It cannot be a unique constraint — `funnel_step` is RANGE
+  // partitioned on `occurred_at` and PostgreSQL requires every unique constraint on a partitioned table
+  // to contain the partition key, so a unique (session_id, step, occurred_at) would permit exactly the
+  // second row the rule is about.
+  //
+  // ZY702 is about the CLOCK, and it is A-MEAS-07's ZY472 about the same calendar one table over. Trading
+  // runs 11:00-02:00, so a pass that ran at 22:00 would write a day's figures from half a day's trade;
+  // the row would look complete, and the next morning's report would show a day whose takings fell by
+  // half for no reason anybody could find. It has to exist separately from ZY472: a reconciliation
+  // refusing an open day says nothing about a rollup writing one. A CHECK cannot state either, because
+  // the closing instant is a row in `business_day`.
+  {
+    code: 'ZY701',
+    rule: 'A session may reach a given funnel step at most once.',
+    migration: '0150',
+    raisedBy: ['analytics.assert_one_step_per_session'],
+    translators: ['packages/db/src/repositories/analytics-rollup.ts'],
+  },
+  {
+    code: 'ZY702',
+    rule: 'A trading day that has not closed may not be rolled up.',
+    migration: '0150',
+    raisedBy: ['analytics.assert_rolled_up_day_has_closed'],
+    translators: ['packages/db/src/repositories/analytics-rollup.ts'],
+  },
+  // ZY711 is A-MEAS-06's, of the band ZY711-ZY720; ZY712 through ZY720 are left free and deliberately
+  // absent, because an entry for a code no migration raises is direction 3.
+  //
+  // The row IS the record that a conversion was permanently not delivered. A-MEAS-07 reconciles internal
+  // truth against what was PUSHED, so a deleted dead letter makes a conversion the platform never heard
+  // about indistinguishable from one nobody enqueued — and the day then reconciles while the money is
+  // short. A trigger rather than a revoke, because it has to hold for the owner too, and scoped to the
+  // STATE rather than the table: a `failed` row is still deletable, which is what makes this a claim about
+  // a permanent failure rather than about `analytics_dispatch`.
+  //
+  // ZY712 was written, applied and REMOVED before this entry was taken, and the removal is worth the
+  // sentence: it would have refused a heartbeat whose `last_success_at` moved BACKWARDS, by ZY452's
+  // argument about the attempt counter. Sixteen cases of the existing watchdog suite failed immediately,
+  // because every one of them simulates silence by moving that column back — and that is not a test
+  // problem. `agent_heartbeat` is the CURRENT state of an agent rather than a ledger, and an earlier
+  // instant moves the answer towards OVERDUE, which is the safe direction and the one that makes somebody
+  // look.
+  {
+    code: 'ZY711',
+    rule: 'A dead-lettered analytics dispatch may not be deleted.',
+    migration: '0151',
+    raisedBy: ['refuse_dead_letter_delete'],
+    translators: ['packages/db/src/repositories/analytics-dispatch.ts'],
+  },
   {
     code: 'ZY741',
     rule: 'A parallel-run reconciliation may not be dated outside the window the row names.',

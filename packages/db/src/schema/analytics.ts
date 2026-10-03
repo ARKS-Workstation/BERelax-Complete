@@ -325,6 +325,14 @@ export const dailyTraffic = analyticsSchema.table(
     visitors: integer('visitors').notNull(),
     botSessions: integer('bot_sessions').notNull(),
     events: integer('events').notNull(),
+    /**
+     * Sessions filed under this trading date out of the 02:00-11:00 gap (0150, A-FIRST-09).
+     *
+     * Read off `analytics.session.trading_date_basis`, which ZY222 holds against `business_day`'s own
+     * instants, so this count and the session rows cannot disagree. `Y5-funnel-gap-bucket` is still
+     * open; this is what makes the answer re-bucketable instead of lost.
+     */
+    gapSessions: integer('gap_sessions').notNull().default(0),
     computedAt: timestamp('computed_at', { withTimezone: true }).notNull(),
   },
   (t) => [
@@ -334,6 +342,10 @@ export const dailyTraffic = analyticsSchema.table(
     ),
     /** The bot-filtered share is a percentage OF these sessions; more crawlers than sessions is not one. */
     check('daily_traffic_bots_within_sessions', sql`${t.botSessions} <= ${t.sessions}`),
+    check(
+      'daily_traffic_gap_within_sessions',
+      sql`${t.gapSessions} >= 0 and ${t.gapSessions} <= ${t.sessions}`,
+    ),
   ],
 )
 
@@ -349,11 +361,17 @@ export const dailyFunnel = analyticsSchema.table(
     /** Removed from both sides of the show-adjusted rate, and carried beside `entered` rather than
      * subtracted from it so both figures the page shows are readable. */
     excluded: integer('excluded').notNull(),
+    /** `dailyTraffic.gapSessions`' column, per funnel step (0150, A-FIRST-09). */
+    gapEntered: integer('gap_entered').notNull().default(0),
     computedAt: timestamp('computed_at', { withTimezone: true }).notNull(),
   },
   (t) => [
     check('daily_funnel_counts_nonneg', sql`${t.entered} >= 0 and ${t.excluded} >= 0`),
     check('daily_funnel_excluded_within_entered', sql`${t.excluded} <= ${t.entered}`),
+    check(
+      'daily_funnel_gap_within_entered',
+      sql`${t.gapEntered} >= 0 and ${t.gapEntered} <= ${t.entered}`,
+    ),
   ],
 )
 

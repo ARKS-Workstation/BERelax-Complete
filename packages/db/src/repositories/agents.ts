@@ -50,6 +50,8 @@ export interface AgentHeartbeatRow {
   readonly lastError: string | undefined
   readonly lastOutcome: string | undefined
   readonly consecutiveFailures: number
+  /** Epoch milliseconds, or absent when this agent has never run (0151). Paired to `lastRunAt` by CHECK. */
+  readonly nextRunAt: number | undefined
 }
 
 export interface AgentRunResult {
@@ -77,7 +79,8 @@ export async function agentsWithHeartbeat(
            h.last_failure_at,
            h.last_error,
            h.last_outcome,
-           h.consecutive_failures
+           h.consecutive_failures,
+           h.next_run_at
     from agent_definition d
     join agent_heartbeat h on h.agent_key = d.agent_key
     order by d.agent_key
@@ -100,6 +103,7 @@ export async function agentsWithHeartbeat(
       lastError: (row['last_error'] as string | null) ?? undefined,
       lastOutcome: (row['last_outcome'] as string | null) ?? undefined,
       consecutiveFailures: row['consecutive_failures'] as number,
+      nextRunAt: instantOf(row['next_run_at']),
     },
   }))
 }
@@ -312,6 +316,22 @@ export async function recordHeartbeat(
   await sql`
     update agent_heartbeat
     set last_run_at = ${atIso}::timestamptz,
+        /*
+         * The fourth field (0151), written on the SAME statement as last_run_at and not by a second
+         * one — agent_heartbeat_next_run_accompanies_a_run refuses the pair being broken, so a writer
+         * that updated one and not the other is refused rather than leaving a console unable to tell a
+         * slow agent from a stopped one.
+         *
+         * expected_interval_seconds is read from the agent's own row, which is the same figure the
+         * watchdog doubles. A cron expression is deliberately NOT consulted: the registry's expression
+         * and this interval are already held equal by pnpm jobs, and a third derivation would be a
+         * third answer to when the next run is due.
+         */
+        next_run_at = ${atIso}::timestamptz
+          + make_interval(secs => (
+              select d.expected_interval_seconds from agent_definition d
+               where d.agent_key = ${agentKey}
+            )),
         last_outcome = ${outcome},
         last_success_at = case when ${succeeded} then ${atIso}::timestamptz else last_success_at end,
         last_failure_at = case when ${failed} then ${atIso}::timestamptz else last_failure_at end,

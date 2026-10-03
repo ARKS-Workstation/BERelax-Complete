@@ -1,5 +1,6 @@
 import {
   ANALYTICS_MAX_ATTEMPTS,
+  actionSourceFor,
   analyticsEventId,
   BOOKING_SOURCE_ACTION_SOURCE,
   BOOKING_SOURCES,
@@ -182,7 +183,16 @@ describe('the booking-source vocabulary', () => {
     // real booking; one in the table and not in the database is a branch nothing can reach, which looks
     // like coverage and is not.
     expect(inDatabase).toEqual([...BOOKING_SOURCES].sort())
-    expect(Object.keys(BOOKING_SOURCE_ACTION_SOURCE).sort()).toEqual(inDatabase)
+    // The action-source table is total over the sources a LIVE booking may have, which is every value
+    // the database admits EXCEPT `import`. Migration 0130 (H-MIG-05) added that one for a reconstructed
+    // visit, and the legacy file does not say where such a booking was taken — so there is no action
+    // source to declare, and `actionSourceFor` refuses it by the same path it refuses an unknown value.
+    // Asserted as a set difference rather than a hand-written list of four, so the next widening of the
+    // CHECK fails here instead of silently leaving a value unmapped.
+    expect(Object.keys(BOOKING_SOURCE_ACTION_SOURCE).sort()).toEqual(
+      inDatabase.filter((value) => value !== 'import'),
+    )
+    expect(() => actionSourceFor('import')).toThrow(/no action source is declared/)
   })
 })
 
@@ -322,7 +332,12 @@ describe('the shared event id', () => {
  * that is what the real enqueuer does and the mapping is the acceptance line's own subject.
  */
 async function queuedConversion(options: {
-  readonly bookingSource: BookingSource
+  /**
+   * A LIVE booking's source. `import` is excluded because no action source is declared for it:
+   * a reconstructed visit (migration 0130) is never dispatched as a conversion, and
+   * `actionSourceFor` refuses it.
+   */
+  readonly bookingSource: Exclude<BookingSource, 'import'>
   readonly aggregateId: string
   readonly destination?: string
   /** When the conversion happened. Defaults to the decision instant, which is a LIVE conversion. */
@@ -655,7 +670,11 @@ describe('the database refuses what the consumer must not do', () => {
       select state::text as state, attempts
         from analytics_dispatch where dispatch_id = ${dispatchId}::uuid
     `
-    expect(row?.state).toBe('failed')
+    // `dead_letter` and not `failed` since migration 0151 (A-MEAS-06): exhausting the ladder is a
+    // permanent failure that must be VISIBLE, while `failed` stays what a single non-retryable refusal
+    // leaves behind. The two are different facts about a dead destination and the console reads them
+    // differently.
+    expect(row?.state).toBe('dead_letter')
     expect(row?.attempts).toBe(ANALYTICS_MAX_ATTEMPTS)
     // And it is not due again, which is what makes giving up a state somebody can see.
     // `ANALYTICS_RETRY_LADDER` and not a hand-written `[30, 60, 120, 240, 480]`, which was the first

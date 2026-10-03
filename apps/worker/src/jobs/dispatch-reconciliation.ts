@@ -1,4 +1,4 @@
-import { DISPATCH_DESTINATIONS } from '@berelax/analytics'
+import { analyticsEventId, DISPATCH_DESTINATIONS } from '@berelax/analytics'
 import {
   DISPATCH_STATES,
   type DispatchReconciliation,
@@ -10,11 +10,12 @@ import {
 } from '@berelax/core'
 import {
   type DispatchReconciliationItemInput,
+  internalPaidConversions,
   pushedDispatchesForDay,
   type Sql,
   writeDispatchReconciliation,
 } from '@berelax/db'
-import { AppError } from '@berelax/shared'
+import { AppError, FUNNEL_TERMINAL_STAGE, type FunnelStage } from '@berelax/shared'
 import type { JobContext, JobDefinition } from '../job.ts'
 
 /**
@@ -47,6 +48,23 @@ import type { JobContext, JobDefinition } from '../job.ts'
  * idempotence — be proved against a real PostgreSQL today, which is `dispatch-reconciliation.itest.ts`.
  */
 
+/**
+ * The stage a settled document's conversion is pushed under.
+ *
+ * Derived from the taxonomy's last element, like the enqueuer's, and narrowed here rather than cast:
+ * `noUncheckedIndexedAccess` types the read as possibly absent, and a `?? 'paid'` would be this file
+ * inventing the taxonomy's own answer — which is what deriving it exists to avoid.
+ */
+const TERMINAL_STAGE: FunnelStage = (() => {
+  if (FUNNEL_TERMINAL_STAGE === undefined) {
+    throw new Error(
+      'FUNNEL_STAGES holds no terminal stage, so there is no stage a paid conversion is pushed under ' +
+        'and the internal side of this reconciliation has no identity to derive.',
+    )
+  }
+  return FUNNEL_TERMINAL_STAGE
+})()
+
 export const DISPATCH_RECONCILIATION_JOB = 'analytics.dispatch-reconciliation'
 
 /** The `agent_definition` row migration 0138 inserts. Spelled here once and read by the registry. */
@@ -64,11 +82,13 @@ export type InternalTruthResolver = (
 ) => Promise<readonly InternalConversion[] | null> | readonly InternalConversion[] | null
 
 /**
- * The resolver this build ships, which answers "nothing on file" for every day.
+ * The resolver that answers "nothing on file" for every day.
  *
- * A-FIRST-09 owns the funnel materialisation and the nightly rollups. Until then the pass runs, finds no
- * internal side, writes nothing and SAYS so in its log line — because "no reconciliation today" has to
- * read as *the rollups are missing* rather than as *everything agreed* (ADR 0002).
+ * It was this build's shipped answer until A-FIRST-09 landed, and it is kept — the pass is still handed a
+ * resolver, the handler now hands it `internalPaidConversions`, and this one is what the pass's own suite
+ * uses to assert the NOTHING-ON-FILE path: the pass runs, writes nothing and says so in its log line,
+ * because "no reconciliation today" has to read as *the internal side is missing* rather than as
+ * *everything agreed* (ADR 0002). `null` and an empty array remain different answers.
  */
 export const NO_INTERNAL_TRUTH_ON_FILE: InternalTruthResolver = () => null
 
@@ -253,11 +273,35 @@ async function dispatchReconciliationHandler(_data: never, context: JobContext):
       { details: { nowIso } },
     )
   }
-  const result = await runDispatchReconciliationPass(configured, {
+  const sql = configured
+  const result = await runDispatchReconciliationPass(sql, {
     businessDay: day.trading_date,
     nowIso,
     destinations: DISPATCH_DESTINATIONS,
-    resolveInternalTruth: NO_INTERNAL_TRUTH_ON_FILE,
+    /*
+     * The real internal side (A-FIRST-09), which replaces {@link NO_INTERNAL_TRUTH_ON_FILE}.
+     *
+     * The rows are the settled documents of the day, read at the grain the comparison needs, and the
+     * event id is derived HERE through `analyticsEventId` — the same function the enqueuer uses, so the
+     * two sides of the reconciliation cannot be two different digests. `packages/db` may not import
+     * `@berelax/analytics`, which is why the repository returns the aggregate and not the id.
+     *
+     * `null` is no longer the shipped answer, and it is still reachable: a day the rollup pass has not
+     * run for reports no internal side rather than an empty one, because an empty array is a day with no
+     * conversions and `null` is *this build cannot answer* (ADR 0093). An empty array here would report
+     * every dispatch as a push with nothing behind it.
+     */
+    resolveInternalTruth: async (businessDay) => {
+      const conversions = await internalPaidConversions(sql, { tradingDate: businessDay })
+      return conversions.map((conversion) => ({
+        eventId: analyticsEventId({
+          kind: conversion.aggregate,
+          aggregateId: conversion.aggregateId,
+          stage: TERMINAL_STAGE,
+        }),
+        valueFils: conversion.grossFils,
+      }))
+    },
   })
   console.log(`${DISPATCH_RECONCILIATION_JOB} ${nowIso}: ${describeReconciliationPass(result)}`)
 }

@@ -376,6 +376,19 @@ export const EXECUTION_RECIPES: readonly ExecutionRecipe[] = recipeRegistry([
     action: 'delete_row',
     via: 'definer',
   }),
+  // A plain DELETE and not `via: 'definer'`: 0149 grants DELETE on this table to `berelax_app`
+  // precisely so this recipe stays a statement. The two definer targets above revoked it on the
+  // understanding that removal happens by cascade from `customer`, and an erasure cannot delete a
+  // customer, so the cascade they relied on never runs.
+  recipe({
+    ruleKey: 'public.customer_attribution.customer_id',
+    schema: 'public',
+    table: 'customer_attribution',
+    column: 'customer_id',
+    subjectKey: 'customer_id',
+    matchColumn: 'customer_id',
+    action: 'delete_row',
+  }),
   recipe({
     ruleKey: 'public.customer_preference.customer_id',
     schema: 'public',

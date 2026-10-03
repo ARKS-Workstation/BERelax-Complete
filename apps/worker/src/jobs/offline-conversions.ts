@@ -13,6 +13,7 @@ import {
   packageConversionStatements,
 } from '@berelax/core'
 import {
+  attributedSessionForBooking,
   enqueueAnalyticsDispatch,
   type OfflineConversionFacts,
   offlineInvoiceConversions,
@@ -71,8 +72,15 @@ import type { JobContext, JobDefinition } from '../job.ts'
 
 export const OFFLINE_CONVERSIONS_JOB = 'analytics.offline-conversions'
 
-/** The `agent_definition` row 0137's sibling pass shares. Spelled once and read by the registry. */
-export const OFFLINE_CONVERSIONS_AGENT = 'analytics_dispatch'
+/**
+ * This pass's OWN agent, from migration 0151 (A-MEAS-06).
+ *
+ * It shared `analytics_dispatch`' agent until then, and A-MEAS-05 recorded why that was a limit rather
+ * than a choice: the consumer writes a heartbeat every five minutes, so the shared row was never more
+ * than five minutes old however long this daily upload had been broken, and a per-agent watchdog could
+ * not see it. 0033's argument, restated by 0110 and by the two analytics partition jobs.
+ */
+export const OFFLINE_CONVERSIONS_AGENT = 'offline_conversions'
 
 /**
  * Which analytics session a conversion belongs to, or why it cannot be said.
@@ -86,10 +94,12 @@ export type AnalyticsSessionResolver = (
 ) => Promise<string | null> | string | null
 
 /**
- * The resolver this build ships, which answers "nothing on file" for every conversion.
+ * The resolver that answers "nothing on file" for every conversion.
  *
- * Not a stub to be replaced quietly: it is the honest answer while A-FIRST-08 does not exist, and the
- * pass's log line carries the count so that "no conversions were uploaded" reads as *the attribution is
+ * It was this build's shipped answer until A-FIRST-08 landed, and it is kept — the pass is still handed a
+ * resolver, the handler now hands it `attributedSessionForBooking`, and this one is what the pass's own
+ * suite uses to assert the refusal PATH: a conversion with no session is counted and not guessed at, and
+ * the log line carries the count so that "no conversions were uploaded" reads as *the attribution is
  * missing* rather than as *there were none*. ADR 0002's rule, applied to a pass instead of a report.
  */
 export const NO_ATTRIBUTION_ON_FILE: AnalyticsSessionResolver = () => null
@@ -347,13 +357,22 @@ async function offlineConversionsHandler(_data: never, context: JobContext): Pro
     nowIso,
     destinations: DISPATCH_DESTINATIONS,
     /*
-     * The shipped resolver, which answers "nothing on file" for every conversion. The pass still RUNS, so
-     * the log line below carries the count — ADR 0002's rule applied to a pass: "no conversions were
-     * uploaded" has to read as *the attribution is missing* rather than as *there were none*. Throwing
-     * instead would burn the retry budget and mark the shared agent unhealthy for the half of the
-     * pipeline that is working.
+     * The real resolver (A-FIRST-08), which replaces {@link NO_ATTRIBUTION_ON_FILE}.
+     *
+     * It is still a REFUSAL rather than a choice, which is what ADR 0092 insisted on: the answer is the
+     * session the booking's OWN last touch names, written by the booking transaction that produced it,
+     * and `null` for every conversion with no such session — every walk-in and every telephone booking
+     * that carried no ref code. The pass still RUNS and the log line still carries the count, because
+     * "no conversions were uploaded" has to read as *these conversions had no session* rather than as
+     * *there were none* (ADR 0002).
+     *
+     * A conversion with no booking behind it — a package sale — resolves to `null` without a query: the
+     * attribution is a property of a booking and there is nothing to look up.
      */
-    resolveSession: NO_ATTRIBUTION_ON_FILE,
+    resolveSession: async (facts) =>
+      facts.bookingId === null
+        ? null
+        : await attributedSessionForBooking(configured as Sql, facts.bookingId),
   })
   console.log(
     `${OFFLINE_CONVERSIONS_JOB} ${nowIso} for ${tradingDate}: ${describeOfflineConversionPass(result)}`,
@@ -368,14 +387,14 @@ async function offlineConversionsHandler(_data: never, context: JobContext): Pro
  * nothing to say about the evening's, and a conversion is not a figure that can be topped up — it is a new
  * statement with its own id, so an incomplete day would be uploaded as a correction to itself.
  *
- * It shares `analytics_dispatch`' agent rather than declaring a second one, and the LIMIT of that is worth
- * stating rather than defending. The two passes are one pipeline — this one produces the rows that one
- * drains — so a watchdog asking "did the analytics dispatch pipeline run" gets a true answer. But the
- * consumer writes a heartbeat every five minutes, so this pass failing for a week is invisible to a
- * per-agent watchdog: the half that is working reports health for the half that is not. A second agent
- * needs an `agent_definition` and an `agent_heartbeat` row in a migration (0031's convention, restated by
- * 0110 and 0122), and this unit was allocated no migration number. Handed to A-MEAS-06, whose subject is
- * the heartbeat, the watchdog and the dead letter for exactly this dispatcher, by a NOTE on the manifest.
+ * It has its OWN agent, `offline_conversions`, from migration 0151 — and the reason that matters is the
+ * one this comment used to state as a limit. It shared `analytics_dispatch`' agent until then, because the
+ * two passes are one pipeline and this one produces the rows that one drains; but the consumer writes a
+ * heartbeat every five minutes, so this pass failing for a week was invisible to a per-agent watchdog —
+ * the half that was working reported health for the half that was not. A second agent needed an
+ * `agent_definition` and an `agent_heartbeat` row in a migration (0031's convention, restated by 0110 and
+ * 0122), and A-MEAS-05 was allocated no migration number, so it was handed to A-MEAS-06 by a NOTE on the
+ * manifest. 86400 seconds is this cron's own interval, held equal to it by `pnpm jobs`.
  */
 export const OFFLINE_CONVERSIONS_JOB_DEFINITION: JobDefinition<never> = {
   name: OFFLINE_CONVERSIONS_JOB,

@@ -61,6 +61,13 @@ export const DISPATCH_STATES = [
   'suppressed',
   'cancelled_consent_withdrawn',
   'failed',
+  /**
+   * 0151, A-MEAS-06: a dispatch whose retry budget ran out. Terminal in the sense `sent` is.
+   *
+   * It arrived exactly the way the comment below says a sixth state would: the `Record`s stopped
+   * compiling and this module refused the state by name until somebody decided what it counts as.
+   */
+  'dead_letter',
 ] as const
 export type DispatchState = (typeof DISPATCH_STATES)[number]
 
@@ -77,6 +84,15 @@ export const DISPATCH_STATE_WAS_PUSHED: Readonly<Record<DispatchState, boolean>>
   suppressed: false,
   cancelled_consent_withdrawn: false,
   failed: false,
+  /*
+   * A dead letter was NOT pushed, and it is the most certain `missing` of the six.
+   *
+   * ADR 0093 already decided that a `queued` or `failed` dispatch is `missing` rather than a fourth
+   * state, because the pass runs after the day has closed and the five-minute consumer has had time to
+   * drain. A dead letter is that conclusion reached by the consumer itself: it has given up, so there is
+   * no later pass that could change the answer.
+   */
+  dead_letter: false,
 })
 
 /**
@@ -93,6 +109,15 @@ export const DISPATCH_STATE_WAS_REFUSED_ON_PURPOSE: Readonly<Record<DispatchStat
     suppressed: true,
     cancelled_consent_withdrawn: true,
     failed: false,
+    /*
+     * NOT a deliberate refusal, and the distinction is the one `intentionally_not_pushed` rests on.
+     *
+     * A suppression is the VISITOR's refusal and the push correctly never happened; a dead letter is this
+     * build failing to deliver a conversion it was permitted to send. Counting it here would hide a
+     * permanent delivery failure inside the one classification A-MEAS-07 deliberately keeps out of the
+     * difference — which is the exact shape of the defect ADR 0093 warns about from the other direction.
+     */
+    dead_letter: false,
   })
 
 /** One conversion this business says it took. The internal side of the comparison. */

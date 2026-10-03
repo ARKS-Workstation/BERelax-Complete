@@ -12,6 +12,7 @@ import type { Sql } from '../connection.ts'
 import { doNotPairExclusion, therapistsExcludedBy } from '../queries/therapist-exclusions.ts'
 import type { UnitOfWork } from '../tx.ts'
 import { withUnitOfWork } from '../tx.ts'
+import { recordBookingAttribution } from './attribution.ts'
 import {
   readCommittedAppointments,
   readEligibleTherapists,
@@ -195,6 +196,24 @@ export interface CreateBookingInput {
   readonly clientGender?: 'female' | 'male'
   /** `booking.same_gender_matching`, from `readGenderMatching`. **Absent is strict.** */
   readonly genderMatching?: GenderMatchingMode
+  /**
+   * The analytics session this booking came through, when the caller knows one (A-FIRST-08).
+   *
+   * An opaque `uuid` and NOT a foreign key: retention purges `analytics.session` at ninety days and the
+   * attribution has to outlive it (0149). Absent for a walk-in, a telephone booking and a front-desk
+   * booking, which is the case the offline fallback exists for — a booking with no session gets
+   * `source = 'offline'`, `medium = 'direct'`, and `booking_attribution.source` is NOT NULL for every
+   * one of the four booking sources as a result.
+   */
+  readonly sessionReference?: string
+  /** What the front desk was told, for an offline booking. Stored only for an offline touch (0149). */
+  readonly howHeard?: string
+  /**
+   * The instant the attribution row records itself at. Injected for the reason every instant in this
+   * area is: the ordering assertions are made under a frozen clock. Defaults to the transaction's own
+   * `now()` when a caller has no opinion.
+   */
+  readonly attributionRecordedAtIso?: string
   readonly deliveries: readonly BookingDeliveryInput[]
 }
 
@@ -934,6 +953,32 @@ export async function createBooking(
         promotion_id: delivery.price.promotionId,
       })),
     },
+  })
+
+  /*
+   * The attribution, in THIS transaction (A-FIRST-08).
+   *
+   * Same argument as the outbox event above and one step stronger: a booking cannot exist without a
+   * `booking_attribution` row, which is what makes `booking_attribution.source` NOT NULL a statement
+   * about the build rather than about one table. An outbox handler was the alternative and is worse
+   * here — a handler that had not run yet is indistinguishable from a booking nobody could attribute,
+   * and the figure that reads is attribution coverage.
+   *
+   * It writes both claims: this booking's LAST touch, and the customer's FIRST touch, which is
+   * write-once and converges (ZY691). A booking with no session gets `offline`/`direct` plus the
+   * how-heard answer when the front desk was given one.
+   */
+  await recordBookingAttribution(uow.sql, {
+    bookingId,
+    customerId: input.customerId,
+    sessionReference: input.sessionReference ?? null,
+    howHeard: input.howHeard ?? null,
+    // Absent means the TRANSACTION's own instant, read by the database rather than by a clock here.
+    // `now()` inside a transaction is its start instant, which is what `booking.created_at` defaulted
+    // to, so ZY692 cannot refuse this row for a skew nobody could see in the code.
+    ...(input.attributionRecordedAtIso === undefined
+      ? {}
+      : { recordedAtIso: input.attributionRecordedAtIso }),
   })
 
   // Same transaction as the rows, so a booking cannot exist without its event and an event cannot
