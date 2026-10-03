@@ -342,6 +342,31 @@ with who followed it and when.
 
 ---
 
+## Rotating the payment webhook signing secret
+
+The gateway signs each delivery with this secret and `packages/payments/src/webhook/verify.ts` checks
+the signature BEFORE the body is parsed, written or logged. Rotating it is therefore a window in which
+deliveries signed with the old secret must still verify, or events are lost — and a lost webhook is
+money the ledger does not know arrived.
+
+No gateway has been chosen (`Y7-gateway`), so the steps below are the shape and not a procedure
+anybody has run. The figures a real rotation needs — the overlap window the chosen gateway offers, and
+whether it supports two active secrets at all — are unknown and are not invented here.
+
+1. Read the current secret's fingerprint from the deployment secret store. Do not read the value.
+2. Create the new secret AT THE GATEWAY first, and confirm the gateway reports both as active. If it
+   does not support two, stop: the rotation needs a maintenance window, and this runbook cannot say how
+   long, because the retry behaviour is the gateway's.
+3. Set `PAYMENT_WEBHOOK_SIGNING_SECRET` to the new value and deploy. Verification fails CLOSED: with no
+   secret configured the endpoint answers 503, which a gateway retries, rather than 401, which makes it
+   give up on a valid event.
+4. Watch `payment_webhook_event` for refused deliveries. A refusal here is the signal that an old-secret
+   delivery is still in flight.
+5. Retire the old secret at the gateway only once no refusal has been seen for longer than the
+   gateway's own retry ladder.
+6. Reconcile: run the missed-event reconciliation job (Y-PAY-05) and confirm it finds nothing, which is
+   what says the rotation lost no event.
+
 ## What rotation does not cover
 
 Rotating a KEK changes which key is used **from now on**. It does not reach into anything already

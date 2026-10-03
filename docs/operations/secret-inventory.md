@@ -14,7 +14,7 @@ written down, which is the only moment the person who knows how it works is stil
 
 ## What this system holds
 
-10 entries.
+11 entries.
 
 | Variable | Kind | Controls | Owner | Rotate every | Zero downtime | Procedure |
 |---|---|---|---|---|---|---|
@@ -28,6 +28,7 @@ written down, which is the only moment the person who knows how it works is stil
 | `—` | stored-credential | Durable control of the business Google presence: reviews, the business profile, the address and the opening hours. It does not expire on its own. | the business Google account owner | 365 days | no | [rotating-a-google-refresh-token](../../docs/runbooks/key-rotation.md#rotating-a-google-refresh-token) |
 | `DOCUMENT_URL_SIGNING_SECRET` | signing-key | The HMAC key behind every private-document link (W-SYS-14). Holding it plus a document id is the ability to MINT a link to that filed tax invoice, VAT return snapshot, payslip or clinical extract. It is not by itself access: /documents/{id} refuses a request with no live staff session and re-checks the authorisation matrix, so a minted link still needs an authenticated principal who holds the document's read permission - the signature authorises a FETCH and never a principal. Either half alone is not the document. | whoever holds the deployment secret store | 365 days | yes | [rotating-the-document-url-signing-secret](../../docs/runbooks/key-rotation.md#rotating-the-document-url-signing-secret) |
 | `SUPPRESSION_PEPPER` | signing-key | The HMAC key behind suppression.key_hmac (migration 0064). With a database dump it is the list of every phone number and address that has opted out of marketing, because the UAE mobile space is about ten million numbers per prefix and an unpeppered digest of one is enumerable on a laptop. Either alone is not: the table holds no plaintext, and the pepper decrypts nothing. | whoever holds the deployment secret store | 730 days | yes | [rotating-the-suppression-pepper](../../docs/runbooks/key-rotation.md#rotating-the-suppression-pepper) |
+| `PAYMENT_WEBHOOK_SIGNING_SECRET` | signing-key | The key the gateway signs each webhook delivery with. With it, somebody can forge a delivery - a capture that never happened, a refund that was never issued - and every downstream figure follows the forgery, because the signature is the only thing that says a delivery came from the gateway. Verification runs BEFORE the body is parsed, written or logged. | whoever holds the deployment secret store | 365 days | no | [rotating-the-payment-webhook-signing-secret](../../docs/runbooks/key-rotation.md#rotating-the-payment-webhook-signing-secret) |
 
 ## Where each one lives
 
@@ -98,6 +99,14 @@ The deployment secret store, injected as an environment variable. Never in the d
 Rotation slots: `SUPPRESSION_PEPPER_VERSION` (version label), `SUPPRESSION_PEPPER_PREVIOUS` (retired key), `SUPPRESSION_PEPPER_PREVIOUS_VERSION` (retired version label).
 
 Classified signing-key and not kek: nothing is encrypted with it, so no record becomes unreadable if it is lost. The retired slot is declared anyway and is the important half - reads consult both peppers, so the rotation itself is seamless, but a row whose plaintext recipient this system no longer holds can never be re-keyed (customer has no email column at all, C-CRM-01 NOTE 3), so SUPPRESSION_PEPPER_PREVIOUS is retained indefinitely rather than until a sweep finishes. Deleting it turns those rows into rows nothing will ever match, which presents as a promotional message to somebody who opted out. The runbook states this under its own heading.
+
+### `PAYMENT_WEBHOOK_SIGNING_SECRET`
+
+The deployment secret store, injected as an environment variable. Never in the database: it is the gateway's half of a shared secret, and a copy beside the rows it authenticates would be readable by anything that can read those rows.
+
+**If it is wrong or missing:** Webhook delivery only, and only if the chosen gateway cannot hold two secrets active at once. Nothing a customer touches stops: a booking, a payment authorisation and the till do not read this secret. An unverifiable delivery answers 503, which a gateway retries, so the window costs delay rather than events - and Y-PAY-05's reconciliation pass is the check that says none was lost. The length of the window is the gateway's retry ladder, which is unknown until one is chosen (Y7-gateway).
+
+No gateway is chosen (Y7-gateway), so there is no secret in any environment yet and 365 days is this repository's own floor for a shared secret with no regulatory period, the same figure database-url and google-refresh-token carry; it is a schedule, not a measurement, and the overlap window a rotation needs is the chosen gateway's. `zeroDowntime` is false for the same reason: whether two secrets can be active at once is the gateway's answer. Absent, the endpoint answers 503 and the gateway retries; it never answers 401, which would make it abandon a valid event. Added by the integrator at the final verify, where `pnpm rotation` refused the undeclared variable Y-PAY-04 introduced.
 
 ## Deliberately not secrets
 
