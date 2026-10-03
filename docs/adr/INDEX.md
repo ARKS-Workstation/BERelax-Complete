@@ -4,7 +4,7 @@
 
 # ADR index
 
-86 records, generated from the front matter of each one. Every column below is read
+87 records, generated from the front matter of each one. Every column below is read
 out of the record it describes, so a row cannot be wrong without the record being wrong — which is
 the whole reason this file is not maintained by hand. For the argument behind any of them, read
 [README.md](README.md) and then the record.
@@ -97,3 +97,4 @@ the whole reason this file is not maintained by hand. For the argument behind an
 | [0098](0098-the-breach-clock-starts-at-discovery-and-a-filed-incident-is-immutable.md) | the breach clock starts at the discovery, a filed incident is immutable, and the threshold is decided nowhere | accepted | 2026-10-03 | H-HARD-07 | docs/01 decisions — none; this is the incident-register half of docs/04 §9 and the |
 | [0099](0099-the-documentation-set-is-generated-and-checked-or-it-is-decoration.md) | the processor register is held against the services actually wired up, and every page in the documentation set is generated or checked | accepted | 2026-10-03 | H-HARD-09 | docs/01 decisions — none; this is the mechanism behind docs/04 §8's processor register and |
 | [0105](0105-a-reconciliation-report-is-a-reading-and-a-variance-is-named-or-it-fails.md) | a reconciliation report is a READING, its run instant lives outside the compared content, and a variance is named or it fails | accepted | 2026-10-03 | H-MIG-08 | docs/01 decisions — none new. It is the reporting-shaped consequence of |
+| [0106](0106-a-dry-run-is-a-fresh-database-and-three-recorded-runs-or-the-gate-is-decoration.md) | a dry run is a FRESH database, a recorded run carries its own digest, and the gate must be able to refuse one | accepted | 2026-10-03 | H-MIG-09 | docs/01 decisions — none new. It is the rehearsal-shaped consequence of |

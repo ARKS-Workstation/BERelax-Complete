@@ -63,6 +63,19 @@ export {
 } from './refusals.ts'
 export { IMPORTERS, importerByName, importerNames } from './registry.ts'
 export {
+  checkRecordedRun,
+  checkRecordedRuns,
+  DRY_RUN_RULES,
+  diffReconciliationReports,
+  MINIMUM_RECORDED_DRY_RUNS,
+  parseRecordedDryRun,
+  REMINTED_FIELDS,
+  type RecordedDryRun,
+  type RecordedRunProblem,
+  type ReportDifference,
+  type RunDiff,
+} from './report/diff.ts'
+export {
   type DedupReading,
   generateReconciliationReport,
   IMPORT_RECORDS,

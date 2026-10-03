@@ -56826,6 +56826,278 @@ export function chargebackNetEffectFils(`,
   )
 }
 
+// 184a-184z. (H-MIG-09) The three-dry-run gate shown to be able to FAIL, which is the whole unit: a gate
+//            over committed artefacts that has never been seen to refuse one is a file everybody trusts
+//            and nothing checks (ADR 0003).
+//
+//            Every case here constructs a FOURTH recorded run out of the committed third one, breaks one
+//            thing about it, and asserts `pnpm dry-runs` refuses it BY THE NAME of the rule. A fourth
+//            run rather than an edit to a committed one, because `withFixture` removes what it created
+//            and `withEditedFile` restores the bytes — and a gate case that left a tampered artefact
+//            behind would poison every later case in this file and the commit after it (brief rule 27).
+//
+//            Three groups:
+//
+//              * **the recorded run.** 184a plants an unexplained variance. 184b edits a figure WITHOUT
+//                recomputing the digest, which is the edit nobody would notice — `unexplainedVariances`
+//                from 1 to 0 is the figure the whole gate turns on, and the stored digest is why that
+//                edit is a failing build rather than a green one. 184c records no importer at all, which
+//                would otherwise satisfy every check above it with a dry run of nothing. 184d records a
+//                post-import check that did not pass, which is a clean reconciliation over books that
+//                are still wrong. 184e disagrees with its own file name, so it would be diffed against
+//                the wrong neighbour. 184f is not a recorded run at all, and the parse refuses it rather
+//                than reading `undefined` off every field it checks.
+//              * **the set.** 184g points the gate at a directory with fewer than three runs, which is
+//                the one rule that cannot be provoked by adding a file. 184h makes run 4 disagree with
+//                run 3 about a figure, which is the report diff doing the job the third acceptance line
+//                asks of it.
+//              * **the arithmetic underneath.** 184i lowers the minimum to one. 184j widens the reminted
+//                field list to excuse a changed `sourceFileHash` — the single most dangerous widening
+//                available, because that value changing means the file imported was not the file the
+//                last run imported. 184k makes every difference reminted. 184l drops the digest check.
+//
+//            184m is the driver's corpus, which has to be byte-stable across runs or run N+1 cannot be
+//            compared with run N at all: a clock reading anywhere in it is refused, with the fixture that
+//            puts one there.
+//
+//            184y and 184z are the controls: the unit's pure suite, and `pnpm dry-runs` itself, both
+//            against the real tree and the three committed runs.
+{
+  const DRY_RUNS_DIR = 'artifacts/migration'
+  const DRY_RUN_THREE = `${DRY_RUNS_DIR}/run-3.json`
+  const DRY_RUN_FOURTH = `${DRY_RUNS_DIR}/run-4.json`
+  const DRY_RUN_DIFF = 'packages/migration/src/report/diff.ts'
+  const DRY_RUN_DRIVER = 'scripts/migrate-dry-run-full.mjs'
+  const DRY_RUN_DIFF_SUITE = 'packages/migration/src/report/diff.test.ts'
+
+  const dryRunSuite = () => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', DRY_RUN_DIFF_SUITE]
+
+  /** The committed third run, as a value a case can break one field of. */
+  const recordedThird = () => JSON.parse(readFileSync(DRY_RUN_THREE, 'utf8'))
+
+  /**
+   * Writes a fourth recorded run built by `mutate`, then asserts `pnpm dry-runs` refuses it by `rule`.
+   *
+   * Named for this block rather than reusing block 183's helper of the same shape, and the reason is
+   * mechanical: two blocks defining a helper of one shape is how git found the bodies as shared context
+   * and INTERLEAVED two blocks at a merge (block 133's note).
+   */
+  const breakDryRun = (name, mutate, rule) => {
+    const run = recordedThird()
+    run.runNumber = 4
+    mutate(run)
+    checkRejectedBy(
+      name,
+      withFixture(DRY_RUN_FOURTH, JSON.stringify(run, null, 2), () =>
+        runExpectingFailure('pnpm', ['dry-runs']),
+      ),
+      rule,
+    )
+  }
+
+  /** One anchored edit to a shipped module, then the pure suite that must fail because of it. */
+  const breakDryRunModule = (name, file, find, into, rule, args = dryRunSuite()) => {
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        file,
+        (source) => replaceOnce(source, find, into),
+        () => runExpectingFailure('pnpm', args),
+      ),
+      rule,
+    )
+  }
+
+  // ---- the recorded run --------------------------------------------------------------------------
+
+  // 184a. An unexplained variance in the newest run. The condition the whole unit is named for, and the
+  //       gate has to refuse it however clean everything else in the file is.
+  breakDryRun(
+    'dry runs: an unexplained variance in a recorded run must be refused',
+    (run) => {
+      run.report.variances[0].unexplained = 1
+      run.report.unexplainedVariances = 1
+      // The stored digest necessarily goes stale too, because the edit is INSIDE the report — and the
+      // digest cannot be recomputed from here, since this file is plain node and `reportContentDigest`
+      // is TypeScript. That is not a weakness of the case: `checkRejectedBy` asserts the VARIANCE rule
+      // appears by name, so the case fails if that rule stops firing even though a second one does.
+    },
+    'recorded-run-must-have-no-unexplained-variance',
+  )
+
+  // 184b. A figure edited by hand with the digest left alone. The edit nobody would notice: a recorded
+  //       run is a file in the repository, and `unexplainedVariances` from 1 to 0 is one keystroke.
+  breakDryRun(
+    'dry runs: a hand-edited figure with a stale digest must be refused',
+    (run) => {
+      run.report.dedup.contactsMatched += 1
+    },
+    'recorded-run-digest-must-match-its-report',
+  )
+
+  // 184c. A run that imported nothing. It has no variance, so every check above this one passes — ADR
+  //       0002's failure mode arriving as a committed artefact rather than as a green tick.
+  breakDryRun(
+    'dry runs: a recorded run that ran no importer must be refused',
+    (run) => {
+      run.importersRun = []
+    },
+    'recorded-run-must-state-at-least-one-importer-that-ran',
+  )
+
+  // 184d. A post-import check that did not pass. A clean reconciliation over books that are still wrong,
+  //       which is what the fourth acceptance line is about and what a report alone cannot say.
+  breakDryRun(
+    'dry runs: a recorded run whose invariant census failed must be refused',
+    (run) => {
+      run.postImportChecks = [
+        { name: 'money invariant census', command: 'pnpm money-invariants', ok: false },
+      ]
+    },
+    'recorded-run-must-record-every-post-import-check-passing',
+  )
+
+  // 184e. A run whose recorded number disagrees with its file name. It would be diffed against the wrong
+  //       neighbour, and the comparison would report on a pair that never followed each other.
+  breakDryRun(
+    'dry runs: a recorded number disagreeing with the file name must be refused',
+    (run) => {
+      run.runNumber = 9
+    },
+    'consecutive-runs-must-differ-only-in-a-reminted-key',
+  )
+
+  // 184f. Not a recorded run at all. Every rule in the checker reads a field, so a loose parse would
+  //       make all of them pass over `undefined`.
+  checkRejectedBy(
+    'dry runs: a file that is not a recorded run must be refused rather than read loosely',
+    withFixture(DRY_RUN_FOURTH, '{ "runNumber": "four" }', () =>
+      runExpectingFailure('pnpm', ['dry-runs']),
+    ),
+    'runNumber is not a number',
+  )
+
+  // ---- the set -----------------------------------------------------------------------------------
+
+  // 184g. Fewer than three. The one rule that cannot be provoked by ADDING a file, which is why the
+  //       checker takes `--dir`: the alternative is a gate case that deletes a committed artefact out of
+  //       the working tree and restores it in a `finally`, and brief rule 27 is what that costs.
+  checkRejectedBy(
+    'dry runs: fewer than three recorded runs must fail the gate',
+    runExpectingFailure('pnpm', [
+      'exec',
+      'tsx',
+      'scripts/check-dry-runs.mjs',
+      '--dir',
+      'artifacts',
+    ]),
+    'at-least-three-dry-runs-must-be-recorded',
+  )
+
+  // 184h. Run 4 disagreeing with run 3 about a figure. This is the report diff doing what the third
+  //       acceptance line asks: two runs from the same clean database and the same corpus cannot differ
+  //       in a count, and the case asserts the diff rule by name rather than a non-zero exit.
+  breakDryRun(
+    'dry runs: two consecutive runs disagreeing about a figure must be refused',
+    (run) => {
+      run.report.sources[0].sourceRows += 1
+      // As in 184a the digest goes stale alongside; the assertion is on the DIFF rule by name.
+    },
+    'consecutive-runs-must-differ-only-in-a-reminted-key',
+  )
+
+  // ---- the arithmetic underneath -----------------------------------------------------------------
+
+  // 184i. The minimum lowered to one. One run proves the importers execute and nothing else; two prove
+  //       the result is reproducible; the third is what distinguishes that from two runs agreeing once.
+  breakDryRunModule(
+    'dry runs: lowering the three-run minimum must be caught',
+    DRY_RUN_DIFF,
+    `export const MINIMUM_RECORDED_DRY_RUNS = 3`,
+    `export const MINIMUM_RECORDED_DRY_RUNS = 1`,
+    'fails while fewer than three exist',
+  )
+
+  // 184j. The reminted list widened to excuse a changed `sourceFileHash`. The most dangerous widening
+  //       available: that value changing means the file imported was not the file the last run imported,
+  //       and it is opaque hex exactly like the two keys the list legitimately excuses.
+  breakDryRunModule(
+    'dry runs: excusing a changed source file hash as a reminted key must be caught',
+    DRY_RUN_DIFF,
+    `export const REMINTED_FIELDS: readonly string[] = Object.freeze(['runId', 'recordId'])`,
+    `export const REMINTED_FIELDS: readonly string[] = Object.freeze([
+  'runId',
+  'recordId',
+  'sourceFileHash',
+  'contentHash',
+])`,
+    'does not excuse a changed hash, which is opaque hex like the keys it does excuse',
+  )
+
+  // 184k. Every difference classified as reminted, so the diff reports nothing material ever.
+  breakDryRunModule(
+    'dry runs: a diff that reports nothing material must be caught',
+    DRY_RUN_DIFF,
+    `    material.push(difference)`,
+    `    reminted.push(difference)`,
+    'reports a changed count as material and names its path',
+  )
+
+  // 184l. The digest check dropped, after which a hand-edited figure is accepted — 184b's defect with
+  //       the guard removed rather than the artefact broken.
+  breakDryRunModule(
+    'dry runs: dropping the digest check must be caught',
+    DRY_RUN_DIFF,
+    `  if (recomputed !== run.contentDigest) {`,
+    `  if (false && recomputed !== run.contentDigest) {`,
+    'fails when a figure was edited by hand without re-recording',
+  )
+
+  // ---- the driver's corpus -----------------------------------------------------------------------
+
+  // 184m. A clock reading in the corpus. The corpus has to be byte-stable across runs or run N+1 cannot
+  //       be compared with run N at all, and the integration suites' own convention is the OPPOSITE — a
+  //       per-execution nonce, because they run against a shared database. Copying that convention into
+  //       this driver is therefore the likely mistake, and the symptom is a report diff that reports
+  //       every source file as changed.
+  {
+    const CLOCK = /\bDate\.now\(\)|\bnew Date\(\)\.getTime\(\)|\bperformance\.now\(\)/
+    const clean = CLOCK.test(readFileSync(DRY_RUN_DRIVER, 'utf8'))
+    const planted = withEditedFile(
+      DRY_RUN_DRIVER,
+      (source) =>
+        replaceOnce(source, `const CONTACT_NONCE = 20_261_003`, `const CONTACT_NONCE = Date.now()`),
+      () => CLOCK.test(readFileSync(DRY_RUN_DRIVER, 'utf8')),
+    )
+    check(
+      'dry runs: a clock reading in the driver corpus is detectable',
+      planted === true,
+      'the scan did not see a planted Date.now() in the corpus, so it proves nothing about the real file',
+    )
+    check(
+      'dry runs: the driver corpus holds no clock reading',
+      clean === false,
+      'the dry-run corpus reads a clock, so two runs import different bytes and cannot be compared',
+    )
+  }
+
+  // ---- the controls ------------------------------------------------------------------------------
+
+  // 184y. The pure suite, unedited: the diff's classification, the three-run minimum, each rule and its
+  //       control, and the parser's refusal of a file that is not a recorded run.
+  check(
+    "dry runs: the unit's pure suite passes against the real tree",
+    !run('pnpm', dryRunSuite()).failed,
+  )
+
+  // 184z. The gate itself, against the three committed runs. Every case above is satisfied by something
+  //       FAILING, so one has to be satisfied by the real artefacts passing.
+  check(
+    'dry runs: the gate passes over the three committed runs',
+    !run('pnpm', ['dry-runs']).failed,
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -57719,6 +57991,11 @@ export function chargebackNetEffectFils(`,
     // it was ignored: a class was taken by reading the migrations a worktree could see, and four migrations
     // claimed one code. A check nobody runs is the convention again with more steps.
     'pnpm sqlstate',
+    // H-MIG-09's gate over the recorded dry runs, in the position `pnpm verify` runs it: beside the
+    // schema gates, because it is a claim about the migration rather than about a suite. Registered here
+    // because that is what makes dropping it from CI a failing build rather than the silent loss of the
+    // one check that says the migration has been rehearsed three times with nothing left unexplained.
+    'pnpm dry-runs',
     'pnpm budgets',
     // The registry check registers itself. Not a cute trick: it is the one entry whose absence this array
     // could not otherwise reveal, since the check exists precisely to notice a verify step nobody listed

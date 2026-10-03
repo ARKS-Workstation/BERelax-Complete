@@ -332,6 +332,12 @@ jobs:
       - name: Private SQLSTATE registry
         run: pnpm sqlstate
 
+      # H-MIG-09's gate over the recorded dry runs. It reads the committed artefacts and needs no
+      # database: the point of recording a run is that the evidence outlives the throwaway database it
+      # was measured in. Positioned beside the schema gates because it is a claim about the migration.
+      - name: Three recorded migration dry runs, no unexplained variance
+        run: pnpm dry-runs
+
       - name: Byte budgets
         run: pnpm budgets
 

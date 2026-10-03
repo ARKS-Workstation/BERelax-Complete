@@ -22107,7 +22107,7 @@ units:
       and records a numbered run report. Three recorded runs, the latest with no unexplained variance, or
       the gate fails.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - H-HARD-04
@@ -22128,6 +22128,30 @@ units:
     - artifacts/migration/run-2.json
     - artifacts/migration/run-3.json
     - scripts/check-dry-runs.mjs
+    - packages/migration/src/report/diff.ts
+    - packages/migration/src/report/diff.test.ts
+    - docs/adr/0106-a-dry-run-is-a-fresh-database-and-three-recorded-runs-or-the-gate-is-decoration.md
+    notes:
+    - 'NOTE: DEFERRED TO H-HARD-04 — the clean database is created by applying every migration from
+      nothing, not by restoring the restore-drill artefact, because scripts/restore-drill.mjs does not
+      exist (H-HARD-04 is todo) and the words "from the restore-drill artefact" cannot be satisfied by a
+      file that is not there. Running the driver as a CI step is deferred with it, for the same reason;
+      what CI runs is pnpm dry-runs, which reads the three committed runs and needs no database. The
+      restore drill''s own integration suite, named in the fourth acceptance line, is deferred to the
+      same unit; the domain-invariant half IS run — pnpm money-invariants against the post-import
+      database, with its verdict recorded on every run and checked by name.'
+    - 'NOTE: BLOCKED ON OWNER DATA — three importers and the opening trial balance are NOT rehearsed, and
+      every recorded run states which and why: packages (Y8-packages, the owner''s sign-off is a human act
+      with four values that may not be defaulted), appointments (Y8-visits), staff (Y8-staff, the leave
+      year anchor has no default) and opening-balances (Y8-opening-balances, attesting a boundary locks
+      the database behind it for ever). The corpus that IS rehearsed — probe and customers — is synthetic
+      and generated from packages/fixtures, so no figure in a committed run is a claim about this
+      business. A run that ran no importer at all is refused by name. ADR 0106 records all of it.'
+    - 'NOTE: no migration, no private SQLSTATE, no port band. Everything reads: the driver writes only
+      into a database it creates and drops, and the gate reads files. ZY731-ZY740 was not allocated and
+      none is used; SCHEMA_VERSION is unchanged and no ledger paragraph was added. One new pnpm verify
+      step, pnpm dry-runs, registered in gate case 29''s array and in .github/workflows/ci.yml in the
+      same commit.'
   - id: H-MIG-10
     order: 192
     title: Parallel run, staff pilot instrumentation and front-desk speed
