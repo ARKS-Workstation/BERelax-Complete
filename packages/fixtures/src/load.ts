@@ -25,6 +25,8 @@ import {
   hoursFromSchedule,
   localDate,
   localTime,
+  stockJourneys,
+  validateFlowDefinition,
 } from '@berelax/core'
 import {
   CONSENT_SEED_STATES,
@@ -34,6 +36,7 @@ import {
   generateBusinessDays,
   readCompliancePolicy,
   readContactsByPhone,
+  readCurrentTemplateClasses,
   type Sql,
   type SuppressionSeedEntry,
   seedCatalogue,
@@ -41,6 +44,7 @@ import {
   seedMessageTemplates,
   seedPremises,
   seedSettingDefaults,
+  seedStockFlows,
   seedSuppression,
   seedTherapistRoster,
 } from '@berelax/db'
@@ -487,6 +491,53 @@ const packageLoader: Loader = {
   },
 }
 
+/**
+ * The three stock journeys, as `flow` and `flow_definition` rows (C-AUTO-11).
+ *
+ * This package is the one that may hold both halves, and the journeys need both: `composeJourney` and
+ * `stockJourneys` are `@berelax/core`'s, the rows are `@berelax/db`'s, and `packages/db` may not import
+ * `packages/core` (brief rule 4). So the documents are composed here and handed to `seedStockFlows`
+ * along with `validateFlowDefinition` — which is the same seam `seedMessageTemplates` takes one loader
+ * along, and for the same reason.
+ *
+ * After `message-templates`, and the ordering is load-bearing rather than tidy: the review journey binds
+ * `review.request`, `messageStep` will only accept a `TemplateRef` minted from the registry, and the
+ * registry is `message_template`'s rows. Run before them, `stockJourneys` answers `null` for the whole
+ * set — which this loader turns into a loud failure rather than two journeys of three.
+ */
+const stockFlowLoader: Loader = {
+  name: 'stock-flows',
+  after: ['message-templates'],
+  async load(sql, salon) {
+    void salon
+    const templates = await readCurrentTemplateClasses(sql)
+    const journeys = stockJourneys(templates)
+    if (journeys === null) {
+      throw new Error(
+        'The stock journeys could not be composed because `review.request` is not in the template ' +
+          'registry. `stockJourneys` answers null for the WHOLE set rather than a shorter list, because ' +
+          'a seed that wrote two of three would leave a database in which the review journey does not ' +
+          'exist and nothing would say so. The message-templates loader runs first; if it has, the ' +
+          'template has been renamed or reclassified.',
+      )
+    }
+    const result = await seedStockFlows(sql, {
+      flows: journeys.map((journey) => ({
+        flowKey: journey.key,
+        title: journey.title,
+        definition: journey,
+      })),
+      // BOUND to the registry, which is the whole point of the injection: `validateFlowDefinition`
+      // with no registry answers `flow-dsl-templates-not-checked` rather than passing, so a seeder that
+      // handed it over unbound would refuse every journey that names a template — which it did, on the
+      // first run of this loader, and the refusal was correct.
+      validate: (candidate) => validateFlowDefinition(candidate, { templates }),
+      publishedAtIso: FIXTURE_NOW_ISO,
+    })
+    return result.published.length
+  },
+}
+
 const LOADERS: Loader[] = [
   premisesLoader,
   catalogueLoader,
@@ -497,6 +548,7 @@ const LOADERS: Loader[] = [
   suppressionLoader,
   messageTemplateLoader,
   packageLoader,
+  stockFlowLoader,
 ]
 
 /** Registers a loader. Called by the unit that owns the tables it writes. */

@@ -1850,6 +1850,12 @@ export {
   type StoredPricePoint,
 } from './seed/fixtures/prices-docs-13.ts'
 export {
+  type SeedFlowsInput,
+  type SeedFlowsResult,
+  type StockFlowSeed,
+  seedStockFlows,
+} from './seed/flows.ts'
+export {
   PROVISIONAL_OPENING_DATE,
   PROVISIONAL_OPENING_LINES,
   seedProvisionalOpeningBalances,
@@ -5301,4 +5307,39 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // ZY751 through ZY755 are used of the band ZY751-ZY760; ZY756 through ZY760 are released UNUSED and
 // deliberately unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
 //
-export const SCHEMA_VERSION = 154 as const
+// 155 is 0155_customer_birthday.sql (C-AUTO-11) — two `smallint` columns on `customer`, and the agent row
+// the daily stock-journey sweep heartbeats under. Mirrored in `packages/db/src/schema/customer.ts`.
+//
+// THERE IS NO BIRTH-YEAR COLUMN, and that is the whole migration. A date of birth is personal data this
+// business has no use for: nothing in docs/03 or docs/06 asks for an age and no treatment in the
+// catalogue is age-restricted in a way the booking path checks, so a marketing journey that greeted
+// somebody from a full date of birth would be holding an identity-grade field in order to send one SMS a
+// year. Two columns leave the year nowhere to live, which a policy cannot — a query cannot derive an age
+// from data that is not there — and `customer-birthday`'s case in `stock-journeys.itest.ts` asserts the
+// absence against `information_schema` beside the presence of the two that do exist, which is the
+// direction that fails the day somebody adds one.
+//
+// A `date` column holding 1900-05-14 was the obvious alternative and is worse in both directions: the
+// year is a lie every reader has to know to ignore, and the moment one row holds a real year the column
+// is a date of birth with no way to tell the two apart.
+//
+// `customer_birthday_is_whole_or_absent` moves the pair together — a month with no day is a birthday
+// nobody can send on, a day with no month fires twelve times a year — and
+// `customer_birthday_is_a_real_date` refuses 30 February and 31 April without needing a year at all. 29
+// February IS a real birthday and is permitted; whether it is greeted on 28 February or 1 March in a
+// common year is `Y9-birthday-leap`'s, because that is a business decision nobody has made, so the ROW is
+// accepted and the SENDING rule is the open question.
+//
+// The agent row exists because the three journeys are entered by a daily SWEEP rather than by an event
+// dispatcher: nothing in this build consumes `outbox_event` into an enrolment, so a review request
+// triggered "on appointment.completed" would be triggered by nothing — and a contact becoming lapsed and
+// a birthday arriving are facts about dates rather than things that happen. The sweep is idempotent by
+// construction, because `enrolOnLiveVersion` answers `already_enrolled` for a contact already running.
+// `budget_fils_per_run` is 0: the pass enrols and performs no outbound call of any kind.
+//
+// NO PRIVATE SQLSTATE IS RAISED HERE. The band ZY761-ZY770 was allocated to this unit and every code in
+// it is RELEASED UNUSED and deliberately unregistered: two CHECKs say everything this schema has to say,
+// `pnpm sqlstate` refuses an entry for a code no migration raises, and a trigger written to carry a code
+// that a CHECK already enforces would be a second statement of one rule.
+//
+export const SCHEMA_VERSION = 155 as const

@@ -56758,6 +56758,256 @@ export function chargebackNetEffectFils(`,
   )
 }
 
+// 187a-187z. (C-AUTO-11) The three stock journeys: the business day shown to be load-bearing, the two
+//            journeys with no approved copy shown to be unable to grow one quietly, the review
+//            eligibility shown to be able to stop excluding, and the birthday pass shown to be one
+//            statement that never reaches the clinical schema.
+//
+//            The unit's claim is that the engine identifies a contact on a FACT — paid, lapsed by
+//            business days, a birthday today — and that two of the three cannot message anybody because
+//            nobody has approved the words. Every mutation below leaves a system that WORKS: a review
+//            request to a no-show, a win-back a day early, a journey that quietly grew a message node.
+//            None would be caught by a review.
+//
+//            187a to 187d run the two core unit suites and are fast. 187e onwards drive the integration
+//            suites, which need a database.
+{
+  const WINBACK_TS = 'packages/core/src/automation/winback.ts'
+  const WINBACK_TEST = 'packages/core/src/automation/winback.test.ts'
+  const JOURNEYS_TS = 'packages/core/src/automation/journeys.ts'
+  const JOURNEYS_TEST = 'packages/core/src/automation/journeys.test.ts'
+  const REVIEW_TRIGGER_TS = 'apps/worker/src/automation/triggers/review-solicitation.ts'
+  const BIRTHDAY_TRIGGER_TS = 'apps/worker/src/automation/triggers/birthday.ts'
+  const SEED_FLOWS_TS = 'packages/db/src/seed/flows.ts'
+  const BIRTHDAY_SQL = 'packages/db/migrations/0155_customer_birthday.sql'
+  const STOCK_ITEST = 'packages/fixtures/src/stock-journeys.itest.ts'
+  const journeyUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const journeyIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // The control for the whole block. Every case asserts that a BROKEN tree is caught, and that says
+  // nothing unless the committed tree passes.
+  {
+    const winback = run('pnpm', journeyUnit(WINBACK_TEST))
+    check(
+      'journeys: the committed win-back suite passes, which is the control for 187a and 187b',
+      !winback.failed,
+      `the win-back suite does not pass on the committed tree:\n${winback.output}`,
+    )
+    const journeys = run('pnpm', journeyUnit(JOURNEYS_TEST))
+    check(
+      'journeys: the committed journeys suite passes, which is the control for 187c and 187d',
+      !journeys.failed,
+      `the journeys suite does not pass on the committed tree:\n${journeys.output}`,
+    )
+  }
+
+  /*
+    187a. The win-back measured from the CALENDAR date instead of the business day.
+
+    The defect the whole module is shaped against, and the one that would be invisible: trading runs
+    11:00-02:00, so a visit that ends at 01:30 belongs to the previous session — and a calendar-dated
+    win-back fires a day early for roughly one visit in three, with a plausible message to a plausibly
+    lapsed customer and a date column reading one off for evidence. The mutation is the plausible wrong
+    implementation: use the instant's own calendar date and stop thinking about it.
+  */
+  checkRejectedBy(
+    'journeys: 187a a win-back measured from the calendar date is caught',
+    withEditedFile(
+      WINBACK_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const dueOn = addCalendarDays(resolved.date, args.intervalDays)',
+          '  const dueOn = addCalendarDays(localDate(instantToIso(args.lastVisitEndedAt).slice(0, 10)), args.intervalDays)',
+        ),
+      () => runExpectingFailure('pnpm', journeyUnit(WINBACK_TEST)),
+    ),
+    'PREVIOUS business day',
+  )
+
+  /*
+    187b. An undatable last visit dated on the calendar instead of refused.
+
+    A visit whose end instant falls in no trading session has no business day to measure from, and the
+    plausible simplification is to fall back. It produces a due date that reconciles perfectly against a
+    day nothing happened on, which is ADR 0070's subject one unit along.
+  */
+  checkRejectedBy(
+    'journeys: 187b an undatable visit dated on the calendar rather than refused is caught',
+    withEditedFile(
+      WINBACK_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "      kind: 'not_measurable',",
+          "      kind: 'never_visited' as 'not_measurable',",
+        ),
+      () => runExpectingFailure('pnpm', journeyUnit(WINBACK_TEST)),
+    ),
+    'not_measurable',
+  )
+
+  /*
+    187c. The review journey sending the public link on the LOW-rating branch.
+
+    The two edges swapped, which is a one-line change that typechecks, publishes and runs — and sends
+    every unhappy customer the public review link. That is the clause the journey exists for and the
+    mistake nothing else in the system would catch: the document is valid, the condition fires, and the
+    message leaves.
+  */
+  checkRejectedBy(
+    'journeys: 187c the public review link on the low-rating branch is caught',
+    withEditedFile(
+      JOURNEYS_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "      'rating_low:true': 'private_follow_up',\n      'rating_low:false': 'ask_for_review',",
+          "      'rating_low:true': 'ask_for_review',\n      'rating_low:false': 'private_follow_up',",
+        ),
+      () => runExpectingFailure('pnpm', journeyUnit(JOURNEYS_TEST)),
+    ),
+    'action_tag',
+  )
+
+  /*
+    187d. A journey that quietly grew a message node.
+
+    Two of the three send nothing because no human has approved win-back or birthday copy, and the way
+    that stops being true is not a decision — it is somebody binding a template because one is to hand.
+    The mutation binds the review template to the win-back journey, which is valid, publishable and
+    exactly what brief rule 15 refuses.
+  */
+  checkRejectedBy(
+    'journeys: 187d a win-back journey that grew a message node is caught',
+    withEditedFile(
+      JOURNEYS_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '      flag: tagStep({\n        tag: WINBACK_DUE_TAG,',
+          '      flag: tagStep({\n        tag: REVIEW_REQUEST_TEMPLATE_KEY,',
+        ),
+      () => runExpectingFailure('pnpm', journeyUnit(JOURNEYS_TEST)),
+    ),
+    'winback_due',
+  )
+
+  /*
+    187e. A review request offered for an appointment that was not paid for.
+
+    `outstanding_fils <= 0` is the half of the eligibility that is cheapest to drop, because dropping it
+    makes the pass offer MORE contacts and every one of them had a real visit. The acceptance clause
+    names it, and the only thing that would notice is a case about a completed visit nobody settled.
+  */
+  checkRejectedBy(
+    'journeys: 187e a review request for an unpaid completion is caught',
+    withEditedFile(
+      REVIEW_TRIGGER_TS,
+      (text) => replaceOnce(text, '       and s.outstanding_fils <= 0', '       and true'),
+      () => runExpectingFailure('pnpm', journeyIntegration(STOCK_ITEST)),
+    ),
+    'unpaid completion',
+  )
+
+  /*
+    187f. A review request offered for a CONFIRMED appointment.
+
+    The status filter widened to the one the acceptance clause names in so many words: a review request
+    for a visit that has not happened yet. It is the mistake a `status <> 'cancelled'` reads as.
+  */
+  checkRejectedBy(
+    'journeys: 187f a review request for a CONFIRMED appointment is caught',
+    withEditedFile(
+      REVIEW_TRIGGER_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "     where a.status = 'completed'",
+          "     where a.status in ('completed', 'confirmed', 'no_show')",
+        ),
+      () => runExpectingFailure('pnpm', journeyIntegration(STOCK_ITEST)),
+    ),
+    'CONFIRMED appointment',
+  )
+
+  /*
+    187g. The birthday pass reading more than it needs to.
+
+    The clinical claim is made by COUNTING the statements the pass issues, so the mutation that matters is
+    one that adds a read. A join into the clinical schema is what the case is about; a join into anything
+    is what the case can see, which is the stronger shape — a pass whose statement count depends on its
+    input could not be held to a list of tables at all.
+  */
+  checkRejectedBy(
+    'journeys: 187g a birthday pass that reads the clinical schema is caught',
+    withEditedFile(
+      BIRTHDAY_TRIGGER_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '       and c.birth_month = ${args.month}',
+          '       and c.birth_month = ${args.month}\n       and not exists (select 1 from clinical.contraindication_flag f where f.customer_id = c.id)',
+        ),
+      () => runExpectingFailure('pnpm', journeyIntegration(STOCK_ITEST)),
+    ),
+    'clinical',
+  )
+
+  /*
+    187h. A seeder that publishes a version every time it runs.
+
+    `flow_definition` is append-only, so an unconditional publish adds a version on every `pnpm seed` —
+    and every enrolment pins the version that was live when it arrived, so two seeds leave two cohorts
+    pinned to two documents. The mutation is the obvious implementation, and the thing it breaks is the
+    acceptance clause about seeding twice.
+  */
+  checkRejectedBy(
+    'journeys: 187h a seeder that republishes an unchanged journey is caught',
+    withEditedFile(
+      SEED_FLOWS_TS,
+      (text) => replaceOnce(text, '    if (live?.same === true) {', '    if (false as boolean) {'),
+      () => runExpectingFailure('pnpm', journeyIntegration(STOCK_ITEST)),
+    ),
+    'publishes nothing',
+  )
+
+  /*
+    187i. A birth-year column introduced through the Drizzle mirror.
+
+    The one mutation in this block that is a schema change, and the reason the absence is asserted against
+    `information_schema` rather than stated in prose: a column is one line away, nothing about the system
+    stops working when it arrives, and from that moment every query in the build can derive an age.
+
+    The MIRROR is what gets edited rather than the migration, because `pnpm db:drift` is the check that
+    fires on it — a column in the mirror the database lacks would otherwise be discovered at runtime, on
+    whichever query first selected it. A migration adding the column is caught by the
+    `information_schema` case in `stock-journeys.itest.ts`, which needs the migration applied and so
+    cannot be driven from here.
+  */
+  checkRejectedBy(
+    'journeys: 187i a birth-year column introduced through the Drizzle mirror is caught',
+    withEditedFile(
+      'packages/db/src/schema/customer.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          "    birthMonth: smallint('birth_month'),",
+          "    birthMonth: smallint('birth_month'),\n    birthYear: smallint('birth_year'),",
+        ),
+      () => runExpectingFailure('pnpm', ['db:drift']),
+    ),
+    'birth_year',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

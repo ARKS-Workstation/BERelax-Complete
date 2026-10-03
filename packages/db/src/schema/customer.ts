@@ -78,6 +78,22 @@ export const customer = pgTable(
      * from these definitions must move the two columns together.
      */
     erasedAt: timestamp('erased_at', { withTimezone: true }),
+    /**
+     * The birthday, as a day and a month (0155, C-AUTO-11).
+     *
+     * **There is no birth-year column and there is not meant to be.** A date of birth is personal data
+     * this business has no use for, and a marketing journey that greeted somebody from a full date of
+     * birth would be holding an identity-grade field in order to send one SMS a year. Two `smallint`s
+     * leave the year nowhere to live, which a policy cannot: a query cannot derive an age from data that
+     * is not there. `packages/fixtures/src/customer-birthday.itest.ts` asserts the absence against
+     * `information_schema`, in the direction that fails when somebody adds one.
+     *
+     * The two move together (`customer_birthday_is_whole_or_absent`) and must name a real calendar day
+     * (`customer_birthday_is_a_real_date`); 29 February is permitted, and whether it is greeted on 28
+     * February or 1 March in a common year is `Y9-birthday-leap`'s to answer.
+     */
+    birthDay: smallint('birth_day'),
+    birthMonth: smallint('birth_month'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
   },

@@ -218,6 +218,18 @@ export const COMMISSION_ENABLED_SETTING_KEY = 'hr.commission_enabled'
  * spelling is a reader that silently falls back to the declared default. For the cap that fallback would
  * be invisible, because the fallback is a number and the number is a budget.
  */
+/**
+ * How many days since a contact's last completed visit before the win-back journey enters them.
+ *
+ * Spelled once here, for the campaign keys' reason: the worker's sweep reads it and the Unconfirmed
+ * Assumptions panel lists it, and a second spelling is a reader that silently falls back to the declared
+ * default — which here is a number, so the mistake would be invisible.
+ */
+export const WINBACK_INTERVAL_DAYS_SETTING_KEY = 'crm.winback_interval_days'
+
+/** 90 days, which is `build/manifest.yaml`'s own provisional value for C-AUTO-11. */
+export const PROVISIONAL_WINBACK_INTERVAL_DAYS = 90
+
 export const CAMPAIGN_SPEND_CAP_FILS_SETTING_KEY = 'crm.campaign_spend_cap_fils'
 export const SEGMENT_COUNT_STALENESS_SECONDS_SETTING_KEY = 'crm.segment_count_staleness_seconds'
 
@@ -654,6 +666,42 @@ export const SETTINGS = [
    * with a send button under it, and a window this build chose and did not declare would be a staleness
    * judgement made on the owner's behalf about the size of their own marketing list.
    */
+  define({
+    /**
+     * Days since a contact's last completed visit before the win-back journey enters them. **90.**
+     *
+     * `build/manifest.yaml`'s own provisional value for C-AUTO-11 — *"win-back trigger at 90 days since
+     * last completed visit"* — and not an interval this build chose. Nothing in the handover says how
+     * long a customer has to be away before this business considers them lapsed, and the answer is a
+     * judgement about this business rather than a default: a spa whose customers come monthly and one
+     * whose customers come twice a year want different numbers, and 90 days is the middle of nothing.
+     *
+     * **The figure lives here and not in `winback.ts`.** That module takes the interval as an argument
+     * and holds no number at all, which is what lets `WINBACK_WORKED_EXAMPLE` be a committed example
+     * rather than a second statement of the setting. What the module owns is that the interval is
+     * measured from the BUSINESS day of the last visit: a visit that ended at 01:30 belongs to the
+     * session that opened at 11:00 the previous calendar day, and a win-back dated on the calendar date
+     * would fire a day early for roughly one visit in three with nothing looking wrong.
+     *
+     * `operational` and OWNER_MANAGER: when a customer counts as lapsed is a marketing judgement, and it
+     * has no compliance consequence — the thing with one is the promotional window. `invalidates: []`
+     * because nothing is prerendered from it, and the sweep reads it per pass rather than at boot so an
+     * audited change takes effect the next night with no deploy.
+     */
+    key: WINBACK_INTERVAL_DAYS_SETTING_KEY,
+    tier: 'operational',
+    schema: z.number().int().min(7).max(730),
+    defaultValue: PROVISIONAL_WINBACK_INTERVAL_DAYS,
+    label: 'Win-back interval (days)',
+    help: 'How long since a contact\u2019s last completed visit before the win-back journey picks them up. Measured from the BUSINESS day the visit ended on, so a treatment that finished at 01:30 counts from the session that opened at 11:00 the day before. The journey tags the contact for the front desk; it sends nothing, because no win-back copy has been approved.',
+    editableBy: OWNER_MANAGER,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: CAMPAIGN_SPEND_CAP_OPEN_QUESTION_ID,
+      note: '90 days assumed, which is build/manifest.yaml\u2019s own provisional value for C-AUTO-11 and not an interval anybody has stated. How long a customer has to be away before this business considers them lapsed is a judgement about this business: a spa whose customers come monthly and one whose customers come twice a year want different numbers.',
+    },
+  }),
   define({
     /**
      * What one campaign may spend, in fils. **AED 500 gross per campaign**, and provisional.

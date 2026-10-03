@@ -7,6 +7,8 @@
  */
 export * from './campaign.ts'
 export * from './dsl.ts'
+export * from './journeys.ts'
 export * from './segment-compile.ts'
 export * from './static-analysis.ts'
 export * from './step-plan.ts'
+export * from './winback.ts'

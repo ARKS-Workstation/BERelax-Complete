@@ -9989,7 +9989,7 @@ units:
       M3: booking event to enrolment to consented send to opt-out to suppression blocking the next send,
       every step asserted on rows.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-MSG-01
@@ -10025,6 +10025,33 @@ units:
     - apps/worker/src/automation/triggers/
     - packages/core/src/automation/winback.ts
     - packages/db/src/schema/customer.ts
+    note: 'THREE ACCEPTANCE CLAUSES HAVE NO DSL VOCABULARY and became arrangements rather than DSL
+      extensions; ADR 0109 records each. (1) FLOW_TRIGGER_EVENTS is appointment-level, so there is no
+      booking.created and the review journey and the M3 proof are both entered by appointment.completed.
+      (2) FLOW_CONDITION_FACTS holds no fact about money, so "COMPLETED and paid" is the TRIGGER''s
+      eligibility query over invoice_settlement.outstanding_fils rather than a condition node. (3) There
+      is no rating fact and nothing in this build collects a rating, so the private path branches on a
+      TAG (LOW_INTERNAL_RATING_TAG) that whoever collects one writes - which also means the provisional
+      "internal rating threshold 3 or below out of 5" is NOT configured anywhere: there is no rating to
+      threshold, and a setting for one would be a figure applied to nothing.
+      TWO OF THE THREE JOURNEYS SEND NOTHING. The only promotional template this build ships is
+      review.request and it ships draft precisely so unapproved words cannot reach a customer, so the
+      win-back and birthday journeys end in an action_tag and the front desk acts. Writing win-back or
+      birthday copy here would invent exactly what packages/messaging/src/templates.ts refuses to invent
+      (brief rule 15). The message node is one edge away the day copy is approved.
+      THE REVIEW LINK SETTING IS NOT BUILT. The provisional says the review link is a configured URL
+      setting; review.request declares {{link}}, a flow node carries no values, and the interpreter
+      already refuses such a node by name (template_variables_unresolved). Since the template is draft the
+      choke point refuses it before any value would be needed, so a resolver and a URL setting would both
+      be code with no reachable path (ADR 0003). Deferred to whoever approves the review copy: it is one
+      setting plus a values resolver in apps/worker/src/automation/nodes/message.ts, whose own comment
+      already names this unit as the owner.
+      M3''S FINAL REFUSAL IS RECORDED refused_no_consent, NOT refused_suppressed. A preference-centre
+      opt-out writes both a consent withdrawal and a suppression row, and evaluateGate reads consent
+      first. Both are asserted on rows, and a THIRD contact - suppressed with consent still standing - is
+      what proves the refused_suppressed path the clause names.
+      ZY761-ZY770 ARE RELEASED UNUSED: two CHECKs say everything migration 0155 has to say, and pnpm
+      sqlstate refuses an entry for a code no migration raises.'
   - id: C-CRM-06
     order: 85
     title: Duplicate review queue and merge preview

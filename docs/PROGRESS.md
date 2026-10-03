@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**179 / 211 units complete.**
+**180 / 211 units complete.**
 
 ## Next up
 
 1. **B-M1 — M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop**
-1. **C-AUTO-11 — Stock journeys - review solicitation, win-back, birthday - and the M3 proof**  — **needs owner input:** Y2-gbp-status, Y9-windows
 1. **P-HR-14 — Therapist self-service portal and staff notifications**
+1. **A-FIRST-08 — First-touch and last-touch attribution onto customer and booking**
 
 ## All units
 
@@ -102,7 +102,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 81 | `C-AUTO-07` | The interpreter on pg-boss: idempotency, loop detection and dry run | `C-AUTO-04`, `C-AUTO-06`, `F06` | — | — |
 | [x] | 82 | `C-AUTO-09` | Node-graph journey builder, with misrouting made impossible | `C-AUTO-06`, `C-AUTO-07`, `H04` | — | — |
 | [x] | 83 | `C-AUTO-10` | Segments, campaigns, spend caps and window-aware scheduling | `C-AUTO-03`, `C-AUTO-04`, `H04` | — | Y6-sender-ids |
-| [ ] | 84 | `C-AUTO-11` | Stock journeys - review solicitation, win-back, birthday - and the M3 proof | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `C-AUTO-07`, `C-AUTO-10`, `H03` | — | Y2-gbp-status, Y9-windows |
+| [x] | 84 | `C-AUTO-11` | Stock journeys - review solicitation, win-back, birthday - and the M3 proof | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `C-AUTO-07`, `C-AUTO-10`, `H03` | — | Y2-gbp-status, Y9-windows |
 | [x] | 85 | `C-CRM-06` | Duplicate review queue and merge preview | `C-CRM-05`, `H04` | — | — |
 | [x] | 86 | `C-CRM-07` | Preference centre, public and login-free | `C-CRM-04`, `F11` | — | — |
 | [x] | 87 | `C-CRM-08` | Clinical intake templates and encrypted submissions behind the boundary | `C-CRM-01`, `F08` | — | Y5-residency, Y1-licence |
