@@ -79,6 +79,24 @@ export const NEVER_DECLARABLE: readonly string[] = Object.freeze(['customer'])
  * from it, and six entries repeating that sentence would be six places for it to drift.
  */
 export const DECLARED_UNQUALIFIED: readonly DeclaredUnqualified[] = Object.freeze([
+  // ## The restore drill
+  //
+  // H-HARD-04 proves a restored database still REFUSES what the original refused. The only way to
+  // prove the append-only rules survived a `pg_restore` is to attempt the writes they forbid, and
+  // the attempt names the table and no rows by design: `delete from audit_event` is the statement
+  // the trigger must refuse. It runs inside `sql.begin` and is rolled back, in a database the
+  // drill itself created from a dump and drops at the end, so no shared row is ever at risk.
+  // Declared at the H-HARD-04 merge, where this guard first saw the file.
+  {
+    file: 'packages/fixtures/src/restore-drill.itest.ts',
+    tables: ['audit_event'],
+    kind: 'rolled-back',
+    why:
+      'the drill attempts the writes the append-only triggers forbid, to prove they survived the ' +
+      'restore. The statement is unqualified because the refusal is about the TABLE, it is rolled ' +
+      "back inside one transaction, and the database is the drill's own throwaway restore target.",
+  },
+
   // ## The invoice family
   //
   // `invoice` refuses DELETE for every role (ZI003), so TRUNCATE as the owner is the only legal removal —

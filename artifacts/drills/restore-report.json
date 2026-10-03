@@ -1,0 +1,131 @@
+{
+  "reportVersion": 1,
+  "runAtIso": "2026-10-03T13:05:53.408Z",
+  "machine": {
+    "platform": "linux",
+    "cpus": 4,
+    "totalMemoryBytes": 16876515328,
+    "loadAverage1m": 3.38,
+    "postgresVersion": "16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)",
+    "measuredOn": "agent_container"
+  },
+  "source": {
+    "database": "berelax_hhard04",
+    "migrationCount": 132,
+    "migrationPrefixDigest": "6f0fab59baf68568e7f657e170789e5ff8173b201b4c6aa2c8796db0ce2511f4"
+  },
+  "backup": {
+    "tool": "pg_dump",
+    "format": "custom",
+    "byteLength": 2349616,
+    "tocEntries": 4093,
+    "startedAtIso": "2026-10-03T13:05:53.408Z",
+    "finishedAtIso": "2026-10-03T13:05:53.935Z",
+    "durationMs": 527
+  },
+  "restore": {
+    "tool": "pg_restore",
+    "startedAtIso": "2026-10-03T13:05:54.414Z",
+    "finishedAtIso": "2026-10-03T13:05:57.863Z",
+    "durationMs": 3449,
+    "exitCode": 0
+  },
+  "pitr": {
+    "configured": false,
+    "walLevel": "replica",
+    "archiveMode": "off",
+    "reason": "archive_mode is off on this server and no WAL archive, base-backup store or recovery target exists, so there is nothing to recover to a chosen instant from. Recorded as a reading off the server rather than as prose, so the day one is configured this field changes by itself"
+  },
+  "verification": {
+    "tablesCompared": 258,
+    "rowsCompared": 810,
+    "mismatches": [],
+    "derivedViews": [
+      {
+        "table": "reporting.dim_customer",
+        "sourceRows": 0,
+        "restoredRows": 4
+      },
+      {
+        "table": "reporting.dim_date",
+        "sourceRows": 0,
+        "restoredRows": 149
+      },
+      {
+        "table": "reporting.dim_service",
+        "sourceRows": 0,
+        "restoredRows": 32
+      },
+      {
+        "table": "reporting.dim_staff",
+        "sourceRows": 0,
+        "restoredRows": 19
+      },
+      {
+        "table": "reporting.fact_appointment",
+        "sourceRows": 0,
+        "restoredRows": 0
+      },
+      {
+        "table": "reporting.fact_sale",
+        "sourceRows": 0,
+        "restoredRows": 0
+      },
+      {
+        "table": "reporting.fact_shift",
+        "sourceRows": 0,
+        "restoredRows": 0
+      }
+    ],
+    "readBacks": [
+      {
+        "claim": "the legal entity singleton is readable and holds its registered name",
+        "expected": "BE RELAX SPA - L.L.C - O.P.C",
+        "actual": "BE RELAX SPA - L.L.C - O.P.C"
+      },
+      {
+        "claim": "the published catalogue is readable and the same size",
+        "expected": "8",
+        "actual": "8"
+      },
+      {
+        "claim": "the money estate is readable: issued invoices and their lines",
+        "expected": "0/0",
+        "actual": "0/0"
+      },
+      {
+        "claim": "the settings store is readable, which is what a restore silently reverts",
+        "expected": "61",
+        "actual": "61"
+      }
+    ],
+    "suite": {
+      "name": "packages/fixtures/src/restore-drill.itest.ts",
+      "ran": true,
+      "exitCode": 0,
+      "skippedReason": null
+    },
+    "invariants": {
+      "name": "money-invariants",
+      "ran": true,
+      "exitCode": 0,
+      "skippedReason": null
+    }
+  },
+  "dataLossWindowMs": 66136,
+  "objectives": {
+    "rpoSeconds": null,
+    "rtoSeconds": null,
+    "backupRetentionDays": null,
+    "drillMaxAgeDays": null,
+    "openQuestionId": "Y13-rpo-rto"
+  },
+  "notProved": [
+    "No restore onto different hardware or a different PostgreSQL build. One server, one version, and the dump never left the machine that wrote it.",
+    "No off-site or immutable copy. The dump is written to a temporary directory and deleted with this run; nothing retains a backup, so there is no retention period to state.",
+    "No point-in-time recovery. archive_mode and wal_level are recorded above as read off the server; with no WAL archive there is no instant to recover to other than the dump.",
+    "No recovery objective. The restore duration below is a measurement of this machine under whatever else was running on it, which brief rule 23 is about; it is not an RTO, and the data-loss window is this run’s and not an RPO.",
+    "No staging host, so \"restore and then serve the application from it\" is untested; what is tested is that the schema and the data come back and that a suite can read them."
+  ],
+  "digest": "0e6b4831ab7155bc9beb7a55688300e31f9932cfc4626099f7bcda2dbafac077"
+}

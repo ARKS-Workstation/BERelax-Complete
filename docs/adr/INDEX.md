@@ -4,7 +4,7 @@
 
 # ADR index
 
-111 records, generated from the front matter of each one. Every column below is read
+115 records, generated from the front matter of each one. Every column below is read
 out of the record it describes, so a row cannot be wrong without the record being wrong — which is
 the whole reason this file is not maintained by hand. For the argument behind any of them, read
 [README.md](README.md) and then the record.
@@ -122,3 +122,7 @@ the whole reason this file is not maintained by hand. For the argument behind an
 | [0120](0120-an-unsound-figure-is-a-refusal-and-dependence-on-a-check-is-derived.md) | an unsound figure is a refusal, and which checks gate a figure is DERIVED | accepted | 2026-10-03 | R-REP-07 | docs/01 decisions — none; this is the mechanism behind docs/02 §4's reporting schema and |
 | [0121](0121-role-scoped-means-the-scope-is-in-the-query-and-a-headline-tile-is-a-fold.md) | role-scoped means the scope is in the QUERY, and a headline tile is a FOLD | accepted | 2026-10-03 | R-REP-08 | docs/01 decisions — none; this is the mechanism behind docs/03's reporting set and docs/06 |
 | [0122](0122-a-performance-budget-is-one-declaration-and-an-unmeasured-figure-is-absent.md) | a performance budget is ONE declaration, and an unmeasured figure is absent rather than invented | accepted | 2026-10-03 | W-SITE-11 | docs/01 decisions — none; this is the mechanism behind docs/08 §8's "three independent |
+| [0123](0123-a-restore-drill-reads-rows-back-and-staleness-is-a-prefix-not-a-calendar.md) | A restore drill restores into a database made from nothing and READS ROWS BACK, and its evidence goes stale by prefix and not by calendar | accepted | 2026-10-03 | H-HARD-04 | docs/01 decisions — none; this is ADR 0002 applied to disaster recovery, ADR 0034 |
+| [0124](0124-a-runbook-is-machine-checked-or-it-is-decoration.md) | A runbook is machine-checked or it is decoration, and its front matter is a narrow format rather than YAML | accepted | 2026-10-03 | H-HARD-06 | docs/01 decisions — none; this extends H-HARD-09's documentation chain (`pnpm docs-set`) |
+| [0125](0125-a-findings-register-is-a-reviewed-file-and-an-empty-one-is-not-a-clean-one.md) | A findings register is a REVIEWED FILE, an empty one is not a clean one, and the vulnerable fixture route may not be in the application | accepted | 2026-10-03 | H-HARD-10 | docs/01 decisions — none; this is ADR 0002 applied to a security review, ADR 0003 applied |
+| [0126](0126-a-soak-proves-counts-of-rows-and-a-p95-from-this-container-is-not-a-product-figure.md) | A soak proves COUNTS OF ROWS; the p95 it also measures is a figure about the container, and the budget is enforced only for a machine somebody chose | accepted | 2026-10-03 | H-HARD-11 | docs/01 decisions — none; this is brief rule 23 turned into a field and a rule, ADR 0070's |

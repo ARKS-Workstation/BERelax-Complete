@@ -1,0 +1,71 @@
+{
+  "reportVersion": 1,
+  "runAtIso": "2026-10-03T14:00:12.946Z",
+  "machine": {
+    "platform": "linux",
+    "cpus": 4,
+    "totalMemoryBytes": 16876515328,
+    "loadAverage1m": 1.98,
+    "postgresVersion": "16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)",
+    "measuredOn": "agent_container"
+  },
+  "contention": {
+    "attempts": 200,
+    "successes": 1,
+    "refusalsByName": {
+      "slot_taken": 199
+    },
+    "untypedFailures": 0,
+    "rawSqlstateFailures": [],
+    "overCapacityRooms": 0
+  },
+  "availability": {
+    "concurrency": 50,
+    "batches": 3,
+    "samples": [
+      141, 88, 121, 216, 95, 109, 129, 215, 111, 228, 227, 95, 212, 126, 81, 87, 116, 53, 123, 212,
+      221, 209, 219, 71, 194, 196, 171, 219, 207, 169, 179, 215, 203, 213, 200, 203, 179, 213, 215,
+      224, 225, 241, 242, 240, 239, 237, 236, 237, 240, 242, 60, 72, 58, 77, 83, 85, 65, 88, 61, 60,
+      69, 86, 50, 84, 77, 88, 76, 48, 66, 87, 71, 73, 88, 88, 111, 112, 114, 113, 103, 114, 112,
+      138, 115, 137, 139, 138, 147, 150, 134, 156, 157, 147, 134, 151, 150, 150, 147, 148, 144, 143,
+      55, 82, 61, 58, 78, 82, 65, 66, 87, 59, 85, 66, 38, 79, 38, 39, 59, 39, 55, 82, 50, 50, 56,
+      76, 72, 118, 117, 88, 87, 120, 114, 123, 124, 118, 115, 117, 123, 119, 118, 113, 102, 119,
+      123, 127, 119, 128, 102, 127, 119, 128
+    ],
+    "p95Ms": 237,
+    "medianMs": 117,
+    "budgetMs": 300
+  },
+  "backlog": {
+    "events": 10000,
+    "handlers": 2,
+    "drainers": 2,
+    "batchSize": 200,
+    "deliveries": 20000,
+    "distinctPairs": 20000,
+    "unpublishedAfter": 0,
+    "drainMs": 6715,
+    "handlerCalls": {
+      "soak-handler-a": 10000,
+      "soak-handler-b": 10000
+    },
+    "foreignHandlerCalls": {
+      "soak-handler-a": 0,
+      "soak-handler-b": 1
+    }
+  },
+  "invariants": {
+    "name": "money-invariants",
+    "ran": true,
+    "exitCode": 0,
+    "skippedReason": null
+  },
+  "notProved": [
+    "No production traffic, no production data volume and no production hardware. The salon is a probe mirroring what B-CAT-06 seeds — five rooms and eight therapists — not the live one.",
+    "The latency figures are a measurement of THIS machine. availability-perf.itest.ts measured the same container six times: 192-231 ms alone and 315-417 ms inside a full run, against a 300 ms budget committed for the CI Postgres. A p95 from here separates the container’s mood and not two versions of the query (brief rule 23).",
+    "No peak has been observed, so the declared concurrency is a load somebody chose and not a forecast. There is no committed figure at any concurrency but 50 (Y13-perf-budget).",
+    "Nothing here exercises the HTTP layer, the browser or the worker process. The contention is measured at the service boundary, so \"zero unhandled constraint-violation 5xx\" is proved as \"every rejection carried a refusal name and no raw SQLSTATE reached a caller\".",
+    "The backlog is drained by several drainOutbox calls in ONE process, which exercises `for update skip locked` and does not exercise two deployed workers on two hosts."
+  ],
+  "openQuestionId": "Y13-perf-budget"
+}

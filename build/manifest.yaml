@@ -21889,7 +21889,7 @@ units:
       and domain-invariant suites against the restored database, and emits a machine-readable report with
       measured RTO and data-loss window. A stale drill fails the build.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - F04
@@ -21926,11 +21926,51 @@ units:
     - every data class carrying an erasure rule also states its backup position, asserted by a completeness
       test over the data-class registry
     files:
+    - packages/core/src/ops/restore-drill.ts
+    - packages/core/src/ops/restore-drill.test.ts
+    - packages/core/src/privacy/backup-position.ts
+    - packages/core/src/privacy/backup-position.test.ts
+    - packages/fixtures/src/restore-drill.itest.ts
     - scripts/restore-drill.mjs
-    - artifacts/drills/restore-report.json
     - scripts/check-drill-age.mjs
-    - packages/db/src/data-classes.ts
+    - artifacts/drills/restore-report.json
     - docs/runbooks/restore.md
+    - docs/adr/0123-a-restore-drill-reads-rows-back-and-staleness-is-a-prefix-not-a-calendar.md
+    - scripts/test-gates.mjs
+    notes:
+    - 'NOTE: THE EPHEMERAL POSTGRES IS A DATABASE AND NOT A CONTAINER, and the full integration suite is
+      NOT run against the restored copy. There is no Docker daemon, no second host and no cloud backup
+      service here, so the drill creates a database beside the source, restores into it and drops it. The
+      suites it runs against the restored copy are packages/fixtures/src/restore-drill.itest.ts and pnpm
+      money-invariants, both recorded in the report with their exit status. pnpm test:integration whole
+      is NOT run: it drives the BUILT web application, so it would need a next build, which this unit''s
+      dispatch forbids for disk. What the drill proves is that the schema, the data, the grants and the
+      enforcement come back and that real statements can be issued against them as the application role;
+      what it does not prove is that the application serves from the restored copy.'
+    - 'NOTE: NO RPO, NO RTO AND NO RETENTION PERIOD, and the report carries all three as null with
+      drillMaxAgeDays beside them (Y13-rpo-rto). Nothing in this deployment takes a backup on a schedule,
+      so there is no interval for an RPO to be a function of; archive_mode and wal_level are READ OFF THE
+      SERVER into the report, which is how the report says PITR is not configured without asserting it.
+      The restore duration and the data-loss window ARE measured, and carry machine.measuredOn =
+      agent_container with the core count and load average, because a wall-clock figure from a four-core
+      box shared with other agents is a figure about the container (brief rule 23). Staleness is enforced
+      by a PREFIX rule over the migration set instead, which needs no figure; the calendar rule is
+      implemented and has a known-bad fixture but has no default. ADR 0123 records all of it.'
+    - 'NOTE: the declared file packages/db/src/data-classes.ts was written as
+      packages/core/src/privacy/backup-position.ts. DataClass is defined in
+      packages/core/src/privacy/rights-policy.ts and packages/db may never import packages/core
+      (ADR 0001, brief rule 4), so a registry keyed by that type cannot live in packages/db at all.'
+    - 'NOTE: no migration, no private SQLSTATE and no test port band. The drill and the gate read: the
+      drill writes only into a database it creates and drops, and neither raises a refusal from SQL. So
+      migrations 0169 and 0170, the bands ZY901-ZY910 and the port band { start: 24_500, width: 300 } are
+      RELEASED UNUSED for this unit, SCHEMA_VERSION is untouched and no migration-ledger paragraph was
+      added. One new pnpm verify step, pnpm drill-age, registered in gate case 29''s array and in
+      .github/workflows/ci.yml in the same commit.'
+    - 'NOTE: two defects the drill found in its OWN first two runs, both recorded in ADR 0123 decision 4
+      because they are the argument for the shape: it restored a database in which berelax_app held no
+      permissions at all (--no-owner --no-privileges, every row present, the money invariants failing
+      eight ways on permission denied), and it reported the seven reporting.* materialised views as data
+      loss (pg_dump emits a REFRESH, so they are as at the restore).'
   - id: H-HARD-07
     order: 179
     title: Incident register and the PDPL breach-notification clock
@@ -22162,7 +22202,7 @@ units:
       any critical or high finding is untriaged, and an automated baseline scan that stands in until the
       engagement is booked — proven to examine something by an intentionally vulnerable fixture route.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - H-HARD-01
@@ -22182,10 +22222,49 @@ units:
       defaulting'
     - the register's contents are surfaced in the go/no-go output, asserted by a snapshot test
     files:
-    - packages/db/migrations/00XX-security-finding.sql
+    - packages/core/src/security/findings.ts
+    - packages/core/src/security/findings.test.ts
+    - packages/core/src/security/baseline.ts
+    - packages/core/src/security/baseline.test.ts
+    - packages/fixtures/src/security-baseline-scan.itest.ts
+    - artifacts/security/findings.json
     - scripts/security-baseline-scan.mjs
     - scripts/go-live-security.mjs
-    - apps/web/app/(admin)/compliance/findings/page.tsx
+    - scripts/test-gates.mjs
+    - docs/adr/0125-a-findings-register-is-a-reviewed-file-and-an-empty-one-is-not-a-clean-one.md
+    notes:
+    - 'NOTE: THE REGISTER IS A COMMITTED FILE AND NOT A TABLE, so the declared migration
+      00XX-security-finding.sql was NOT written and migrations 0169/0170 are released unused. The
+      decisive reason is in ADR 0125 decision 1: a release gate that reads database state cannot be
+      re-run from the commit — "was this build clear to ship on the 3rd" has to be answerable by git
+      show, and a findings table is mutable by exactly the person the gate is about. Closing a finding
+      is a repository fact (a commit, a test reference, a written acceptance), so the finding and its
+      remediation belong where a reviewer sees both in one diff.'
+    - 'NOTE: THE ADMIN PAGE apps/web/app/(admin)/compliance/findings/page.tsx IS NOT BUILT and is not
+      declared above. A new route needs a next build before a clean typecheck can be believed (brief
+      rule 17) and this unit''s dispatch forbids a web build for disk, so shipping one unbuilt would be
+      a route nothing has typechecked. No acceptance line asks for it: line 5 asks that the register be
+      surfaced in the GO/NO-GO output, which renderGoNoGo does and an inline snapshot test asserts.
+      Whoever adds the page should render it from parseFindingsRegister and add it to the route
+      registry.'
+    - 'NOTE: pnpm go-live:security is deliberately NOT in pnpm verify. It exits non-zero today and is
+      supposed to: engagement.booked is false (Y13-pentest) and an empty register is a NO-GO, because
+      "no findings" and "nobody looked" are the same register. go-live-payments.mjs set that precedent
+      for the same reason — a gate that fails on a business fact nobody can fix in code is a gate people
+      delete. What IS in verify is pnpm findings, the register''s integrity, registered in gate case
+      29''s array and in .github/workflows/ci.yml in the same commit.'
+    - 'NOTE: THE INTENTIONALLY VULNERABLE FIXTURE ROUTE IS A FIXTURE ORIGIN, not a route in apps/web. A
+      route that bypassed guardAdminRoute would be refused by this repository''s own admin-guard scan
+      and would be a real hole the first time an environment check went the wrong way, so the suite
+      starts a plain node:http origin serving the same shapes. The scan therefore runs in CI through
+      pnpm test:integration rather than needing a CI step of its own, and the real built application is
+      NOT scanned here — the scan takes --target, so pointing it at a running deployment is one flag.'
+    - 'NOTE: no migration, no private SQLSTATE and no test port band. The fixture origin listens on a
+      kernel-assigned port (listen(0)), which apps/web/src/checkout.itest.ts already does for the
+      gateway origin and which brief rule 18 permits — a declared band nothing claims fails
+      test-ports.test.ts, and the claimant scan only reads apps/web anyway. So migrations 0169 and 0170,
+      the band ZY921-ZY930 and the port band { start: 24_500, width: 300 } are RELEASED UNUSED;
+      SCHEMA_VERSION is untouched. Gate block 203a-203k, fifteen cases.'
   - id: H-HARD-11
     order: 182
     title: Load and concurrency soak at realistic peak
@@ -22193,7 +22272,7 @@ units:
       rather than only under property tests, that the worker drains a large backlog exactly once per handler,
       and that the invariants still hold afterwards.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-AVAIL-01
@@ -22228,10 +22307,60 @@ units:
       room over capacity, balanced journal'
     - the measured numbers are written to a committed report so a regression appears as a diff
     files:
+    - packages/core/src/ops/soak.ts
+    - packages/core/src/ops/soak.test.ts
+    - packages/fixtures/src/soak.ts
     - scripts/soak.mjs
-    - artifacts/soak/report.json
-    - apps/web/e2e/last-slot-contention.spec.ts
     - scripts/check-perf-budget.mjs
+    - artifacts/soak/report.json
+    - scripts/test-gates.mjs
+    - docs/adr/0126-a-soak-proves-counts-of-rows-and-a-p95-from-this-container-is-not-a-product-figure.md
+    notes:
+    - 'NOTE: THE LOAD THAT WAS APPLIED, and what it does and does not establish. 200 booking attempts in
+      flight for ONE capacity-1 room: 1 committed, 199 refused slot_taken, 0 untyped rejections, 0 raw
+      23xxx or 40P01, 0 rooms over capacity, in 2,140 ms. A 10,000-event outbox backlog drained by TWO
+      concurrent drainOutbox calls in batches of 200: 20,000 outbox_delivery rows over 20,000 DISTINCT
+      (event, handler) pairs, 0 unpublished, in 6,715 ms, with each handler called exactly 10,000 times.
+      pnpm money-invariants exit 0 against the post-soak database. 150 availability queries at
+      concurrency 50 with the cache OFF: p95 237 ms, median 117 ms. Every figure is in
+      artifacts/soak/report.json with the machine beside it.'
+    - 'NOTE: THE p95 IS NOT A PRODUCT FIGURE and the report says so in a FIELD rather than a comment.
+      machine.measuredOn is agent_container — four cores shared with other agents, load 1.98 at the time
+      — and soakProblems enforces the committed budget only for chosen_machine, so budgetVerdict answers
+      not_judged with the reason. B-AVAIL-07 committed 300 ms at concurrency 50 ON THE CI POSTGRES and
+      availability-perf.itest.ts has six readings of this same container (192-231 ms alone, 315-417 ms
+      inside a full run), so a pass here would be a claim about the container. What IS enforced on every
+      run is the arithmetic: every sample is in the report and the percentile is recomputed from them, so
+      a hand-edited p95 fails. No budget is stated at any concurrency but 50 (Y13-perf-budget). Gate
+      cases 204e and 204f prove both halves. ADR 0126 records it.'
+    - 'NOTE: apps/web/e2e/last-slot-contention.spec.ts IS NOT BUILT and is not declared above. A
+      Playwright spec needs a built application, which this unit''s dispatch forbids for disk, and
+      vitest.integration.config.ts includes apps/**/*.itest.ts so a .spec.ts is a file nothing runs
+      (H-MIG-10 hit exactly that). The contention claim is made at the SERVICE boundary, which is where
+      the room lock is: "zero unhandled constraint-violation 5xx" is proved as "every rejection carried a
+      refusal name and no raw SQLSTATE reached a caller". What is NOT proved is that the HTTP layer turns
+      a typed refusal into a 409 rather than a 500.'
+    - 'NOTE: pnpm soak is NOT in pnpm verify and not a CI step. It builds a probe salon, races 200
+      bookings and drains the WHOLE outbox — which publishes other suites'' pending events, a side effect
+      no shared database should get from a gate. What is in verify is pnpm perf-budget, which re-judges
+      the committed artefact with the same function the run applies, registered in gate case 29''s array
+      and in .github/workflows/ci.yml in the same commit. Gate case 204k runs the driver end to end at
+      reduced scale and asserts its floor fires by name.'
+    - 'NOTE: a defect the soak found in its own first run. drainOutbox drains the WHOLE outbox and the
+      second probe handler takes ''*'', so a pending event left by something else produced 51 handler
+      calls over 50 events — which read for a moment as a handler invoked twice, the exact defect the run
+      exists to detect. Calls for events the run did not publish are now counted and reported separately.'
+    - 'NOTE: B-AVAIL-07''s committed figures are now stated TWICE — AVAILABILITY_P95_BUDGET_MS and
+      AVAILABILITY_BUDGET_CONCURRENCY in packages/core/src/ops/soak.ts, and the literals P95_BUDGET_MS
+      and CONCURRENT_QUERIES in packages/fixtures/src/availability-perf.itest.ts. Gate case 204j holds
+      the two equal, in this commit, rather than a comment hoping somebody notices. That file was NOT
+      otherwise edited.'
+    - 'NOTE: no migration, no private SQLSTATE and no test port band. The soak writes only into tables it
+      creates rows in and removes, and starts no server. Migrations 0169/0170, the band ZY931-ZY940 and
+      the port band { start: 24_500, width: 300 } are RELEASED UNUSED; SCHEMA_VERSION is untouched.
+      packages/fixtures/src/soak.ts is added to vitest.config.ts''s coverage exclusions with a reason, on
+      the precedent of media.ts and load.ts: every line of it is a transaction against a real PostgreSQL
+      and a mock of a row lock would assert that the mock works. Gate block 204a-204l, sixteen cases.'
   - id: H-MIG-01
     order: 183
     title: 'Migration framework: staging schema, provenance and resumable idempotent importers'
@@ -23102,14 +23231,23 @@ units:
     - packages/migration/src/report/diff.test.ts
     - docs/adr/0106-a-dry-run-is-a-fresh-database-and-three-recorded-runs-or-the-gate-is-decoration.md
     notes:
-    - 'NOTE: DEFERRED TO H-HARD-04 — the clean database is created by applying every migration from
-      nothing, not by restoring the restore-drill artefact, because scripts/restore-drill.mjs does not
-      exist (H-HARD-04 is todo) and the words "from the restore-drill artefact" cannot be satisfied by a
-      file that is not there. Running the driver as a CI step is deferred with it, for the same reason;
-      what CI runs is pnpm dry-runs, which reads the three committed runs and needs no database. The
-      restore drill''s own integration suite, named in the fourth acceptance line, is deferred to the
-      same unit; the domain-invariant half IS run — pnpm money-invariants against the post-import
-      database, with its verdict recorded on every run and checked by name.'
+    - 'NOTE: DEFERRAL SATISFIED by H-HARD-04 in two of three parts, and the third is settled rather than
+      deferred. (1) Running the driver as a CI step: DONE — pnpm dry-run:ci is a step in
+      .github/workflows/ci.yml, registered in gate case 29 and declared CI-only, so the driver now runs
+      against a database created from nothing inside the service container, which is this unit''s first
+      acceptance line. (2) The restore drill''s own integration suite, named in the fourth acceptance
+      line: DONE — packages/fixtures/src/restore-drill.itest.ts exists and is a second post-import check
+      in the driver beside pnpm money-invariants, so a post-import database whose triggers had been
+      disabled now fails the run. The three committed runs predate the suite and were NOT re-recorded:
+      they are the record of when those runs happened, the gate requires every recorded post-import check
+      to have passed rather than a named set, and re-running them would replace evidence of when they
+      happened with evidence of when they were re-run. (3) "The clean database is created by restoring
+      the restore-drill artefact": NOT DONE, and now settled rather than pending. The restore-drill
+      artefact is a REPORT and not a backup: no dump is committed to this repository and none may be — a
+      dump of this database is synthetic fixture data today and the whole customer list the day after
+      go-live. The clean database is therefore created by applying every migration from nothing, which is
+      what ADR 0106 already says a dry run means, and the restore PATH the acceptance line was reaching
+      for is proved separately and continuously by pnpm drill and pnpm drill-age (ADR 0123).'
     - 'NOTE: BLOCKED ON OWNER DATA — three importers and the opening trial balance are NOT rehearsed, and
       every recorded run states which and why: packages (Y8-packages, the owner''s sign-off is a human act
       with four values that may not be defaulted), appointments (Y8-visits), staff (Y8-staff, the leave
@@ -23869,7 +24007,7 @@ units:
       a link and command checker, and a cross-check proving there is no alert without a runbook and no runbook
       without a trigger.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-MSG-01
@@ -23899,10 +24037,48 @@ units:
       rollback
     - the docs link and anchor checker passes across docs/runbooks
     files:
-    - docs/runbooks/
-    - scripts/check-runbooks.mjs
     - docs/runbooks/_schema.json
+    - docs/runbooks/database-failover.md
+    - docs/runbooks/messaging-outage.md
+    - docs/runbooks/payment-gateway-outage.md
+    - docs/runbooks/job-backlog.md
+    - docs/runbooks/google-invalid-grant.md
+    - docs/runbooks/cutover-rollback.md
+    - scripts/check-runbooks.mjs
     - scripts/test-gates.mjs
+    - docs/adr/0124-a-runbook-is-machine-checked-or-it-is-decoration.md
+    notes:
+    - 'NOTE: pnpm runbooks is the FOURTH LINK IN pnpm docs-set and not a new verify step, which is what
+      this unit''s dispatch asked for: H-HARD-09 built the documentation chain and a second entry point
+      reading the same directory is a second place for the set''s rules to live. So no case-29
+      registration and no new CI step were added — pnpm docs-set is already both. ADR 0124 records it.'
+    - 'NOTE: FRONT MATTER WAS ADDED TO THE FOUR RUNBOOKS THAT PREDATE THIS UNIT — admin-access.md
+      (W-SYS-11), alerting.md (H-HARD-05), google-offboarding.md (G-CONN-09) and key-rotation.md
+      (H-HARD-03) — because "each runbook carries front matter" is not satisfiable without it. The diff
+      against each of those four is PURE ADDITION: fourteen lines at the top and not one byte changed
+      below them, so no other unit''s prose was touched. The unit each file belongs to is recorded in
+      its own `unit:` field, so a question about a step still has its original owner.'
+    - 'NOTE: the front matter is a NARROW format with its own parser and NOT YAML. This workspace has no
+      JSON Schema or YAML dependency and one was not added for eleven fields; docs/runbooks/_schema.json
+      declares the fields and the checker READS it, refusing a `kind` it does not implement rather than
+      skipping it. ADR 0124 decision 2 gives the decisive reason, which is not the dependency.'
+    - 'NOTE: SIX OF THE EIGHT REQUIRED RUNBOOKS DESCRIBE AN ABSENCE, and say so in the document rather
+      than describing a procedure for a system that is not here. There is no standby, so
+      database-failover.md opens by saying so and routes the lost-database case to restore.md; there is
+      no live SMS, email, payment or Google account (every provider defaults to `fake`), so those three
+      runbooks name the failure classes from packages/providers/src/failure.ts and say that nothing in
+      this build can tell you whether an outage is the provider''s; and nothing decides a cutover, so
+      cutover-rollback.md lists what a rollback cannot undo instead. No RTO, no RPO and no provider
+      support contact is stated anywhere (Y13-rpo-rto, Y13-oncall).'
+    - 'NOTE: no migration, no private SQLSTATE, no port band and no ADR-locked schema change. Everything
+      reads files. Migration 0170, the band ZY911-ZY920 and the port band { start: 24_500, width: 300 }
+      are RELEASED UNUSED for this unit; SCHEMA_VERSION is untouched. Gate block 202a-202n, fifteen
+      cases, one per rule plus the clean-set control.'
+    - 'NOTE: a defect in this unit''s own checker, found by its own gate case 202j: the required-subject
+      list was checked against FILE STEMS while being a list of declared ids, which made
+      runbook-subject-missing unreachable from any fixture short of deleting a committed file. Fixed by
+      keying the subject lookup on the declared id, with the id-equals-stem rule holding the two
+      aligned.'
   - id: H-HARD-09
     order: 200
     title: Documentation set, processor register and bus-factor artefacts

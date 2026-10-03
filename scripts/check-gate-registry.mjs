@@ -38,6 +38,11 @@ const CI_ONLY = new Map([
     'CI starts from an empty database; a local verify runs against one already migrated',
   ],
   ['pnpm seed', 'the catalogue routes prerender from the database, so CI seeds before the build'],
+  [
+    'pnpm dry-run:ci',
+    'creates and drops a database of its own, so it is a CI step and not a verify step; H-MIG-09 ' +
+      'deferred running the driver in CI to H-HARD-04 for want of a restore drill',
+  ],
   ['postgres:16', 'a service container, not a step'],
 ])
 

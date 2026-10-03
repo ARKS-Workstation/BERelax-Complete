@@ -64307,6 +64307,948 @@ export function chargebackNetEffectFils(`,
   )
 }
 
+// 201a-201z. (H-HARD-04) The restore drill shown to be able to FAIL, and its committed evidence shown to
+//            be re-judged rather than read. A drill that reports success without reading a row back has
+//            proved that two commands exited zero, which is ADR 0002 in the one subject where the cost of
+//            being wrong is the whole business: the backup nobody has restored.
+//
+//            Two of these cases exist because the drill found the defect in its own first runs, and both
+//            are the kind no row count can see — a restore that strips every GRANT, and a materialised
+//            view reported as data loss. Those are covered by the drill's own run and by ADR 0123; what
+//            is proved here is that each REFUSAL fires by name.
+{
+  const DRILL = 'scripts/restore-drill.mjs'
+  const AGE = 'scripts/check-drill-age.mjs'
+  const REPORT = 'artifacts/drills/restore-report.json'
+  const TRUNCATED = 'artifacts/drills/__gate_fixture__truncated.dump'
+  const SCHEMA_DUMP = 'artifacts/drills/__gate_fixture__schema.dump'
+  const url = process.env['DATABASE_URL'] ?? process.env['TEST_DATABASE_URL'] ?? ''
+
+  // 201a. A deliberately truncated backup is refused BY NAME, and with no database involved at all.
+  //
+  //       The fixture is a file that begins exactly like a custom-format dump — the five magic bytes —
+  //       and then stops. `pg_restore --list` parses an archive's table of contents and opens no
+  //       connection, so the drill reads the backup before it creates anything, which is why this case
+  //       can point `--source` at a port nothing is listening on and still get the right answer. That
+  //       ordering is deliberate in the script and is commented there: with the server's `show` queries
+  //       first, a rule about a FILE would have needed a reachable PostgreSQL to prove.
+  checkRejectedBy(
+    'the restore drill refuses a truncated backup by name, before it creates a database',
+    withFixture(TRUNCATED, 'PGDMP\u0001\u000e\u0000', () =>
+      runExpectingFailure(process.execPath, [
+        DRILL,
+        '--backup',
+        TRUNCATED,
+        '--source',
+        'postgres://nobody@127.0.0.1:1/none',
+        '--suite',
+        'off',
+        '--invariants',
+        'off',
+      ]),
+    ),
+    'restore-backup-unusable',
+  )
+
+  // 201b. The control, and a second rule in the same pair: a dump `pg_restore --list` CAN read gets past
+  //       the readability rule, and is then refused for having compared nothing.
+  //
+  //       Without this, 201a is satisfied by a drill that refuses every file — which is the gate that
+  //       passes while measuring nothing, from the other direction. A schema-only dump is used because it
+  //       is a real archive that restores no rows, so the floor on tables compared and rows read back
+  //       (`MINIMUM_TABLES_COMPARED`, `MINIMUM_READ_BACKS`) is the thing that fires instead.
+  check(
+    'a database is configured for the drill cases',
+    url !== '',
+    'DATABASE_URL or TEST_DATABASE_URL must be set: 201b restores a real archive, and skipping it ' +
+      'quietly is how a gate comes to be about nothing',
+  )
+  if (url !== '') {
+    let control = { failed: false, output: '' }
+    try {
+      run('pg_dump', ['--schema-only', '--format=custom', '--file', SCHEMA_DUMP, url])
+      control = runExpectingFailure(process.execPath, [
+        DRILL,
+        '--backup',
+        SCHEMA_DUMP,
+        '--suite',
+        'off',
+        '--invariants',
+        'off',
+      ])
+    } finally {
+      rmSync(SCHEMA_DUMP, { force: true })
+    }
+    checkRejectedBy(
+      'a readable archive gets past the backup rule and is refused for having compared nothing',
+      control,
+      'restore-examined-nothing',
+    )
+    check(
+      'and it is NOT refused as an unusable backup, which is what makes 201a a measurement',
+      control.failed && !control.output.includes('restore-backup-unusable'),
+      `the readability rule fired on an archive pg_restore can read:\n${control.output}`,
+    )
+  }
+
+  // 201c. The committed report is re-judged from its own bytes, so a hand-edited figure is refused.
+  //
+  //       The edit nobody would notice is the mismatch list from one entry to none, which is the figure
+  //       the whole gate turns on. `mismatches` is edited here rather than a duration, because a duration
+  //       is a measurement and the mismatch list is the verdict.
+  checkRejectedBy(
+    'the drill-age gate refuses a report whose figures were edited by hand',
+    withEditedFile(
+      REPORT,
+      (text) => replaceOnce(text, '"rowsCompared"', '"rowsCompared_edited"'),
+      () => runExpectingFailure(process.execPath, [AGE]),
+    ),
+    'drill-report-digest-mismatch',
+  )
+
+  // 201d. A migration the drill restored having CHANGED makes the evidence stale.
+  //
+  //       Raising `migrationCount` past what is on disk is the cheapest way to reach the rule from a
+  //       fixture: the prefix cannot be computed, which is itself the stale case. The digest rule fires
+  //       as well, because changing a figure changes the digest — that is not a flaw in the case, it is
+  //       the stronger statement, and `checkRejectedBy` asserts the rule this case is about rather than a
+  //       non-zero exit.
+  checkRejectedBy(
+    'the drill-age gate refuses evidence about a migration set that is not a prefix of this tree',
+    withEditedFile(
+      REPORT,
+      (text) => replaceOnce(text, '"migrationCount": 132', '"migrationCount": 9999'),
+      () => runExpectingFailure(process.execPath, [AGE]),
+    ),
+    'drill-report-stale-schema',
+  )
+
+  // 201e. And the half of the prefix rule that is a decision rather than a check: APPENDING a migration
+  //       must NOT make the evidence stale.
+  //
+  //       This is the case that keeps the rule from being a calendar in disguise. If adding a migration
+  //       invalidated the drill, every unit that writes one would have to re-run it — twenty minutes with
+  //       the suites — to get a green build, and a gate that fails on correct work is a gate somebody
+  //       deletes. The fixture is a real new file in the real migrations directory, sorted after the
+  //       newest so the prefix is untouched, removed in `withFixture`'s `finally`.
+  check(
+    'appending a migration does not make the recorded drill stale',
+    withFixture(
+      'packages/db/migrations/0999___gate_fixture__append.sql',
+      '-- A gate fixture. 201e proves that appending a migration does not invalidate the restore drill.',
+      () => !run(process.execPath, [AGE]).failed,
+    ),
+    'the drill-age gate failed with one migration appended, which makes it a gate that fails on correct ' +
+      'work',
+  )
+
+  // 201f. A report claiming no limitations is wrong about itself and is refused.
+  //
+  //       The same shape as `importersNotRun` in ADR 0106: this drill restores one database on one
+  //       machine from one local dump, and an artefact with an empty `notProved` would read exactly like
+  //       evidence from a configured off-site recovery.
+  checkRejectedBy(
+    'the drill-age gate refuses a report that lists nothing it did not prove',
+    withEditedFile(
+      REPORT,
+      (text) =>
+        replaceOnce(
+          text,
+          text.slice(
+            text.indexOf('"notProved": ['),
+            text.indexOf('],', text.indexOf('"notProved": [')) + 2,
+          ),
+          '"notProved": [],',
+        ),
+      () => runExpectingFailure(process.execPath, [AGE]),
+    ),
+    'drill-report-malformed',
+  )
+
+  // 201g. The calendar bound exists and fires — and is not enforced from a default.
+  //
+  //       `--max-age-days 0` makes every recorded drill too old, which is how the rule is seen to work
+  //       without this build inventing a figure for how often a restore must be rehearsed. The pair below
+  //       is the control: with a wide bound, and with none at all, the same artefact passes. That is the
+  //       difference between "the rule is unconfigured" and "the rule does not exist" (`Y13-rpo-rto`).
+  checkRejectedBy(
+    'the drill-age gate refuses a report older than a configured maximum age',
+    runExpectingFailure(process.execPath, [
+      AGE,
+      '--max-age-days',
+      '0',
+      '--now',
+      '2099-01-01T00:00:00Z',
+    ]),
+    'drill-report-too-old',
+  )
+  check(
+    'and judges no age at all when none is configured, rather than defaulting to one',
+    !run(process.execPath, [AGE, '--now', '2099-01-01T00:00:00Z']).failed &&
+      !run(process.execPath, [AGE, '--max-age-days', '36500']).failed,
+    'the gate failed on age with no maximum configured, which means it has a default figure in it',
+  )
+
+  // 201h. No artefact at all is its own named refusal, and not a pass.
+  checkRejectedBy(
+    'the drill-age gate refuses to report success when no drill has been recorded',
+    runExpectingFailure(process.execPath, [
+      AGE,
+      '--report',
+      'artifacts/drills/__gate_fixture__absent.json',
+    ]),
+    'drill-report-missing',
+  )
+
+  // 201i. The data-class completeness claim: a class with an erasure rule and no backup position fails.
+  //
+  //       Removing the `identity` entry is the fixture because it is the class whose absence would be
+  //       least visible — nobody reviewing a table of ten entries counts them. The test derives the class
+  //       set from `ERASURE_RULES` rather than from a second list, which is what makes this fail at all.
+  checkRejectedBy(
+    'a data class with an erasure rule and no stated backup position fails the completeness test',
+    withEditedFile(
+      'packages/core/src/privacy/backup-position.ts',
+      (text) =>
+        replaceOnce(text, "      dataClass: 'identity',", "      dataClass: 'operational',"),
+      () =>
+        runExpectingFailure('pnpm', [
+          'exec',
+          'vitest',
+          'run',
+          '-c',
+          'vitest.config.ts',
+          'packages/core/src/privacy/backup-position.test.ts',
+        ]),
+    ),
+    'states a backup position for every data class that carries an erasure rule',
+  )
+
+  // 201j. The committed artefact carries no invented recovery objective, and says which machine it was
+  //       measured on.
+  //
+  //       A static read of the file rather than a fixture, because the claim is about what the artefact
+  //       does NOT contain. Four nulls and a `measuredOn` field: brief rule 15 and brief rule 23, each
+  //       turned into something a scan can refuse. The day somebody decides a figure, this case is what
+  //       they will have to change deliberately.
+  {
+    const report = JSON.parse(readFileSync(REPORT, 'utf8'))
+    const objectives = report.objectives ?? {}
+    check(
+      'the committed drill report states no RPO, RTO, retention period or maximum age',
+      objectives.rpoSeconds === null &&
+        objectives.rtoSeconds === null &&
+        objectives.backupRetentionDays === null &&
+        objectives.drillMaxAgeDays === null &&
+        objectives.openQuestionId === 'Y13-rpo-rto',
+      `the artefact carries ${JSON.stringify(objectives)} — a figure here is indistinguishable from a ` +
+        'commitment somebody made',
+    )
+    check(
+      'and names the machine its durations were measured on, so no duration reads as a recovery time',
+      report.machine?.measuredOn === 'agent_container' ||
+        report.machine?.measuredOn === 'chosen_machine',
+      `machine.measuredOn is ${JSON.stringify(report.machine?.measuredOn)}`,
+    )
+    check(
+      'and records the PITR question as a READING off the server rather than as prose',
+      typeof report.pitr?.walLevel === 'string' &&
+        typeof report.pitr?.archiveMode === 'string' &&
+        report.pitr.configured === (report.pitr.archiveMode === 'on'),
+      `pitr is ${JSON.stringify(report.pitr)} — the configured flag has to follow the reading, or the ` +
+        'day somebody turns archiving on this field will still say no',
+    )
+  }
+
+  // 201k. Neither script spells a rule name, so the gate cases above cannot pass against a drill whose
+  //       rules have been renamed in one place only.
+  //
+  //       Both read `RESTORE_DRILL_RULES` and `DRILL_REPORT_RULES` from `packages/core`, which is what
+  //       makes a rule a rule rather than a string in a `console.error`. A literal here would be the
+  //       second statement of a fact, and the one that drifts is the one in the script nobody tests.
+  for (const script of [DRILL, AGE]) {
+    const text = readFileSync(script, 'utf8')
+    const body = text.slice(text.indexOf('*/') + 2)
+    check(
+      `${script} takes its rule names from the registry rather than spelling them`,
+      !/'(?:restore-[a-z-]+|drill-report-[a-z-]+)'/.test(body),
+      'a rule name is written as a literal in the script, so renaming it in packages/core would leave ' +
+        'the script printing the old one and every gate case above would still pass',
+    )
+  }
+}
+
+// 202a-202z. (H-HARD-06) The runbook set shown to be machine-checked rather than decorative. A runbook
+//            is read at 8pm on a Friday, which is the one moment when nobody is going to notice that the
+//            script a step names was renamed six months ago. Every failure mode of this document set is
+//            quiet — the sentence still reads correctly and the thing it names is gone — so each of the
+//            eight rules below is proved against a fixture runbook that makes exactly one of them fire.
+//
+//            The fixtures are real files in `docs/runbooks/`, not a fixture directory, deliberately: the
+//            set-wide rules (the eight required subjects, the floors, the alert cross-check) all fail at
+//            once against a directory holding one document, and a case whose output contains every rule
+//            proves nothing about the one it is named after.
+{
+  const RUNBOOKS = 'docs/runbooks'
+  const SCHEMA = `${RUNBOOKS}/_schema.json`
+  const FIXTURE = `${RUNBOOKS}/__gate_fixture__probe.md`
+  const gate = () => runExpectingFailure('pnpm', ['runbooks'])
+
+  /**
+   * A fixture runbook that passes every rule, so that each case below can break exactly one field.
+   *
+   * It is a function of its overrides rather than eleven copies of the block: the first version of this
+   * was eight hand-written front matters, and the field a later rule was added for was missing from
+   * three of them — which made three cases fail for the wrong reason and look like the new rule working.
+   */
+  const probe = (overrides = {}) => {
+    const fields = {
+      id: '__gate_fixture__probe',
+      title: 'A gate fixture runbook, removed in a finally',
+      unit: 'H-HARD-06',
+      trigger_kind: 'manual',
+      trigger:
+        'A gate case is proving that one rule of the runbook checker fires, and this document exists ' +
+        'for the length of that case.',
+      first_action_heading: 'what-to-do',
+      first_action:
+        'Nothing: this document is a known-bad fixture and is deleted in the finally of the case that ' +
+        'wrote it.',
+      owner: 'owner',
+      escalation:
+        'There is nothing to escalate, because this file does not survive the gate case that created ' +
+        'it (ADR 0003).',
+      alerts: '(none)',
+      env: '(none)',
+      ...overrides,
+    }
+    const body = ['', '# A gate fixture runbook', '', '## What to do', '', 'Nothing.', '']
+    return ['---', ...Object.entries(fields).map(([k, v]) => `${k}: ${v}`), '---', ...body].join(
+      '\n',
+    )
+  }
+
+  // 202a. The acceptance line, word for word: a fixture runbook naming a missing script fails the gate.
+  //
+  //       `pnpm restore-everything` is not a script in package.json and never has been. A procedure
+  //       naming a command is worth exactly as much as the command, and this is the rule the set needs
+  //       most — every other failure in a runbook is at least visible to a reader.
+  checkRejectedBy(
+    'a runbook naming a pnpm script that does not exist fails the gate',
+    withFixture(
+      FIXTURE,
+      probe().replace('Nothing.', 'Run `pnpm restore-everything` and wait.'),
+      gate,
+    ),
+    'runbook-command-missing',
+  )
+
+  // 202b. And the same claim for a PATH, which is the half a command check misses: a step that says
+  //       "read scripts/whatever.mjs" is a reference nothing resolves, and `pnpm docs-set`'s link checker
+  //       cannot see it because it is a code span and not a link.
+  checkRejectedBy(
+    'a runbook naming a repository path that does not exist fails the gate',
+    withFixture(
+      FIXTURE,
+      probe().replace('Nothing.', 'The procedure is in `scripts/no-such-procedure.mjs`.'),
+      gate,
+    ),
+    'runbook-path-missing',
+  )
+
+  // 202c. The schema test: a missing field fails, which is the acceptance line's "a schema test fails on
+  //       any missing field". `escalation` is removed because it is the field most likely to be left out
+  //       in practice — for most of these runbooks the honest answer is that there is nobody to escalate
+  //       to, and a blank field reads exactly like one nobody filled in.
+  checkRejectedBy(
+    'a runbook with no escalation field fails the schema test',
+    withFixture(
+      FIXTURE,
+      probe()
+        .split('\n')
+        .filter((line) => !line.startsWith('escalation: '))
+        .join('\n'),
+      gate,
+    ),
+    'runbook-front-matter-field-missing',
+  )
+
+  // 202d. No front matter at all is its own rule, because a document with none has no declared trigger
+  //       and a runbook with no trigger is one nobody opens at the right moment.
+  checkRejectedBy(
+    'a runbook with no front matter at all fails the gate',
+    withFixture(FIXTURE, '# A document that is not a runbook\n\nProse.\n', gate),
+    'runbook-front-matter-missing',
+  )
+
+  // 202e. The owner is an F07 ROLE and never a person (brief rule 10). `ROLES` is imported from
+  //       `packages/core`, so a role added to the matrix is admissible here on the same commit and a
+  //       plausible-looking name is not.
+  checkRejectedBy(
+    'a runbook whose owner is not an F07 role fails the gate',
+    withFixture(FIXTURE, probe({ owner: 'the duty manager' }), gate),
+    'runbook-front-matter-field-invalid',
+  )
+
+  // 202f. The acceptance line's "every heading a check references must exist", pointed at the one
+  //       heading a reader is sent to before they have read anything. The front matter's claim is
+  //       machine-checked rather than prose beside the document.
+  checkRejectedBy(
+    'a runbook whose first_action_heading names no heading in its own file fails the gate',
+    withFixture(FIXTURE, probe({ first_action_heading: 'a-heading-nobody-wrote' }), gate),
+    'runbook-first-action-heading-missing',
+  )
+
+  // 202g. The orphan-runbook direction: a runbook that says it is triggered by an alert and names none.
+  //       This is what makes "no runbook without a trigger" checkable rather than a matter of opinion —
+  //       every runbook has a `trigger` sentence by schema, and this is the one kind of trigger that can
+  //       be verified against something outside the document.
+  checkRejectedBy(
+    'a runbook triggered by an alert that names no alert is an orphan',
+    withFixture(FIXTURE, probe({ trigger_kind: 'alert' }), gate),
+    'runbook-orphan',
+  )
+
+  // 202h. An alert id the registry does not define: a procedure for a condition that cannot occur.
+  checkRejectedBy(
+    'a runbook naming an alert ALERT_REGISTRY does not define fails the gate',
+    withFixture(FIXTURE, probe({ trigger_kind: 'alert', alerts: 'the_freezer_is_warm' }), gate),
+    'runbook-alert-unknown',
+  )
+
+  // 202i. The other direction of the cross-check, and the one `pnpm alerts` cannot make: an alert whose
+  //       registry entry points at a runbook heading while that runbook's own list has stopped
+  //       mentioning it. The heading still resolves, so the cheap gate stays green, and the document has
+  //       quietly become about something else.
+  checkRejectedBy(
+    'an alert whose runbook no longer lists it is an orphan alert',
+    withEditedFile(
+      `${RUNBOOKS}/alerting.md`,
+      (text) => replaceOnce(text, 'alerts: customer_list_export, ', 'alerts: '),
+      gate,
+    ),
+    'runbook-alert-orphan',
+  )
+
+  // 202j. The eight subjects, by name. `id` is changed rather than the file renamed, because the rule is
+  //       about the SET containing a runbook for each subject and the id is what binds the two — and the
+  //       id/stem rule firing as well is the stronger statement rather than a defect in the case.
+  checkRejectedBy(
+    'a declared subject with no runbook fails the gate by name',
+    withEditedFile(
+      `${RUNBOOKS}/cutover-rollback.md`,
+      (text) => replaceOnce(text, 'id: cutover-rollback', 'id: something-else'),
+      gate,
+    ),
+    'runbook-subject-missing',
+  )
+
+  // 202k. The schema is READ and not restated, in both directions. This is the case that keeps
+  //       `_schema.json` from being documentation: adding a required field makes every runbook fail on
+  //       the same commit, and declaring a `kind` the checker does not implement is refused rather than
+  //       skipped — which is the failure mode of a schema a validator ignores a keyword in.
+  checkRejectedBy(
+    'a field added to the schema is required of every runbook immediately',
+    withEditedFile(
+      SCHEMA,
+      (text) =>
+        replaceOnce(
+          text,
+          '    "id": {\n      "required": true,\n      "kind": "slug",',
+          '    "aftermath": {\n      "required": true,\n      "kind": "text",\n      "minLength": 10,\n' +
+            '      "why": "A gate fixture."\n    },\n    "id": {\n      "required": true,\n      ' +
+            '"kind": "slug",',
+        ),
+      gate,
+    ),
+    'runbook-front-matter-field-missing',
+  )
+  checkRejectedBy(
+    'a schema kind the checker does not implement is refused rather than skipped',
+    withEditedFile(
+      SCHEMA,
+      (text) => replaceOnce(text, '"kind": "slug",', '"kind": "a-kind-nothing-implements",'),
+      gate,
+    ),
+    'runbook-schema-construct-unimplemented',
+  )
+
+  // 202l. An environment variable the application never reads. A step telling somebody to set one is a
+  //       step that appears to work: the shell accepts it, nothing complains, and the setting has no
+  //       effect at all.
+  checkRejectedBy(
+    'a runbook naming an environment variable env.ts does not declare fails the gate',
+    withFixture(FIXTURE, probe({ env: 'BERELAX_MAINTENANCE_MODE' }), gate),
+    'runbook-env-undeclared',
+  )
+
+  // 202m. The floors. Every rule above is a comparison, and a comparison against an empty list passes —
+  //       so the checker refuses to report success over a directory with no runbooks in it rather than
+  //       printing that every runbook is correct. `build/` is used because it holds no `.md` at all,
+  //       which is exactly what a directory walk that has stopped matching looks like from the inside.
+  checkRejectedBy(
+    'the runbook checker refuses to report success over a directory with no runbooks in it',
+    runExpectingFailure('pnpm', ['runbooks', '--dir', 'build']),
+    'runbook-examined-nothing',
+  )
+
+  // 202n. And it passes on the real set, which is the control for all thirteen cases above: a checker
+  //       that rejected everything would satisfy every `checkRejectedBy` here and nothing else.
+  {
+    const clean = run('pnpm', ['runbooks'])
+    check(
+      'the runbook checker passes on the committed set',
+      !clean.failed && clean.output.includes('declared subjects covered'),
+      clean.output,
+    )
+  }
+}
+
+// 203a-203z. (H-HARD-10) The findings register shown to be unable to stop refusing, and the stand-in scan
+//            shown to be able to find something. The engagement is not booked (`Y13-pentest`), so every
+//            claim this unit makes rests on two things being true: that the register refuses a report it
+//            cannot represent, and that the scan standing in for the engagement is not reporting nothing.
+//            ADR 0003 is the acceptance line here rather than a convention behind it.
+{
+  const REGISTER = 'artifacts/security/findings.json'
+  const FIXTURE = 'artifacts/security/__gate_fixture__register.json'
+  const SCAN_SUITE = 'packages/fixtures/src/security-baseline-scan.itest.ts'
+  const findings = (path) => ['findings', '--register', path]
+  const goLive = (path) => ['go-live:security', '--register', path]
+
+  /** A register with one finding, so each case below can spoil one field of it. */
+  const register = (finding) =>
+    `${JSON.stringify(
+      {
+        registerVersion: 1,
+        engagement: {
+          booked: true,
+          standIn: 'a gate fixture register, removed in a finally',
+          openQuestionId: 'Y13-pentest',
+        },
+        findings: [
+          {
+            id: 'GF-0001',
+            title: 'A gate fixture finding',
+            severity: 'critical',
+            status: 'open',
+            source: 'penetration_test',
+            detail: 'Written by a gate case to prove one rule of the register fires.',
+            surface: '/settings/integrations',
+            raisedAtIso: '2026-10-03T00:00:00.000Z',
+            ...finding,
+          },
+        ],
+      },
+      null,
+      2,
+    )}\n`
+
+  // 203a. The acceptance line: severity is a CLOSED set and an unknown one FAILS rather than defaulting.
+  //
+  //       `Critical` rather than `critical` is the realistic case — it is how three of the four
+  //       commercial report formats spell it — and with any defaulting at all it becomes whatever the
+  //       default is. The default nobody would notice is the one that lets a critical through as a
+  //       medium.
+  checkRejectedBy(
+    'a register whose severity is not in the closed set is refused by name',
+    withFixture(FIXTURE, register({ severity: 'Critical' }), () =>
+      runExpectingFailure('pnpm', findings(FIXTURE)),
+    ),
+    'finding-severity-not-in-closed-set',
+  )
+
+  // 203b. The closing rule, first half: "fixed" with neither a commit nor a test reference.
+  checkRejectedBy(
+    'closing a finding as fixed with no commit and no test reference is refused by name',
+    withFixture(FIXTURE, register({ status: 'fixed' }), () =>
+      runExpectingFailure('pnpm', findings(FIXTURE)),
+    ),
+    'finding-closed-without-evidence',
+  )
+
+  // 203c. The closing rule, second half: an accepted risk with no rationale and no role behind it.
+  //       Accepting a risk is a decision, and a decision with no stated reason cannot be revisited.
+  checkRejectedBy(
+    'accepting a finding with no rationale is refused by name',
+    withFixture(FIXTURE, register({ status: 'accepted_with_rationale' }), () =>
+      runExpectingFailure('pnpm', findings(FIXTURE)),
+    ),
+    'finding-accepted-without-rationale',
+  )
+
+  // 203d. The remediation gate, in both directions. A seeded critical finding makes the go-live check
+  //       exit non-zero NAMING that finding; triaging it to fixed with evidence clears it. Without the
+  //       second half this is a check that refuses everything.
+  {
+    const blocked = withFixture(FIXTURE, register({}), () =>
+      runExpectingFailure('pnpm', goLive(FIXTURE)),
+    )
+    checkRejectedBy(
+      'a seeded critical finding makes the go-live check exit non-zero',
+      blocked,
+      'go-live-blocked-by-finding',
+    )
+    check(
+      'and names the finding, rather than reporting a count',
+      blocked.output.includes('GF-0001'),
+      blocked.output,
+    )
+    const cleared = withFixture(
+      FIXTURE,
+      register({ status: 'fixed', remediation: { commit: 'deadbee' } }),
+      () => run('pnpm', goLive(FIXTURE)),
+    )
+    check(
+      'and triaging it to fixed with a commit clears the gate',
+      !cleared.failed && cleared.output.includes('VERDICT: go'),
+      cleared.output,
+    )
+    const accepted = withFixture(
+      FIXTURE,
+      register({
+        status: 'accepted_with_rationale',
+        remediation: {
+          rationale: 'rate limiting is H-HARD-01 and is not built',
+          acceptedBy: 'owner',
+        },
+      }),
+      () => run('pnpm', goLive(FIXTURE)),
+    )
+    check(
+      'as does accepting it with a rationale and a role',
+      !accepted.failed && accepted.output.includes('VERDICT: go'),
+      accepted.output,
+    )
+  }
+
+  // 203e. An EMPTY register does not pass, and the committed one is the fixture: no penetration test has
+  //       been performed, so the register being clear says nothing. "No findings" and "nobody looked"
+  //       are the same register, which is ADR 0002's shape applied to a security review — and it is why
+  //       `pnpm go-live:security` is not in `pnpm verify`.
+  checkRejectedBy(
+    'the committed register, which is empty, is a no-go because nobody has looked',
+    runExpectingFailure('pnpm', ['go-live:security']),
+    'go-live-blocked-engagement-not-performed',
+  )
+
+  // 203f. And the control for 203a to 203c: the committed register is well formed, so those three are
+  //       about the defect rather than about a checker that refuses everything.
+  {
+    const clean = run('pnpm', ['findings'])
+    check(
+      'the committed register passes its integrity check',
+      !clean.failed && clean.output.includes('closed set'),
+      clean.output,
+    )
+  }
+
+  // 203g. The scan is not passing on nothing — proved by breaking the RULE and watching the suite that
+  //       points the scan at a deliberately vulnerable origin go red.
+  //
+  //       This is the case the acceptance line asks for, one level deeper than the suite itself: the
+  //       suite asserts the scan finds a 200 on an unauthenticated admin path, and this asserts the
+  //       suite would NOTICE if the scan stopped looking. The mutation adds 200 to the statuses a
+  //       guarded path may answer, which is exactly the mistake a well-meaning fix for a false positive
+  //       would make.
+  checkRejectedBy(
+    'the baseline scan suite fails when the admin-route rule stops refusing a 200',
+    withEditedFile(
+      'packages/core/src/security/baseline.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          'Object.freeze([301, 302, 303, 307, 308, 401, 403, 404])',
+          'Object.freeze([200, 301, 302, 303, 307, 308, 401, 403, 404])',
+        ),
+      () =>
+        runExpectingFailure('pnpm', [
+          'exec',
+          'vitest',
+          'run',
+          '-c',
+          'vitest.integration.config.ts',
+          SCAN_SUITE,
+        ]),
+    ),
+    'finds the intentionally vulnerable origin and names each hole',
+  )
+
+  // 203h. A target that cannot be reached is an ERROR and not an empty result. This is the quietest way
+  //       a scan can lie: pointed at a server that was not running, it finds nothing wrong.
+  {
+    const unreachable = runExpectingFailure('pnpm', [
+      'security-scan',
+      '--target',
+      'http://127.0.0.1:1',
+    ])
+    check(
+      'a scan whose target cannot be reached fails rather than reporting nothing found',
+      unreachable.failed && unreachable.output.includes('could not be reached'),
+      unreachable.output,
+    )
+  }
+
+  // 203i. And no target at all.
+  {
+    const noTarget = runExpectingFailure('pnpm', ['security-scan'])
+    check(
+      'a scan with no target refuses to run',
+      noTarget.failed && noTarget.output.includes('examines nothing'),
+      noTarget.output,
+    )
+  }
+
+  // 203j. The admin path list is DERIVED from the route registry, and that is load-bearing. With
+  //       `requiresAdminSession` answering false for everything, the scan has nothing to probe and must
+  //       say so — rather than reporting that no admin route is reachable without a session, which would
+  //       be a claim about no routes.
+  checkRejectedBy(
+    'the scan refuses to report success when the registry yields no guarded admin path',
+    withEditedFile(
+      'apps/web/src/routes/admin-routes.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          'export function requiresAdminSession(pathname: string): boolean {',
+          'export function requiresAdminSession(pathname: string): boolean {\n  if (pathname !== undefined) return false',
+        ),
+      () => runExpectingFailure('pnpm', ['security-scan', '--target', 'http://127.0.0.1:1']),
+    ),
+    'finding-register-examined-nothing',
+  )
+
+  // 203k. Neither script spells a rule name, so every case above would notice a rule renamed in one
+  //       place only. The rules live in `packages/core/src/security/findings.ts` beside the tests that
+  //       exercise them.
+  for (const script of ['scripts/go-live-security.mjs', 'scripts/security-baseline-scan.mjs']) {
+    const text = readFileSync(script, 'utf8')
+    const body = text.slice(text.indexOf('*/') + 2)
+    check(
+      `${script} takes its rule names from the registry rather than spelling them`,
+      !/'(?:finding-[a-z-]+|go-live-blocked[a-z-]*)'/.test(body),
+      'a rule name is written as a literal, so renaming it in packages/core would leave the script ' +
+        'printing the old one and every case above would still pass',
+    )
+  }
+}
+
+// 204a-204z. (H-HARD-11) The soak's recorded numbers shown to be re-judged rather than read, and the one
+//            figure that is a measurement of the MACHINE shown to be treated as one. The claims about the
+//            code are counts of rows and are enforced on every run; the latency reading is enforced only
+//            for a machine somebody chose, and both halves of that have a fixture here — because a budget
+//            rule that can never fire is decoration, and a budget rule that fires on an agent container
+//            is a gate that fails on correct work.
+{
+  const BUDGET = 'scripts/check-perf-budget.mjs'
+  const REPORT = 'artifacts/soak/report.json'
+  const FIXTURE = 'artifacts/soak/__gate_fixture__report.json'
+  const PERF_ITEST = 'packages/fixtures/src/availability-perf.itest.ts'
+  const gate = (path) => runExpectingFailure('pnpm', ['perf-budget', '--report', path])
+  const committed = JSON.parse(readFileSync(REPORT, 'utf8'))
+
+  // 204a. The edit a reader would quote. The percentile is recomputed from the samples the report
+  //       carries, so a hand-edited p95 fails — which is what makes the figure in the artefact the
+  //       figure that was measured.
+  checkRejectedBy(
+    'the perf gate refuses a p95 the report’s own samples do not give',
+    withEditedFile(
+      REPORT,
+      (text) => replaceOnce(text, `"p95Ms": ${committed.availability.p95Ms},`, '"p95Ms": 1,'),
+      () => runExpectingFailure('pnpm', ['perf-budget']),
+    ),
+    'soak-report-arithmetic-inconsistent',
+  )
+
+  // 204b. Two successes is the double booking and zero is a lock that refuses everybody. Both are the
+  //       same rule, and the acceptance line's "exactly one" is the reason it is not "at least one".
+  for (const [successes, what] of [
+    ['2', 'two successes, which is the double booking'],
+    ['0', 'no success, which is a lock that refuses everybody'],
+  ]) {
+    checkRejectedBy(
+      `the perf gate refuses ${what}`,
+      withEditedFile(
+        REPORT,
+        (text) => replaceOnce(text, '"successes": 1,', `"successes": ${successes},`),
+        () => runExpectingFailure('pnpm', ['perf-budget']),
+      ),
+      'soak-contention-not-exactly-one-success',
+    )
+  }
+
+  // 204c. A rejection that carried no refusal name is a raw constraint violation reaching a caller,
+  //       which is what "zero unhandled constraint-violation 5xx" is at the service boundary.
+  checkRejectedBy(
+    'the perf gate refuses a run in which any rejection was untyped',
+    withEditedFile(
+      REPORT,
+      (text) => replaceOnce(text, '"untypedFailures": 0,', '"untypedFailures": 1,'),
+      () => runExpectingFailure('pnpm', ['perf-budget']),
+    ),
+    'soak-refusal-not-typed',
+  )
+
+  // 204d. Exactly one delivery per (event, handler), in both directions: one more row than pairs is a
+  //       second delivery, one fewer is an event a handler never saw.
+  for (const delta of [1, -1]) {
+    checkRejectedBy(
+      `the perf gate refuses ${delta > 0 ? 'an extra' : 'a missing'} delivery row`,
+      withEditedFile(
+        REPORT,
+        (text) =>
+          replaceOnce(
+            text,
+            `"deliveries": ${committed.backlog.deliveries},`,
+            `"deliveries": ${committed.backlog.deliveries + delta},`,
+          ),
+        () => runExpectingFailure('pnpm', ['perf-budget']),
+      ),
+      'soak-backlog-not-exactly-one-delivery-per-handler',
+    )
+  }
+
+  // 204e. The budget rule fires — for a reading taken on a machine somebody chose. Without this case the
+  //       rule would be unreachable and "breaching the committed number fails the build" would be a
+  //       sentence rather than a check.
+  {
+    const breaching = {
+      ...committed,
+      machine: { ...committed.machine, measuredOn: 'chosen_machine' },
+      availability: {
+        ...committed.availability,
+        concurrency: 50,
+        // Fifty identical samples, not one: the report's own floor refuses fewer samples than queries,
+        // and a fixture that tripped THAT rule would have made case 204f below fail for a reason that
+        // proves nothing about the budget.
+        samples: Array.from({ length: 50 }, () => 900),
+        p95Ms: 900,
+        medianMs: 900,
+        budgetMs: 300,
+      },
+    }
+    checkRejectedBy(
+      'breaching the committed availability budget on a chosen machine fails the build',
+      withFixture(FIXTURE, `${JSON.stringify(breaching, null, 2)}\n`, () => gate(FIXTURE)),
+      'soak-availability-budget-breached',
+    )
+
+    // 204f. And the other half, which is brief rule 23 as a RULE: the same breaching figure taken on an
+    //       agent container does not fail. `availability-perf.itest.ts` measured this container six
+    //       times — 192 to 231 ms alone and 315 to 417 ms inside a full run against a 300 ms budget — so
+    //       a gate enforcing it here would fail on correct work, and a gate that fails on correct work
+    //       is one somebody deletes.
+    const container = {
+      ...breaching,
+      machine: { ...committed.machine, measuredOn: 'agent_container' },
+    }
+    const tolerated = withFixture(FIXTURE, `${JSON.stringify(container, null, 2)}\n`, () =>
+      run('pnpm', ['perf-budget', '--report', FIXTURE]),
+    )
+    check(
+      'and the same figure on an agent container is recorded rather than enforced',
+      !tolerated.failed && tolerated.output.includes('not_judged'),
+      tolerated.output,
+    )
+  }
+
+  // 204g. No artefact at all is a named refusal and not a pass.
+  checkRejectedBy(
+    'the perf gate refuses to report success when no soak has been recorded',
+    gate('artifacts/soak/__gate_fixture__absent.json'),
+    'soak-report-malformed',
+  )
+
+  // 204h. The control for everything above: the committed report passes, so the seven refusals are
+  //       about the defect rather than about a gate that rejects everything.
+  {
+    const clean = run('pnpm', ['perf-budget'])
+    check(
+      'the committed soak report passes the perf gate',
+      !clean.failed && clean.output.includes('Budget verdict'),
+      clean.output,
+    )
+  }
+
+  // 204i. What the artefact must SAY. Three static reads, each one a rule this unit's dispatch is about:
+  //       the load that was applied, the machine it was applied on, and what it does not establish.
+  check(
+    'the committed report names the machine its latency figures came from',
+    committed.machine?.measuredOn === 'agent_container' ||
+      committed.machine?.measuredOn === 'chosen_machine',
+    `machine.measuredOn is ${JSON.stringify(committed.machine?.measuredOn)}`,
+  )
+  check(
+    'and states what the applied load does not establish, in more than one sentence',
+    Array.isArray(committed.notProved) && committed.notProved.length >= 3,
+    `notProved holds ${JSON.stringify(committed.notProved)}`,
+  )
+  check(
+    'and carries every sample, so the percentile in it is recomputable rather than quotable',
+    Array.isArray(committed.availability?.samples) &&
+      committed.availability.samples.length >= committed.availability.concurrency,
+    `${committed.availability?.samples?.length} sample(s) at concurrency ${committed.availability?.concurrency}`,
+  )
+
+  // 204j. The committed figures are stated twice — in `packages/core/src/ops/soak.ts` and as literals in
+  //       `availability-perf.itest.ts` — and this is the check that holds the two equal, which the brief
+  //       asks for in the same commit as the second statement. Without it the soak would go on judging
+  //       against 300 ms after B-AVAIL-07's own budget had moved.
+  {
+    const core = readFileSync('packages/core/src/ops/soak.ts', 'utf8')
+    const perf = readFileSync(PERF_ITEST, 'utf8')
+    const budget = /export const AVAILABILITY_P95_BUDGET_MS = (\d+)/.exec(core)?.[1]
+    const concurrency = /export const AVAILABILITY_BUDGET_CONCURRENCY = (\d+)/.exec(core)?.[1]
+    const perfBudget = /const P95_BUDGET_MS = (\d+)/.exec(perf)?.[1]
+    const perfConcurrency = /const CONCURRENT_QUERIES = (\d+)/.exec(perf)?.[1]
+    check(
+      'the soak and B-AVAIL-07 agree on the committed p95 budget and the concurrency it holds at',
+      budget !== undefined &&
+        concurrency !== undefined &&
+        budget === perfBudget &&
+        concurrency === perfConcurrency,
+      `core says ${budget} ms at ${concurrency} and ${PERF_ITEST} says ${perfBudget} ms at ` +
+        `${perfConcurrency}. A second statement of a fact drifts, and the one that drifts here makes ` +
+        'the soak judge against a budget nobody holds',
+    )
+  }
+
+  // 204k. The soak's own floor, end to end: a reduced run is refused BY NAME rather than reported as a
+  //       smaller success. This one really runs the driver — it builds the probe salon, races two
+  //       attempts and drains two events — because the floor living in the shared judgement is only
+  //       half the claim; the other half is that the driver applies it to the run it just performed.
+  checkRejectedBy(
+    'the soak refuses a run smaller than the acceptance figures, by name',
+    runExpectingFailure('pnpm', [
+      'soak',
+      '--attempts',
+      '2',
+      '--events',
+      '2',
+      '--concurrency',
+      '1',
+      '--batches',
+      '1',
+      '--invariants',
+      'off',
+    ]),
+    'soak-examined-nothing',
+  )
+
+  // 204l. And the gate spells no rule name, so every case above would notice a rule renamed in one
+  //       place only.
+  {
+    const text = readFileSync(BUDGET, 'utf8')
+    const body = text.slice(text.indexOf('*/') + 2)
+    check(
+      `${BUDGET} takes its rule names from the registry rather than spelling them`,
+      !/'soak-[a-z-]+'/.test(body),
+      'a rule name is written as a literal, so renaming it in packages/core would leave the gate ' +
+        'printing the old one and every case above would still pass',
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -65174,6 +66116,9 @@ export function chargebackNetEffectFils(`,
     'pnpm perf-layers',
     'pnpm offline-money',
     'pnpm headers',
+    'pnpm drill-age',
+    'pnpm findings',
+    'pnpm perf-budget',
     'pnpm egress',
     // And the SAQ-A scan beside it, for the same reason in the other direction: it is the one check that
     // says no card number can reach anything this build renders, logs or stores, and its whole value is

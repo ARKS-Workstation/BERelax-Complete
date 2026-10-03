@@ -1,3 +1,17 @@
+---
+id: google-offboarding
+title: Offboarding a Google account
+unit: G-CONN-09
+trigger_kind: manual
+trigger: A person who holds access to the Business Profile, Search Console, the GA4 property or the Cloud project is leaving, or their Google account must stop being able to act for this business.
+first_action_heading: step-1-disconnect-in-admin
+first_action: Disconnect the connection in admin first, because that is the only step this application can perform and it records whether the revoke succeeded.
+owner: owner
+escalation: Five of the seven steps happen in Google's own consoles and nothing in this build can verify them, so escalation is re-reading step 7's audit sequence rather than asking somebody else.
+alerts: (none)
+env: GOOGLE_OAUTH_CLIENT_SECRET
+---
+
 # Runbook — offboarding a Google account
 
 Run this when a person or an agency loses access to the business's Google presence: a staff member

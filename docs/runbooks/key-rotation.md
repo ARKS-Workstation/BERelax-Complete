@@ -1,3 +1,17 @@
+---
+id: key-rotation
+title: Key and secret rotation, including the clinical KEK
+unit: H-HARD-03
+trigger_kind: manual
+trigger: A key or secret has to be replaced, either on a schedule or because it may have been disclosed; the clinical KEK is the one whose rotation re-wraps stored records.
+first_action_heading: before
+first_action: Read the Before step for the key being rotated and confirm the current version, because a rotation performed against the wrong version cannot be undone.
+owner: owner
+escalation: There is nobody else holding these secrets, so escalation means recording the rotation and its reason in the incident register before performing it; what a rotation cannot recover is written out in its own section.
+alerts: (none)
+env: CLINICAL_KEK, CLINICAL_KEK_VERSION, CLINICAL_KEK_PREVIOUS, CLINICAL_KEK_PREVIOUS_VERSION, GOOGLE_TOKEN_KEK, STAFF_PII_KEK, SUPPRESSION_PEPPER, DOCUMENT_URL_SIGNING_SECRET
+---
+
 # Runbook — key and secret rotation
 
 Every secret in `build/secret-inventory.json` points at a heading in this file, and

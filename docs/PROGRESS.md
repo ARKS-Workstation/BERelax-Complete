@@ -2,13 +2,12 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**205 / 211 units complete.**
+**209 / 211 units complete.**
 
 ## Next up
 
 1. **B-M1 — M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop**
-1. **H-HARD-04 — Backup, PITR and the automated restore drill**
-1. **H-HARD-10 — Pen-test intake, findings register and the remediation gate**  — **needs owner input:** Y13-pentest
+1. **H-MIG-11 — Freeze, go/no-go check and the cutover runbook with rollback**  — **needs owner input:** Y13-pentest, Y11-tax-agent, Y10-consent, Y6-sender-ids, Y7-mcc
 
 ## All units
 
@@ -196,11 +195,11 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 175 | `H-HARD-01` | Security headers, CSP and public-endpoint rate limiting | `A-FIRST-01`, `A-FIRST-02`, `A-FIRST-03`, `A-FIRST-04`, `A-FIRST-05`, `A-FIRST-06`, `A-FIRST-07`, `A-FIRST-08`, `A-FIRST-09`, `A-FIRST-10`, `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `H05`, `W-SITE-01`, `W-SITE-02`, `W-SITE-03`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07`, `W-SITE-08`, `W-SITE-09`, `W-SITE-10`, `W-SITE-11` | — | — |
 | [x] | 176 | `H-HARD-02` | Dependency, secret, licence and container scanning in CI | `F02`, `H05` | — | — |
 | [x] | 177 | `H-HARD-03` | KEK rotation for clinical DEKs, and secret rotation | `F08`, `H-HARD-02` | — | Y5-residency |
-| [ ] | 178 | `H-HARD-04` | Backup, PITR and the automated restore drill | `F04`, `M-VAT-01`, `M-VAT-02`, `M-VAT-03`, `M-VAT-04`, `M-VAT-05`, `M-VAT-06`, `M-VAT-07`, `M-VAT-08`, `M-VAT-09`, `M-VAT-10`, `M-VAT-11`, `M-VAT-12`, `M-VAT-13`, `R-REP-01`, `R-REP-02`, `R-REP-03`, `R-REP-04`, `R-REP-05`, `R-REP-06`, `R-REP-07`, `R-REP-08` | — | — |
+| [x] | 178 | `H-HARD-04` | Backup, PITR and the automated restore drill | `F04`, `M-VAT-01`, `M-VAT-02`, `M-VAT-03`, `M-VAT-04`, `M-VAT-05`, `M-VAT-06`, `M-VAT-07`, `M-VAT-08`, `M-VAT-09`, `M-VAT-10`, `M-VAT-11`, `M-VAT-12`, `M-VAT-13`, `R-REP-01`, `R-REP-02`, `R-REP-03`, `R-REP-04`, `R-REP-05`, `R-REP-06`, `R-REP-07`, `R-REP-08` | — | — |
 | [x] | 179 | `H-HARD-07` | Incident register and the PDPL breach-notification clock | `C-CRM-01`, `C-CRM-02`, `C-CRM-03`, `C-CRM-04`, `C-CRM-05`, `C-CRM-06`, `C-CRM-07`, `C-CRM-08`, `C-CRM-09`, `C-CRM-10`, `F06`, `F09`, `M-VAT-01`, `M-VAT-02`, `M-VAT-03`, `M-VAT-04`, `M-VAT-05`, `M-VAT-06`, `M-VAT-07`, `M-VAT-08`, `M-VAT-09`, `M-VAT-10`, `M-VAT-11`, `M-VAT-12`, `M-VAT-13` | — | Y1-entity |
 | [x] | 180 | `H-HARD-08` | Offline tolerance, honest failure and the paper fallback | `B-UI-01`, `B-UI-02`, `B-UI-03`, `B-UI-04`, `B-UI-05`, `H-HARD-01`, `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13` | — | — |
-| [ ] | 181 | `H-HARD-10` | Pen-test intake, findings register and the remediation gate | `H-HARD-01`, `H-HARD-02` | — | Y13-pentest |
-| [ ] | 182 | `H-HARD-11` | Load and concurrency soak at realistic peak | `B-AVAIL-01`, `B-AVAIL-02`, `B-AVAIL-03`, `B-AVAIL-04`, `B-AVAIL-05`, `B-AVAIL-06`, `B-AVAIL-07`, `H-HARD-01`, `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13` | — | — |
+| [x] | 181 | `H-HARD-10` | Pen-test intake, findings register and the remediation gate | `H-HARD-01`, `H-HARD-02` | — | Y13-pentest |
+| [x] | 182 | `H-HARD-11` | Load and concurrency soak at realistic peak | `B-AVAIL-01`, `B-AVAIL-02`, `B-AVAIL-03`, `B-AVAIL-04`, `B-AVAIL-05`, `B-AVAIL-06`, `B-AVAIL-07`, `H-HARD-01`, `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13` | — | — |
 | [x] | 183 | `H-MIG-01` | Migration framework: staging schema, provenance and resumable idempotent importers | `F04`, `F06`, `H-HARD-04` | — | — |
 | [x] | 184 | `H-MIG-02` | Package templates in settings, and the reconstruction workbook validator | `F09`, `H-MIG-01`, `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13` | — | Y8-packages, Y9-package-policy |
 | [x] | 185 | `H-MIG-03` | Package liability import, opening deferred revenue and cash reconciliation | `H-MIG-02`, `M-VAT-01`, `M-VAT-02`, `M-VAT-03`, `M-VAT-04`, `M-VAT-05`, `M-VAT-06`, `M-VAT-07`, `M-VAT-08`, `M-VAT-09`, `M-VAT-10`, `M-VAT-11`, `M-VAT-12`, `M-VAT-13` | — | Y8-packages, Y11-vat-package, Y9-package-thin |
@@ -217,7 +216,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 196 | `Y-PAY-04` | Webhook ingest: signature verification, replay protection, idempotent handlers | `F06`, `Y-PAY-02` | — | — |
 | [x] | 197 | `Y-PAY-05` | Missed-event reconciliation job | `Y-PAY-04` | — | — |
 | [x] | 198 | `H-HARD-05` | Alert registry, SLOs and the insider-threat export alarm | `F06`, `H-HARD-01`, `R-REP-01`, `R-REP-02`, `R-REP-03`, `R-REP-04`, `R-REP-05`, `R-REP-06`, `R-REP-07`, `R-REP-08`, `Y-PAY-05` | — | — |
-| [ ] | 199 | `H-HARD-06` | Runbook set, machine-checked | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `G-CONN-01`, `G-CONN-02`, `G-CONN-03`, `G-CONN-04`, `G-CONN-05`, `G-CONN-06`, `G-CONN-07`, `G-CONN-08`, `G-CONN-09`, `H-HARD-04`, `H-HARD-05` | — | — |
+| [x] | 199 | `H-HARD-06` | Runbook set, machine-checked | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `G-CONN-01`, `G-CONN-02`, `G-CONN-03`, `G-CONN-04`, `G-CONN-05`, `G-CONN-06`, `G-CONN-07`, `G-CONN-08`, `G-CONN-09`, `H-HARD-04`, `H-HARD-05` | — | — |
 | [x] | 200 | `H-HARD-09` | Documentation set, processor register and bus-factor artefacts | `H-HARD-06`, `H-HARD-07`, `H01` | — | — |
 | [x] | 201 | `Y-PAY-06` | Deposits and prepayment as an appointment-scoped payment on account | `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13`, `Y-PAY-02` | — | Y9-windows |
 | [x] | 202 | `Y-PAY-07` | Card-on-file mandates and the no-show / late-cancellation fee path | `Y-PAY-06` | — | Y9-windows |

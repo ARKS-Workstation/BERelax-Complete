@@ -1,0 +1,32 @@
+{
+  "$comment": [
+    "The security findings register. H-HARD-10.",
+    "",
+    "It ships LIVE AND EMPTY rather than absent, which is this unit's own provisional note: the",
+    "engagement has not been booked (OPEN-QUESTIONS Y13-pentest), and a register that did not exist",
+    "until there was something to put in it is a register nobody would build on the day they needed it.",
+    "",
+    "AN EMPTY REGISTER IS NOT A CLEAN ONE. `engagement.booked` is false, and `pnpm go-live:security`",
+    "refuses while it is: 'no findings' and 'nobody looked' are the same register, which is ADR 0002's",
+    "shape applied to a security review. That is why the go-live check is NOT in `pnpm verify` — it",
+    "exits non-zero today and is supposed to, exactly as `pnpm go-live:payments` does.",
+    "",
+    "What IS in `pnpm verify` is `pnpm findings`, which checks this file's integrity: closed severity and",
+    "status sets, and the closing rule — a finding cannot be fixed without a commit or a test reference,",
+    "accepted without a rationale and a role, dismissed as a false positive without a reason, or marked",
+    "a duplicate without naming the original.",
+    "",
+    "There is deliberately no digest over this file. The restore drill's report has one (ADR 0123)",
+    "because it is a measurement and a hand edit to it is always a falsification; this is a working",
+    "document somebody edits on purpose, and its control is the closing rule plus the review of the diff.",
+    "",
+    "To add findings from the stand-in scan: `pnpm security-scan --target <url> --import`."
+  ],
+  "registerVersion": 1,
+  "engagement": {
+    "booked": false,
+    "standIn": "an automated unauthenticated baseline scan over the route list the registry declares, exercised against a deliberately vulnerable fixture origin so that it is known to find what is there (scripts/security-baseline-scan.mjs)",
+    "openQuestionId": "Y13-pentest"
+  },
+  "findings": []
+}

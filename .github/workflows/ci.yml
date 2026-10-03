@@ -359,6 +359,42 @@ jobs:
       - name: Three recorded migration dry runs, no unexplained variance
         run: pnpm dry-runs
 
+      # H-HARD-04's gate over the committed restore drill. It reads the artefact and the migration
+      # directory and needs no database. The rule it enforces is a PREFIX one — the evidence stands while
+      # the migrations the drill restored are unchanged — so appending a migration does not fail it and
+      # editing one the drill restored does. It also prints the RPO, the RTO, the backup retention period
+      # and its own maximum age as unset on every run, because all four are unanswered (`Y13-rpo-rto`) and
+      # none of them was given an invented default.
+      - name: The committed restore drill is evidence about this schema
+        run: pnpm drill-age
+
+      # H-HARD-10's register integrity: closed severity and status sets, and the closing rule — a
+      # finding is fixed with a commit or a test reference, accepted with a rationale and a role,
+      # dismissed with a reason, or marked a duplicate naming the original. The go/no-go check itself
+      # (`pnpm go-live:security`) is deliberately NOT here: it exits non-zero today because no
+      # penetration test has been performed, and a gate that fails on a business fact nobody can fix in
+      # code is a gate people delete. The SCAN that stands in runs inside the integration suite.
+      - name: Findings register integrity
+        run: pnpm findings
+
+      # H-HARD-11's gate over the committed soak. It reads the artefact and needs no database: the point
+      # of recording a soak is that the evidence outlives the rows it was measured over. The claims about
+      # the code — exactly one of 200 contenders, exactly one delivery per (event, handler), no room over
+      # capacity, the invariants after — are enforced on every run because they are counts of rows. The
+      # availability p95 is recomputed from the samples so a hand-edited figure fails, and is compared
+      # with the committed budget only for a reading taken on a machine somebody chose (brief rule 23).
+      - name: The committed soak report is its own arithmetic
+        run: pnpm perf-budget
+
+      # H-MIG-09's driver, run as a CI step. Its own NOTE deferred this to H-HARD-04 because the restore
+      # drill did not exist; it does now, so the driver runs here against a fresh database it creates and
+      # drops inside the service container — which is the unit's first acceptance line, and the only place
+      # "all inside CI against a fresh postgres:16" can actually be true. It records to /tmp and not into
+      # `artifacts/migration/`: the three committed runs are reviewed fixtures, and a CI run overwriting
+      # one would replace evidence of when it happened with evidence of when CI last ran.
+      - name: One full migration dry run against a database created from nothing
+        run: pnpm dry-run:ci
+
       - name: Byte budgets
         run: pnpm budgets
 
