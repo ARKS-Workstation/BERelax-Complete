@@ -406,6 +406,22 @@ export async function unconfirmedAssumptionRows(
       union all
       select 'consent_wording', purpose || ' v' || version::text, open_question_id, provisional_note
         from consent_wording where is_provisional
+      -- The merchant category code (0156). Its own branch rather than the singleton CTE below, and the
+      -- reason is the shape of the absence: that clause matches on is_placeholder_text(value), and an
+      -- unconfirmed MCC is NULL rather than a placeholder — legal_entity_mcc_is_not_a_placeholder
+      -- refuses one outright, precisely so the column cannot be filled with a marker and then read as
+      -- configured. So the condition is mcc_confirmed_at is null, which is the fact the panel has to
+      -- show: until an acquirer confirms a code in writing, what a cardholder's bank statement says the
+      -- money went to is undecided, and PAYMENT_PROVIDER=real is refused. The DESCRIPTOR reaches this
+      -- panel as an app_setting, which is why it is not here: a provisional value has to be able to say
+      -- it is one, and legal_entity carries no provenance trio.
+      union all
+      select 'legal_entity', 'mcc', 'Y7-mcc',
+             'No acquirer has confirmed a merchant category code in writing, so the category a card '
+             'payment is recorded under - and what a cardholder''s statement says the money went to - '
+             'is undecided. ZY771 refuses a payment intent against any gateway but the manual till and '
+             'the card fake while this is unset.'
+        from legal_entity where mcc_confirmed_at is null
       union all
       select source, column_name, question,
              -- The value itself is the note: 'WHATSAPP-PENDING-Y1-NAP' says what it is, and a NULL

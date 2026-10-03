@@ -15,16 +15,19 @@ import {
   applyPreferenceCentreChange,
   createConnection,
   enrolOnLiveVersion,
+  recordSuppression,
   type Sql,
   type SuppressionKeying,
+  seedStockFlows,
   setFlowActive,
   toggleMessagingControl,
   withUnitOfWork,
 } from '@berelax/db'
+import { fixtureSuppressionPeppers, syntheticPerson } from '@berelax/fixtures'
 import { createSmsalaTransport } from '@berelax/messaging/transports/smsala'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { fixtureSuppressionPeppers } from './suppression.ts'
-import { syntheticPerson } from './synthetic.ts'
+import { buildTestInterpreterRuntime } from '../testing/flow-runtime.ts'
+import { runFlowTick, startRunAndQueueFirstTick } from './interpreter.ts'
 
 /**
  * **MILESTONE M3**, as one integration test, with every assertion on ROWS.
@@ -127,9 +130,6 @@ const contact = (index: number): string => {
 }
 
 async function buildRuntime(transport: ReturnType<typeof createSmsalaTransport>['transport']) {
-  const { buildTestInterpreterRuntime } = await import(
-    '../../../apps/worker/src/testing/flow-runtime.ts'
-  )
   return buildTestInterpreterRuntime({
     sql,
     transport,
@@ -265,7 +265,6 @@ beforeAll(async () => {
   // Published through the SEEDER, not through `publishFlowDefinition` directly: the seeder compares the
   // stored document with the composed one and publishes only on a difference, so running this file a
   // hundred times leaves one version. See FLOW_KEY.
-  const { seedStockFlows } = await import('@berelax/db')
   await seedStockFlows(sql, {
     flows: [{ flowKey: FLOW_KEY, title: 'M3 proof', definition: journey }],
     validate: (candidate) => validateFlowDefinition(candidate, { templates }),
@@ -302,9 +301,6 @@ afterAll(async () => {
 
 /** Enrol one contact and start their run, returning the run id. */
 async function enrolAndStart(customerId: string, atIso: string): Promise<string> {
-  const { startRunAndQueueFirstTick } = await import(
-    '../../../apps/worker/src/automation/interpreter.ts'
-  )
   return withUnitOfWork(sql, ACTOR, async (uow) => {
     const enrolment = await enrolOnLiveVersion(uow, {
       flowKey: FLOW_KEY,
@@ -335,7 +331,6 @@ async function enrolAndStart(customerId: string, atIso: string): Promise<string>
  * it is worth having met: a loop whose exit depends on time moving, driven at a frozen clock, has no exit.
  */
 async function tick(runId: string, atIso: string): Promise<string> {
-  const { runFlowTick } = await import('../../../apps/worker/src/automation/interpreter.ts')
   const result = await runFlowTick(runtime, { runId, atIso })
   return result.kind
 }
@@ -461,7 +456,6 @@ describe("MILESTONE M3 — a suppressed contact whose consent still stands is re
     // both, so the chain above can only ever show the consent refusal. A suppression on its own is a
     // real state — a vendor-reported STOP, a complaint, a bounce — and it is the state the gate's
     // `isSuppressed` evaluator exists for.
-    const { recordSuppression } = await import('@berelax/db')
     const suppressed = await withUnitOfWork(sql, ACTOR, (uow) =>
       recordSuppression(uow, KEYING(), {
         keyKind: 'phone',

@@ -6,7 +6,7 @@
 - **Covers:** docs/01 decisions — none; this is the mechanism behind docs/03 §5's campaigns, and it stands
   on [ADR 0003](0003-every-gate-needs-a-known-bad-fixture.md) (a gate nobody has seen fail is not a gate),
   [ADR 0006](0006-sql-first-migrations.md) (SQL-first) and
-  [ADR 0007](0007-money-integer-fils-vat-inclusive.md) (integer fils)
+  [ADR 0007](0007-money-and-business-day-primitives.md) (integer fils)
 
 ## Context
 
@@ -66,7 +66,7 @@ query"* — which it is only if the columns cannot be null.
 
 `ZY755` then makes a sent row immutable. **The consequence is deliberate: a campaign that reached a
 provider can no longer be deleted at all**, because the cascade from `campaign` hits the refusal. A
-campaign that spent money and sent messages is the record of both, and `packages/fixtures/src/campaign.itest.ts`
+campaign that spent money and sent messages is the record of both, and `apps/worker/src/automation/campaign.itest.ts`
 works around it by using a per-run key and leaving behind exactly the campaigns that sent — which is the
 rule working rather than getting in the way.
 

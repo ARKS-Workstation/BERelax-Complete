@@ -56505,7 +56505,7 @@ export function chargebackNetEffectFils(`,
   const CAMPAIGN_TEST = 'packages/core/src/automation/campaign.test.ts'
   const SENDER_TS = 'apps/worker/src/automation/campaign-sender.ts'
   const CAMPAIGN_SQL = 'packages/db/migrations/0154_campaign_and_segment.sql'
-  const CAMPAIGN_ITEST = 'packages/fixtures/src/campaign.itest.ts'
+  const CAMPAIGN_ITEST = 'apps/worker/src/automation/campaign.itest.ts'
   const CHOKE_POINT_TS = 'packages/messaging/src/send.ts'
   const CHOKE_POINT_TEST = 'packages/messaging/src/send.test.ts'
   const campaignUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
@@ -56780,7 +56780,7 @@ export function chargebackNetEffectFils(`,
   const BIRTHDAY_TRIGGER_TS = 'apps/worker/src/automation/triggers/birthday.ts'
   const SEED_FLOWS_TS = 'packages/db/src/seed/flows.ts'
   const BIRTHDAY_SQL = 'packages/db/migrations/0155_customer_birthday.sql'
-  const STOCK_ITEST = 'packages/fixtures/src/stock-journeys.itest.ts'
+  const STOCK_ITEST = 'apps/worker/src/automation/stock-journeys.itest.ts'
   const journeyUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
   const journeyIntegration = (file) => [
     'exec',
@@ -57005,6 +57005,248 @@ export function chargebackNetEffectFils(`,
       () => runExpectingFailure('pnpm', ['db:drift']),
     ),
     'birth_year',
+  )
+}
+
+// 188a-188z. (Y-PAY-10) The statement descriptor and the MCC gate: the privacy claim shown to be able to
+//            widen, the blocking lexicon shown to be able to stop blocking, the sentinels shown to be
+//            able to become plausible values, and the three-layer gate shown to be able to lose a layer.
+//
+//            The unit has no gateway, no merchant account and no MCC, so everything it ships is a shape
+//            and a refusal — which means every mutation below leaves a system that WORKS. A descriptor
+//            lint that accepts one more word, a privacy sentence with one more reassurance in it, a
+//            sentinel that is a plausible length: each reads as an improvement and each is read by a
+//            customer on a bank statement.
+//
+//            188a to 188e run the two unit suites and the two scripts, and are fast. 188f onwards drive
+//            the integration suite, which needs a database.
+{
+  const DESCRIPTOR_TS = 'packages/core/src/payments/descriptor.ts'
+  const DESCRIPTOR_TEST = 'packages/core/src/payments/descriptor.test.ts'
+  const GO_LIVE_TS = 'packages/core/src/payments/go-live.ts'
+  const GO_LIVE_TEST = 'apps/web/src/payments-go-live.test.ts'
+  const SETTINGS_TS = 'packages/config/src/settings/registry.ts'
+  const PAYMENTS_ITEST = 'packages/fixtures/src/payments-go-live.itest.ts'
+  const payUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const payIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // The control for the whole block. Every case asserts that a BROKEN tree is caught, and that says
+  // nothing unless the committed tree passes.
+  {
+    const descriptor = run('pnpm', payUnit(DESCRIPTOR_TEST))
+    check(
+      'payments: the committed descriptor suite passes, which is the control for 188a to 188c',
+      !descriptor.failed,
+      `the descriptor suite does not pass on the committed tree:\n${descriptor.output}`,
+    )
+    const lint = run('pnpm', ['descriptor-lint'])
+    check(
+      'payments: the committed tree passes the descriptor lint, which is the control for 188d',
+      !lint.failed,
+      `the descriptor lint does not pass on the committed tree:\n${lint.output}`,
+    )
+  }
+
+  /*
+    188a. The privacy claim widened into a reassurance the mechanism cannot deliver.
+
+    The mutation nobody would review as a defect: one more sentence, saying the thing a customer would
+    like to hear. A descriptor conceals what was bought and nothing else, so "your visit stays private"
+    is a claim this build cannot keep — and the person who finds out is the one whose shared statement
+    carries a recognisable business name.
+  */
+  checkRejectedBy(
+    'payments: 188a a privacy claim that promises more than a descriptor can deliver is caught',
+    withEditedFile(
+      DESCRIPTOR_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  'The statement line names the business, not the treatment. It does not hide that a payment was ' +",
+          "  'Your visit stays private. The statement line names the business, not the treatment. It does not hide that a payment was ' +",
+        ),
+      () => runExpectingFailure('pnpm', payUnit(DESCRIPTOR_TEST)),
+    ),
+    'DESCRIPTOR_PRIVACY_CLAIM',
+  )
+
+  /*
+    188b. A term dropped from the blocking lexicon.
+
+    `massage` is the first entry and the one word the descriptor exists not to say. Dropping it leaves
+    every other refusal firing, every test about the lexicon's shape passing, and a statement line that
+    tells whoever shares the account exactly what was bought.
+  */
+  checkRejectedBy(
+    'payments: 188b a blocking lexicon that lost the word the unit is about is caught',
+    withEditedFile(
+      DESCRIPTOR_TS,
+      (text) => replaceOnce(text, "  'massage',\n", ''),
+      () => runExpectingFailure('pnpm', payUnit(DESCRIPTOR_TEST)),
+    ),
+    'descriptor-contains-a-blocked-term',
+  )
+
+  /*
+    188c. The length rule reading "at least" instead of "more than".
+
+    An off-by-one that makes the refusal fire one character early, which looks like strictness — and
+    then does not fire for the descriptor that is one character too LONG if the comparison is inverted.
+    The mutation is the inversion, because that is the version that still refuses something and so still
+    looks like a working rule.
+  */
+  checkRejectedBy(
+    'payments: 188c a descriptor length rule that accepts an overlong descriptor is caught',
+    withEditedFile(
+      DESCRIPTOR_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          '    if (descriptor.length > input.limit) {',
+          '    if (descriptor.length > input.limit * 2) {',
+        ),
+      () => runExpectingFailure('pnpm', payUnit(DESCRIPTOR_TEST)),
+    ),
+    'descriptor-exceeds-provider-limit',
+  )
+
+  /*
+    188d. The descriptor given a plausible default instead of a marker.
+
+    The mutation this unit exists against, and the one that is hardest to see in a diff: a sensible
+    short string where a refused marker was. Every test about the lint still passes — the value is
+    perfectly legal — and from that commit the build has a configured descriptor nobody approved, which
+    is brief rule 15's whole subject. `pnpm descriptor-lint` is what notices, because it holds the
+    declared default to being a marker `is_placeholder_text()` refuses.
+  */
+  checkRejectedBy(
+    'payments: 188d a plausible descriptor default instead of a refused marker is caught',
+    withEditedFile(
+      SETTINGS_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "export const PROVISIONAL_STATEMENT_DESCRIPTOR = 'DESCRIPTOR-PENDING-Y7-DESCRIPTOR'",
+          "export const PROVISIONAL_STATEMENT_DESCRIPTOR = 'BR AUH'",
+        ),
+      () => runExpectingFailure('pnpm', ['descriptor-lint']),
+    ),
+    'declared-descriptor-is-not-a-marker',
+  )
+
+  /*
+    188e. A go-live verdict that treats an unpublished page as live.
+
+    An absent route and a route nobody published are different states, and the second is the dangerous
+    one: the page is there and looks finished. The mutation accepts any recorded state, which is the
+    plausible simplification — "it exists, that is what the acquirer looks for" — and it is wrong
+    because an approved-but-unpublished page is not on the site.
+  */
+  checkRejectedBy(
+    'payments: 188e a go-live verdict that accepts an unpublished page is caught',
+    withEditedFile(
+      GO_LIVE_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "    if (state !== 'published') {",
+          "    if (state === 'nothing-is-ever-this') {",
+        ),
+      () => runExpectingFailure('pnpm', payUnit(GO_LIVE_TEST)),
+    ),
+    'unpublished',
+  )
+
+  /*
+    188f. The real-provider gate losing its production half.
+
+    Both halves are the acceptance line, and this is the half ADR 0005 is about: a real provider outside
+    production can take a real payment from a test run. The mutation leaves the MCC half working, so
+    every case about the three columns still passes.
+  */
+  checkRejectedBy(
+    'payments: 188f a real-provider gate that no longer checks the environment is caught',
+    withEditedFile(
+      DESCRIPTOR_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (!input.isProduction) reasons.push('not-production')",
+          '  // the production half, removed',
+        ),
+      () => runExpectingFailure('pnpm', payUnit(DESCRIPTOR_TEST)),
+    ),
+    'not-production',
+  )
+
+  /*
+    188g. The MCC gate reading the confirmation as a boolean rather than as three facts.
+
+    The plausible simplification, and it loses the thing an operator needs: which of the three columns is
+    missing. A gate that answers "no" tells somebody to go and find out; a gate that answers
+    `mcc-confirmation-has-no-recorder` tells them what to do.
+  */
+  checkRejectedBy(
+    'payments: 188g an MCC gate that cannot say which column is missing is caught',
+    withEditedFile(
+      DESCRIPTOR_TS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (input.mccConfirmedBy === null || input.mccConfirmedBy.trim() === '') {\n    reasons.push('mcc-confirmation-has-no-recorder')\n  }",
+          '  // the recorder half, removed',
+        ),
+      () => runExpectingFailure('pnpm', payUnit(DESCRIPTOR_TEST)),
+    ),
+    'mcc-confirmation-has-no-recorder',
+  )
+
+  /*
+    188h. ZY771 widened to permit any gateway.
+
+    The layer whose absence is invisible: the config refusal and the registry refusal both still fire, so
+    nothing about a `PAYMENT_PROVIDER=real` deploy changes — and a writer that does not go through the
+    registry can record an intent against a live acquirer with no MCC on file. `pnpm sqlstate` is what
+    notices, because the registry entry for ZY771 names the function that raises it, and this is also
+    the control on that entry: an entry for a code no migration raises is refused.
+  */
+  checkRejectedBy(
+    'payments: 188h the ZY771 raise removed from the migration is caught',
+    withEditedFile(
+      'packages/db/migrations/0156_legal_entity_mcc.sql',
+      (text) => replaceOnce(text, "    using errcode = 'ZY771';", "    using errcode = 'ZY779';"),
+      () => runExpectingFailure('pnpm', ['sqlstate']),
+    ),
+    'ZY771',
+  )
+
+  /*
+    188i. The Unconfirmed Assumptions branch that stops reporting the MCC.
+
+    The panel is where somebody decides what to chase, so a row that quietly leaves it is a question
+    nobody asks again. The mutation makes the branch match nothing, which is what a reworded condition
+    looks like.
+  */
+  checkRejectedBy(
+    'payments: 188i an MCC that no longer reaches the Unconfirmed Assumptions panel is caught',
+    withEditedFile(
+      'packages/db/src/settings-store.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          '        from legal_entity where mcc_confirmed_at is null',
+          '        from legal_entity where mcc_confirmed_at is not null',
+        ),
+      () => runExpectingFailure('pnpm', payIntegration(PAYMENTS_ITEST)),
+    ),
+    'Unconfirmed Assumptions',
   )
 }
 
@@ -57857,6 +58099,12 @@ export function chargebackNetEffectFils(`,
     'pnpm cms',
     'pnpm chokepoint',
     'pnpm send-chokepoint',
+    // Y-PAY-10's statement-descriptor lint. It is in `verify` and its sibling `pnpm go-live:payments` is
+    // NOT, deliberately: the lint is a claim about the repository and holds on every commit, while the
+    // go-live check is a claim about the acquirer's requirements that exits non-zero today — two of the
+    // five public pages it asks for do not exist — and a gate that fails every commit on a business fact
+    // nobody can fix in code is a gate somebody deletes.
+    'pnpm descriptor-lint',
     'pnpm private-documents',
     // A-MEAS-01's egress guard, in the position `pnpm verify` runs it. Registered here because that is what
     // makes dropping it from CI a failing build rather than the silent loss of the one check that says

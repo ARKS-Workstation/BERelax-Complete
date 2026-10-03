@@ -4,7 +4,7 @@
 
 # ADR index
 
-85 records, generated from the front matter of each one. Every column below is read
+88 records, generated from the front matter of each one. Every column below is read
 out of the record it describes, so a row cannot be wrong without the record being wrong — which is
 the whole reason this file is not maintained by hand. For the argument behind any of them, read
 [README.md](README.md) and then the record.
@@ -96,3 +96,6 @@ the whole reason this file is not maintained by hand. For the argument behind an
 | [0097](0097-the-alert-registry-is-what-the-alerting-path-reads-and-an-slo-has-no-invented-target.md) | the alert registry is what the alerting path READS, an SLO carries no invented target, and what is not defended is written down | accepted | 2026-10-03 | H-HARD-05 | docs/01 decisions — none; this is the mechanism one floor above ADR 0031's heartbeat |
 | [0098](0098-the-breach-clock-starts-at-discovery-and-a-filed-incident-is-immutable.md) | the breach clock starts at the discovery, a filed incident is immutable, and the threshold is decided nowhere | accepted | 2026-10-03 | H-HARD-07 | docs/01 decisions — none; this is the incident-register half of docs/04 §9 and the |
 | [0099](0099-the-documentation-set-is-generated-and-checked-or-it-is-decoration.md) | the processor register is held against the services actually wired up, and every page in the documentation set is generated or checked | accepted | 2026-10-03 | H-HARD-09 | docs/01 decisions — none; this is the mechanism behind docs/04 §8's processor register and |
+| [0108](0108-a-spend-cap-is-the-databases-or-it-is-a-cap-until-two-workers-run.md) | a spend cap is the DATABASE's, or it is a cap until two workers run | accepted | 2026-10-03 | C-AUTO-10 | docs/01 decisions — none; this is the mechanism behind docs/03 §5's campaigns, and it stands |
+| [0109](0109-a-journey-that-cannot-be-expressed-is-a-finding-and-a-birthday-has-no-year.md) | a journey the DSL cannot express is a FINDING, not a second DSL; and a birthday has no year | accepted | 2026-10-03 | C-AUTO-11 | docs/01 decisions — none; this is the mechanism behind docs/03 §5's stock journeys and |
+| [0110](0110-discreet-is-a-narrow-privacy-claim-and-the-mcc-gate-is-three-layers.md) | "discreet" is a NARROW privacy claim, and the MCC gate is three layers with no invented value | accepted | 2026-10-03 | Y-PAY-10 | docs/01 decisions — none; this is the go-live-shaped consequence of |

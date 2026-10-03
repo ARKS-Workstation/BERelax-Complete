@@ -10,6 +10,7 @@ import {
   type SegmentDefinition,
   segmentCountFreshness,
   serialiseSegmentDefinition,
+  suppressionKeyNormaliser,
   toLocal,
   validateSegmentDefinition,
 } from '@berelax/core'
@@ -28,9 +29,11 @@ import {
   settleCampaignRecipient,
   withUnitOfWork,
 } from '@berelax/db'
+import { fixtureSuppressionPeppers, syntheticPerson } from '@berelax/fixtures'
 import { createSmsalaTransport } from '@berelax/messaging/transports/smsala'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { syntheticPerson } from './synthetic.ts'
+import { drainCampaign } from './campaign-sender.ts'
+import { messageNodeDepsFor } from './runtime.ts'
 
 /**
  * C-AUTO-10 — segments, the pre-launch estimate, and the spend cap the DATABASE enforces.
@@ -814,10 +817,12 @@ describe('a stored cached count is read with its age, never without it', () => {
 /**
  * Drain a campaign through the shipped sender.
  *
- * Imported lazily, inside this file's own helper, because `apps/worker` is not a dependency of
- * `packages/fixtures` in the module graph — the composition is the worker's and the fixtures package is
- * where a test that exercises the PAIR lives (brief rule 4). The dynamic import is what keeps the static
- * edge out of `.dependency-cruiser.cjs`'s view while still driving the real code.
+ * This file lives in `apps/worker/src/automation/` and not in `packages/fixtures`, which is where it
+ * started: `nothing-imports-an-app` in `.dependency-cruiser.cjs` refuses a package importing an app, and
+ * it refuses a DYNAMIC import too — `pnpm boundaries` reported all seven edges. That rule is right and
+ * the first arrangement was wrong: the composition under test is the worker's, so the suite belongs
+ * beside `interpreter.itest.ts`, which drives the same runtime for the same reason. The fixture helpers
+ * come from `@berelax/fixtures`, which an app may import.
  */
 async function drain(
   campaignId: string,
@@ -829,11 +834,6 @@ async function drain(
   readonly held: number
   readonly failed: number
 }> {
-  const { drainCampaign } = await import('../../../apps/worker/src/automation/campaign-sender.ts')
-  const { messageNodeDepsFor } = await import('../../../apps/worker/src/automation/runtime.ts')
-  const { fixtureSuppressionPeppers } = await import('./suppression.ts')
-  const { suppressionKeyNormaliser } = await import('@berelax/core')
-
   const stored = await readCampaignByKey(sql, campaignKey)
   if (stored === null) throw new Error(`no campaign ${campaignKey}`)
 

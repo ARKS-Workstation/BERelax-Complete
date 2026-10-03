@@ -98,7 +98,7 @@ is a fact about the preference centre rather than a defect in either.
 An opt-out over the whole grid is two writes: a consent withdrawal for every send-gating purpose on every
 channel, and a suppression row against the recipient. `evaluateGate` reads consent before suppression, so
 the withdrawal refuses first and the suppression never gets the chance. Both are asserted —
-`packages/fixtures/src/m3-proof.itest.ts` reads the suppression row AND the withdrawal row — and a third
+`apps/worker/src/automation/m3-proof.itest.ts` reads the suppression row AND the withdrawal row — and a third
 case drives a contact who is suppressed and whose consent still stands, which is where
 `refused_suppressed` is proved. Without that third contact the gate's suppression path would have been
 covered by nothing, while a test named after it passed.

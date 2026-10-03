@@ -2320,6 +2320,12 @@ export {
   readObligationReminderOffsets,
 } from './settings/compliance.ts'
 export {
+  readMccConfirmation,
+  readStatementDescriptor,
+  type StoredMccConfirmation,
+  type StoredStatementDescriptor,
+} from './settings/descriptor.ts'
+export {
   PACKAGE_POLICY_SETTING_KEYS,
   PACKAGE_TRANSFERABLE_SETTING_KEY,
   PACKAGE_UNREDEEMED_BALANCE_SETTING_KEY,
@@ -5342,4 +5348,47 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // `pnpm sqlstate` refuses an entry for a code no migration raises, and a trigger written to carry a code
 // that a CHECK already enforces would be a second statement of one rule.
 //
-export const SCHEMA_VERSION = 155 as const
+// 156 is 0156_legal_entity_mcc.sql (Y-PAY-10) — three columns on `legal_entity`, one STABLE function and
+// one trigger. Mirrored in `packages/db/src/schema/identity.ts`.
+//
+// THE MCC IS NULL AND THERE IS NO DEFAULT. A merchant category code decides which acquirer will take
+// this business, what it is charged, and — the part that decided this migration — what a cardholder's
+// bank statement says the money went to. Picking one would be this build deciding how somebody's spa
+// visit appears on an account they may share, which is a privacy consequence it has no standing to
+// choose. `legal_entity_mcc_is_not_a_placeholder` additionally refuses a provisional-looking value
+// through `is_placeholder_text()` (0026), so the column cannot be filled with a marker and then read as
+// configured (brief rule 15). `Y7-mcc` is the open question.
+//
+// A CONFIRMATION IS THREE FACTS OR NONE. `legal_entity_mcc_confirmation_is_whole` requires the code, the
+// instant and who recorded it to move together: a code with no instant is a number somebody typed, an
+// instant with no code confirms nothing, and either without a recorder is a fact with nobody behind
+// it — which is the one question an acquirer dispute asks. `mayUseRealPaymentProvider` in `@berelax/core`
+// names the three separately, because an operator fixing a go-live needs to know which column is missing.
+//
+// ZY771 IS SCOPED TO THE GATEWAY, AND THE SCOPE IS WHAT MAKES IT SAFE. `parseConfig` refuses
+// `PAYMENT_PROVIDER=real` outside production (ADR 0005) and `createPaymentGateways` refuses it again
+// unless the MCC is on file, and both of those are code somebody can edit. The trigger is the layer that
+// holds when they are: a `payment_intent` against any gateway other than `manual-till` and
+// `fake-card-gateway` cannot be recorded at all while `mcc_confirmed_at` is null. A BLANKET refusal would
+// have stopped the manual till adapter and the card fake — the only two payment paths that work today —
+// so the rule names the two gateways that are not a live acquirer and refuses everything else. A third
+// gateway is then a diff somebody has to justify.
+//
+// `mcc_confirmed()` is STABLE rather than IMMUTABLE because it reads a table, which is why ZY771 is a
+// trigger and not a CHECK: a CHECK may not contain a subquery and may not call a non-immutable function,
+// which 0142's header records being refused for twice.
+//
+// THE DESCRIPTOR IS NOT A COLUMN HERE. `payments.statement_descriptor` is an F09 setting carrying
+// `provisional: true` against `Y7-descriptor`, because a provisional value has to be able to say that it
+// is one and reach the Unconfirmed Assumptions panel — which a column on this singleton cannot, since
+// `legal_entity` carries no provenance trio. Its stored value is a MARKER `is_placeholder_text()` refuses
+// rather than a null, because `app_setting.value` is NOT NULL and because brief rule 15 asks for a marker
+// rather than a blank. The MCC reaches that panel through a new branch in `unconfirmedAssumptionRows`
+// keyed on `mcc_confirmed_at is null` rather than through the existing `singleton` clause: that clause
+// matches `is_placeholder_text(value)`, and an absent MCC is NULL rather than a placeholder, so it would
+// not have been seen.
+//
+// ZY772 through ZY780 are released UNUSED and deliberately unregistered, because `pnpm sqlstate` refuses
+// an entry for a code no migration raises.
+//
+export const SCHEMA_VERSION = 156 as const

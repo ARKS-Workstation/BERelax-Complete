@@ -23146,7 +23146,7 @@ units:
       guard that refuses to run a real provider until the MCC is recorded in writing and the acquirer's
       public-site prerequisites are actually live.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F09
@@ -23183,6 +23183,38 @@ units:
     - packages/config/src/env.ts
     - scripts/go-live-payments.mjs
     - packages/db/migrations/00XX-legal-entity-mcc.sql
+    note: 'NEITHER THE DESCRIPTOR NOR ITS LIMIT IS SET, and the proposed values were REFUSED under brief
+      rule 15. ''BR SPA AUH'' contains ''SPA'', which lintStatementDescriptor blocks by name because it
+      tells a shared bank statement what was bought; 22 characters is true of some card schemes and not
+      others, and a descriptor silently cut to the wrong length is still a valid statement line. Both are
+      now Y7-descriptor in docs/OPEN-QUESTIONS.md. payments.statement_descriptor holds a MARKER
+      is_placeholder_text() refuses (app_setting.value is NOT NULL, so unset cannot be a null) and
+      payments.statement_descriptor_limit holds 0, which is not a legal length.
+      FILE PATHS DIFFER FROM THE ENTRY, and deliberately. The lint lives in
+      packages/core/src/payments/descriptor.ts rather than only in the script, and the go-live
+      prerequisite list and verdict in packages/core/src/payments/go-live.ts, because a judgement that
+      lives in a .mjs script is a judgement no test reaches - the same reason ALERT_REGISTRY is in
+      @berelax/shared. packages/db/src/settings/descriptor.ts is the reader, as declared. The migration is
+      0156_legal_entity_mcc.sql.
+      THE MCC HALF OF THE CONFIG REFUSAL IS NOT IN packages/config/src/env.ts, because parseConfig reads
+      no database. The environment half stays there (ADR 0005); the ROW half is createPaymentGateways,
+      which takes the three columns as an argument and refuses with no argument - proven by
+      packages/payments/src/registry.test.ts, whose existing no-fallback case now supplies a confirmed MCC
+      so it is still about the fallback. ZY771 is the third layer.
+      TWO OF THE FIVE PUBLIC PAGES DO NOT EXIST. This application serves no route at /refunds and none at
+      /privacy, so the route test asserts the honest state - both reported MISSING by name, the three that
+      exist reported unpublished, the verdict not ok - rather than asserting they are live. pnpm
+      go-live:payments exits non-zero today for six reasons including the MCC. It is deliberately NOT in
+      pnpm verify: a gate that fails every commit on a business fact nobody can fix in code is a gate
+      somebody deletes. pnpm descriptor-lint IS in verify, in CI and in gate case 29.
+      THE RECEIPT COPY IS NOT WRITTEN. What is built is DESCRIPTOR_PRIVACY_CLAIM, the one sentence a screen
+      may show about what a discreet descriptor conceals - and its NEGATIVE half is tested, because that is
+      the half somebody paraphrases away: it names the business and not the treatment, and hides neither the
+      payment, nor its amount, nor its date, nor the business from anyone who looks the name up. A
+      customer-facing receipt line is copy no human has approved and it cannot be written before
+      Y7-descriptor is answered (brief rule 15).
+      ZY772-ZY780 ARE RELEASED UNUSED: the remaining rules are CHECKs, and pnpm sqlstate refuses an entry
+      for a code no migration raises.'
   - id: H-MIG-11
     order: 206
     title: Freeze, go/no-go check and the cutover runbook with rollback

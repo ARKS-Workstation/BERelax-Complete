@@ -9,7 +9,9 @@
  */
 
 export * from './deposit.ts'
+export * from './descriptor.ts'
 export * from './fee-policy.ts'
+export * from './go-live.ts'
 export * from './guards.ts'
 export * from './minor-units.ts'
 export * from './port.ts'

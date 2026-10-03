@@ -23,9 +23,14 @@ import {
   seedStockFlows,
   withUnitOfWork,
 } from '@berelax/db'
+import { FIXTURE_HOURS, invoiceFixture, syntheticPerson } from '@berelax/fixtures'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { FIXTURE_HOURS, invoiceFixture } from './invoice.ts'
-import { syntheticPerson } from './synthetic.ts'
+import { readBirthdayCandidates } from './triggers/birthday.ts'
+import {
+  readReviewCandidates,
+  runReviewSolicitationTrigger,
+} from './triggers/review-solicitation.ts'
+import { readWinbackCandidates, runWinbackTrigger } from './triggers/winback.ts'
 
 /**
  * C-AUTO-11 — the three stock journeys, their triggers, and the facts the acceptance lines name.
@@ -367,9 +372,6 @@ describe('acceptance — all three journeys exist as flow_definition rows in the
 
 describe('acceptance — review solicitation enrols only on a COMPLETED and paid appointment', () => {
   const candidatesFor = async () => {
-    const { readReviewCandidates } = await import(
-      '../../../apps/worker/src/automation/triggers/review-solicitation.ts'
-    )
     return readReviewCandidates(sql, {
       sinceTradingDate: TRADING_DATE,
       untilTradingDate: TRADING_DATE,
@@ -397,9 +399,6 @@ describe('acceptance — review solicitation enrols only on a COMPLETED and paid
   })
 
   it('enrols the eligible contact and nobody else, and is safe to run twice', async () => {
-    const { runReviewSolicitationTrigger } = await import(
-      '../../../apps/worker/src/automation/triggers/review-solicitation.ts'
-    )
     const args = {
       sinceTradingDate: TRADING_DATE,
       untilTradingDate: TRADING_DATE,
@@ -448,9 +447,6 @@ describe('acceptance — win-back is computed on business_day arithmetic', () =>
   })
 
   it('reads each contact’s last COMPLETED visit as an instant, never as a trading date', async () => {
-    const { readWinbackCandidates } = await import(
-      '../../../apps/worker/src/automation/triggers/winback.ts'
-    )
     const candidates = await readWinbackCandidates(sql)
     const mine = new Map(
       candidates
@@ -468,9 +464,6 @@ describe('acceptance — win-back is computed on business_day arithmetic', () =>
   }, 60_000)
 
   it('does not enrol a contact whose visit is recent', async () => {
-    const { runWinbackTrigger } = await import(
-      '../../../apps/worker/src/automation/triggers/winback.ts'
-    )
     // "Today" is the day after this file's appointments, so nobody here is 90 days lapsed.
     const outcome = await runWinbackTrigger(sql, {
       today: localDate('2099-12-02'),
@@ -488,9 +481,6 @@ describe('acceptance — win-back is computed on business_day arithmetic', () =>
   }, 60_000)
 
   it('enrols the same contact once the interval has passed', async () => {
-    const { runWinbackTrigger } = await import(
-      '../../../apps/worker/src/automation/triggers/winback.ts'
-    )
     // The control for the case above. 2100-04-01 is well past 2099-12-01 plus ninety days.
     const outcome = await runWinbackTrigger(sql, {
       today: localDate('2100-04-01'),
@@ -563,9 +553,6 @@ describe('acceptance — birthday journeys use day and month only', () => {
   })
 
   it('finds the contact whose day and month are today, and not the one with no consent', async () => {
-    const { readBirthdayCandidates } = await import(
-      '../../../apps/worker/src/automation/triggers/birthday.ts'
-    )
     const today = toLocal(Date.now() as Instant, ASIA_DUBAI)
     const candidates = await readBirthdayCandidates(sql, {
       month: Number(today.date.slice(5, 7)),
@@ -578,9 +565,6 @@ describe('acceptance — birthday journeys use day and month only', () => {
   })
 
   it('never reads the clinical schema, proved by every statement the pass issues', async () => {
-    const { readBirthdayCandidates } = await import(
-      '../../../apps/worker/src/automation/triggers/birthday.ts'
-    )
     const statements: string[] = []
     // A recording wrapper around the connection, so the claim is about the statements that RAN rather
     // than about the source somebody read. A pass whose statement count depended on its input could not

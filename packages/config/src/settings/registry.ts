@@ -225,6 +225,55 @@ export const COMMISSION_ENABLED_SETTING_KEY = 'hr.commission_enabled'
  * Assumptions panel lists it, and a second spelling is a reader that silently falls back to the declared
  * default — which here is a number, so the mistake would be invisible.
  */
+/**
+ * The statement descriptor and the provider's limit on its length (Y-PAY-10).
+ *
+ * Spelled once here for the deposit keys' reason: `packages/db/src/settings/descriptor.ts` reads both,
+ * `scripts/check-descriptor-lint.mjs` reads both, and the Unconfirmed Assumptions panel lists both. A
+ * second spelling is a reader that silently falls back to the declared default, and for the LIMIT that
+ * fallback would be invisible — the fallback is a number, and the symptom is a descriptor truncated to
+ * somebody else's length.
+ */
+export const STATEMENT_DESCRIPTOR_SETTING_KEY = 'payments.statement_descriptor'
+export const STATEMENT_DESCRIPTOR_LIMIT_SETTING_KEY = 'payments.statement_descriptor_limit'
+
+/** Both, for a panel or a test that has to prove neither was forgotten. */
+export const STATEMENT_DESCRIPTOR_SETTING_KEYS = [
+  STATEMENT_DESCRIPTOR_SETTING_KEY,
+  STATEMENT_DESCRIPTOR_LIMIT_SETTING_KEY,
+] as const
+
+/** The open question both descriptor settings stand in for. */
+export const STATEMENT_DESCRIPTOR_OPEN_QUESTION_ID = 'Y7-descriptor'
+
+/**
+ * The descriptor's default: a MARKER the schema refuses, not a plausible line and not a blank.
+ *
+ * `app_setting.value` is NOT NULL, so "unset" cannot be a null — and that is the better arrangement in
+ * any case, which brief rule 15 states as a rule: *provisional values carry a marker the schema refuses*.
+ * `is_placeholder_text()` (migration 0026) matches `pending`, so this value is refused by every
+ * constraint in the schema that uses it, is refused by `lintStatementDescriptor` as
+ * `descriptor-not-configured`, and is visibly unanswered on the Unconfirmed Assumptions panel. A
+ * plausible descriptor in its place would be indistinguishable from one a processor accepted, and the
+ * place it would be read is a line on a customer's bank statement.
+ *
+ * It is also deliberately NOT sendable in a second, independent way: it contains no character a card
+ * network would carry in that order, it is longer than any scheme's field, and `DESCRIPTOR-` is not a
+ * business name. Three reasons it cannot reach a statement, which is what a marker is for.
+ */
+export const PROVISIONAL_STATEMENT_DESCRIPTOR = 'DESCRIPTOR-PENDING-Y7-DESCRIPTOR'
+
+/**
+ * The limit's default: **zero, which is not a length.**
+ *
+ * A number cannot carry a placeholder marker, so the sentinel has to be a value that is not legal — and
+ * for a LENGTH, zero is exactly that: a descriptor of zero characters is not a short descriptor, it is
+ * no descriptor. That is the opposite of `payments.deposit_percent_bp`, where 0 IS a legal policy
+ * meaning "no deposit", and the difference is why a coercing reader is safe here and dangerous there.
+ * `lintStatementDescriptor` refuses anything under 1 as `descriptor-limit-not-configured`.
+ */
+export const PROVISIONAL_STATEMENT_DESCRIPTOR_LIMIT = 0
+
 export const WINBACK_INTERVAL_DAYS_SETTING_KEY = 'crm.winback_interval_days'
 
 /** 90 days, which is `build/manifest.yaml`'s own provisional value for C-AUTO-11. */
@@ -666,6 +715,72 @@ export const SETTINGS = [
    * with a send button under it, and a window this build chose and did not declare would be a staleness
    * judgement made on the owner's behalf about the size of their own marketing list.
    */
+  define({
+    /**
+     * What a cardholder's bank statement says the money went to. **UNSET.**
+     *
+     * Null, and that is the answer rather than a gap. `Y7-descriptor` is open: no acquirer has been
+     * chosen, nobody has approved a statement line, and a descriptor is not a cosmetic string — it is
+     * the one line about this visit that appears on an account somebody else may share. A plausible
+     * value written into a default would be indistinguishable from one a processor accepted (brief rule
+     * 15), and the place it would be read is a customer's statement.
+     *
+     * The stored value is {@link PROVISIONAL_STATEMENT_DESCRIPTOR} — a marker the schema refuses, for
+     * the reason that constant's own note gives — rather than a null, because `app_setting.value` is
+     * NOT NULL and because brief rule 15 asks for a marker rather than a blank.
+     *
+     * **Unset is a first-class state and the whole payment path already handles it.** `PAYMENT_PROVIDER`
+     * resolves `real` to `notImplemented('card-gateway')`, the manual adapter takes cash, the terminal
+     * and a bank transfer and sends no descriptor at all, and `lintStatementDescriptor` in
+     * `@berelax/core` answers `descriptor-not-configured` by name. Nothing degrades quietly.
+     *
+     * `compliance_locked` and **OWNER_ONLY**, deliberately not the accountant's. What appears on a
+     * customer's bank statement is a privacy decision with a dispute consequence rather than an
+     * accounting policy, and `registry.test.ts` enumerates the accountant's compliance-locked settings
+     * one by one precisely so that the list cannot grow by default — which it would have, had this
+     * copied the deposit percentage beside it. `invalidates: []` because nothing is prerendered from it.
+     */
+    key: STATEMENT_DESCRIPTOR_SETTING_KEY,
+    tier: 'compliance_locked',
+    schema: z.string().min(1).max(64),
+    defaultValue: PROVISIONAL_STATEMENT_DESCRIPTOR,
+    label: 'Statement descriptor',
+    help: 'The line a cardholder sees on their bank statement. It names the BUSINESS and never the treatment: a statement is read by whoever shares the account, and naming what was bought is a disclosure the customer did not choose to make. It does not hide that a payment was made, its amount or its date. Unset until an acquirer is chosen and somebody approves the wording.',
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: STATEMENT_DESCRIPTOR_OPEN_QUESTION_ID,
+      note: 'UNSET. Y7-descriptor asks what this business\u2019s statement descriptor should be, and no acquirer has been chosen to tell it how long one may be. Y-PAY-10\u2019s manifest entry proposed \u2018BR SPA AUH\u2019 with a 22-character limit and both were REFUSED under brief rule 15: the proposed value contains \u2018SPA\u2019, which the descriptor lint blocks by name because it tells a shared bank statement what was bought, and a plausible length is indistinguishable from a contracted one in the one place a truncation is invisible. What is needed: the acquirer\u2019s descriptor field length, and an approved line that names the business and not the treatment.',
+    },
+  }),
+  define({
+    /**
+     * How long a statement descriptor may be, in characters. **UNSET.**
+     *
+     * Every card network and every acquirer has its own, and this business has neither. The reason this
+     * is a refusal rather than a figure is the failure mode: a descriptor over the limit is not rejected
+     * by a processor, it is TRUNCATED — and the characters that go are the ones at the end, which is
+     * where the city and the branch are. So an assumed limit produces a valid statement line that is no
+     * longer recognisable, which is the shape a cardholder disputes.
+     *
+     * Y-PAY-10's manifest entry proposed 22. It is not written here: 22 is a figure that is true of some
+     * schemes and not others, and the one place it would be read is a truncation nobody can see.
+     */
+    key: STATEMENT_DESCRIPTOR_LIMIT_SETTING_KEY,
+    tier: 'compliance_locked',
+    schema: z.number().int().min(0).max(64),
+    defaultValue: PROVISIONAL_STATEMENT_DESCRIPTOR_LIMIT,
+    label: 'Statement descriptor length limit',
+    help: 'How many characters the acquirer will carry on a statement line. Unset until an acquirer says. A descriptor over the limit is not refused by the processor \u2014 it is truncated, and what goes is the end of the line, so an assumed limit produces a statement nobody recognises.',
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: STATEMENT_DESCRIPTOR_OPEN_QUESTION_ID,
+      note: 'UNSET. No acquirer has been chosen, so nobody has said how long a descriptor may be. Y-PAY-10\u2019s manifest entry assumed 22 characters; it is refused here because 22 is true of some schemes and not others, and a descriptor silently cut to the wrong length is still a valid statement line \u2014 the part that was cut is the part that made it recognisable.',
+    },
+  }),
   define({
     /**
      * Days since a contact's last completed visit before the win-back journey enters them. **90.**

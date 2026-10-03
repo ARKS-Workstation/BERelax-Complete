@@ -2564,6 +2564,21 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['refuse_sent_campaign_recipient_change'],
     translators: ['packages/db/src/repositories/campaign.ts'],
   },
+  // ZY771 is Y-PAY-10's, of the band ZY771-ZY780; ZY772 through ZY780 are left free and deliberately
+  // unregistered, because an entry for a code no migration raises is refused.
+  //
+  // It is the structural half of the go-live gate. `parseConfig` refuses PAYMENT_PROVIDER=real outside
+  // production and `createPaymentGateways` refuses it again unless the MCC is confirmed, and both are
+  // code somebody can edit; this holds when they are. SCOPED to the gateway, and the scope is what makes
+  // it safe: a blanket refusal would stop the manual till adapter and the card fake, which are the only
+  // two payment paths that work today.
+  {
+    code: 'ZY771',
+    rule: 'A payment intent may not be recorded against an unshipped gateway until the MCC is confirmed.',
+    migration: '0156',
+    raisedBy: ['refuse_intent_without_confirmed_mcc'],
+    translators: [],
+  },
   {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',
