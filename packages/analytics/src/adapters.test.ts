@@ -85,10 +85,17 @@ const fakeContext = (
 })
 
 describe('the action source table', () => {
-  it('is total over every booking source the database admits', () => {
+  it('is total over every LIVE booking source, and refuses the imported one', () => {
     // `Record<BookingSource, …>` makes this true by compilation; this is the runtime half, and the
     // equality with the database's own CHECK is asserted in packages/fixtures where a connection exists.
-    expect(Object.keys(BOOKING_SOURCE_ACTION_SOURCE).sort()).toEqual([...BOOKING_SOURCES].sort())
+    expect(Object.keys(BOOKING_SOURCE_ACTION_SOURCE).sort()).toEqual(
+      [...BOOKING_SOURCES].filter((value) => value !== 'import').sort(),
+    )
+    // `import` is the one source with no action source, and that is a decision rather than a gap:
+    // migration 0130 admits it for a reconstructed visit, the legacy file does not say where the
+    // booking was taken, and a dispatch for it would report a visit from before this system existed
+    // as a conversion that happened now. The refusal is the behaviour, so it is asserted.
+    expect(() => actionSourceFor('import')).toThrow(/no action source is declared/)
   })
 
   it('maps the three the acceptance line names, table-driven', () => {
