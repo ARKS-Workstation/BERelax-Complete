@@ -17,11 +17,11 @@ import {
   withUnitOfWork,
 } from '@berelax/db'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { createFixturePrincipal } from '../../../../packages/fixtures/src/admin-principal.ts'
 import {
   describeParallelRunPass,
   runParallelRunReconciliationPass,
-} from '../../../apps/worker/src/jobs/parallel-run-reconcile.ts'
-import { createFixturePrincipal } from './admin-principal.ts'
+} from './parallel-run-reconcile.ts'
 
 const url = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL']
 if (!url) {
@@ -438,10 +438,10 @@ describe('what nothing here does', () => {
       pilot's arithmetic lives in, and the assertion below is what keeps that honest.
     */
     const modules = {
-      'services/parallel-run.ts': await import('../../../packages/db/src/services/parallel-run.ts'),
-      'jobs/parallel-run-reconcile.ts': await import(
-        '../../../apps/worker/src/jobs/parallel-run-reconcile.ts'
+      'services/parallel-run.ts': await import(
+        '../../../../packages/db/src/services/parallel-run.ts'
       ),
+      'jobs/parallel-run-reconcile.ts': await import('./parallel-run-reconcile.ts'),
     }
     for (const [where, module] of Object.entries(modules)) {
       /*

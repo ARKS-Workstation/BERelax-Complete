@@ -59146,7 +59146,7 @@ export function chargebackNetEffectFils(`,
     'apps/web/src/test-ports.test.ts',
   ]
   const PARALLEL_PAIR_SUITES = [
-    'packages/fixtures/src/parallel-run.itest.ts',
+    'apps/worker/src/jobs/parallel-run.itest.ts',
     'apps/web/e2e/walk-in-speed.itest.ts',
   ]
 

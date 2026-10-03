@@ -23430,7 +23430,7 @@ units:
     - packages/core/src/pilot/feedback.test.ts
     - packages/core/src/pilot/walk-in-speed.ts
     - packages/core/src/pilot/walk-in-speed.test.ts
-    - packages/fixtures/src/parallel-run.itest.ts
+    - apps/worker/src/jobs/parallel-run.itest.ts
     - docs/adr/0107-the-paper-side-is-a-named-persons-claim-and-the-cutover-decision-is-not-a-function-of-it.md
     notes:
     - 'NOTE: the declared file apps/web/e2e/walk-in-speed.spec.ts was written as walk-in-speed.itest.ts.
