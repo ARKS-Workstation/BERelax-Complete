@@ -114,6 +114,12 @@ export {
   publishEvent,
   type StoredEvent,
 } from './outbox.ts'
+/*
+ * The TLS adjustment the `pg`-family drivers need. Exported from the package root because its two callers
+ * are in different workspaces — the worker's pg-boss and `apps/web/payload.config.ts`'s Payload adapter —
+ * and both reach the same cluster with the same problem.
+ */
+export { pgDriverConnectionString, writeCaCertificateFile } from './pg-driver-url.ts'
 export {
   CONTACT_DETAIL_COLUMNS,
   CREDENTIAL_COLUMN_PATTERN,

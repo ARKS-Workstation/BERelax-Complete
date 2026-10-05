@@ -1,4 +1,5 @@
 import { CMS_ROBOTS_TAG, PAYLOAD_ADMIN_ROUTE, PAYLOAD_API_ROUTE } from '@berelax/cms'
+import { pgDriverConnectionString, writeCaCertificateFile } from '@berelax/db'
 import { sharp } from '@berelax/media/sharp'
 import { CMS_SCHEMA } from '@berelax/shared'
 import { postgresAdapter } from '@payloadcms/db-postgres'
@@ -158,7 +159,22 @@ export default buildConfig({
    */
   typescript: { outputFile: `${import.meta.dirname}/.next/payload-types.ts` },
   db: postgresAdapter({
-    pool: { connectionString: process.env['DATABASE_URL'] ?? '' },
+    /*
+     * `pgDriverConnectionString`, not the raw `DATABASE_URL`.
+     *
+     * `@payloadcms/db-postgres` connects through `pg`, which verifies the TLS chain on `sslmode=require`
+     * where postgres.js does not — so against a managed cluster signed by its provider's own CA the CMS
+     * admin answered 500 with `self-signed certificate in certificate chain` while the public site beside
+     * it served pages off the same database. The helper's header carries the full reasoning and the other
+     * caller (pg-boss, which hit this first). With `DATABASE_CA_CERT` set it asks for `verify-full`
+     * against that certificate; without it, for exactly what the connection string asked for.
+     */
+    pool: {
+      connectionString: pgDriverConnectionString(
+        process.env['DATABASE_URL'] ?? '',
+        writeCaCertificateFile(process.env['DATABASE_CA_CERT']),
+      ),
+    },
     // `CMS_SCHEMA` from `@berelax/shared` rather than the literal, because `packages/db`'s catalogue probes
     // have to name this schema in order to EXCLUDE it — see MERGE_CATALOGUE_EXCLUDED_SCHEMAS for why — and
     // two spellings of it would make the exclusion silently stop matching. It comes from `shared` and not

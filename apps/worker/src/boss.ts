@@ -1,8 +1,5 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import type { Config } from '@berelax/config'
-import { createJobQueue, PGBOSS_SCHEMA } from '@berelax/db'
+import { createJobQueue, PGBOSS_SCHEMA, writeCaCertificateFile } from '@berelax/db'
 import type { PgBoss } from 'pg-boss'
 
 /**
@@ -35,20 +32,6 @@ export interface BossOptions {
   readonly max?: number
 }
 
-/**
- * Writes the configured CA certificate out and returns its path, or `undefined` when there is none.
- *
- * Exported so a test can assert both branches without starting a queue. It is deliberately not cached:
- * one call per `createBoss`, and `createBoss` is called once per process.
- */
-export function writeCaCertificate(pem: string | undefined): string | undefined {
-  if (pem === undefined || pem.trim().length === 0) return undefined
-  const directory = mkdtempSync(join(tmpdir(), 'berelax-db-ca-'))
-  const path = join(directory, 'ca.pem')
-  writeFileSync(path, pem.endsWith('\n') ? pem : `${pem}\n`, { mode: 0o644 })
-  return path
-}
-
 export function createBoss(options: BossOptions): PgBoss {
   /*
    * The CA goes to disk, because `sslrootcert` in a connection string names a FILE and the connection
@@ -57,7 +40,7 @@ export function createBoss(options: BossOptions): PgBoss {
    * mode 0o644 and the OS temp root are right, and the file lives as long as the process does because the
    * driver reads it on every reconnect, not once at boot.
    */
-  const caPath = writeCaCertificate(options.config.DATABASE_CA_CERT)
+  const caPath = writeCaCertificateFile(options.config.DATABASE_CA_CERT)
   return createJobQueue({
     connectionString: options.config.DATABASE_URL,
     max: options.max ?? 4,
