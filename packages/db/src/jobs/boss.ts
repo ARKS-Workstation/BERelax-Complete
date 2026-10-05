@@ -21,50 +21,63 @@ export interface JobQueueOptions {
   readonly max?: number
   readonly schema?: string
   /**
-   * The PEM of the server's certificate authority, when the deployment has one.
+   * A FILE holding the server's certificate authority, when the deployment has one.
    *
-   * DigitalOcean's managed PostgreSQL presents a certificate signed by its own CA, which is not in any
-   * default trust store. Supplying it here is what makes the connection VERIFIED rather than merely
-   * encrypted — docs/02 §2 says "TLS verify-full" and this is the half of it that is in code.
+   * A path and not the PEM itself, because `sslrootcert` in a connection string names a file and that is
+   * the only channel pg-boss passes through. `apps/worker/src/boss.ts` writes `DATABASE_CA_CERT` out and
+   * hands over the path. DigitalOcean's managed PostgreSQL presents a certificate signed by its own CA,
+   * which is in no default trust store, so supplying it is what makes the connection VERIFIED rather than
+   * merely encrypted — docs/02 §2 says "TLS verify-full" and this is the half of it that is in code.
    */
-  readonly caCertificate?: string
+  readonly caCertificatePath?: string
 }
 
 /**
- * The TLS settings for pg-boss's driver, which are not the same as postgres.js's.
+ * The connection string pg-boss's driver should be given, which is not the one the rest of the app uses.
  *
- * This exists because of a failure that only appeared on a real deployment: the worker died at boot with
- * `SELF_SIGNED_CERT_IN_CHAIN` against the same cluster the web app was serving from happily. The
- * difference is the driver. `postgres` reads `sslmode=require` the way libpq defines it — encrypt, do not
- * verify — while `pg`, which pg-boss uses, verifies the chain anyway. So a connection string that asked
- * for no verification got it from one driver and not the other, and the one that refused was the one with
- * no page to serve and nothing to fall back to.
+ * ## Why this is a URL rewrite and not an `ssl` option
  *
- * With a CA the answer is the strong one: verify against it. Without a CA it is what the connection string
- * actually asked for, and no more — which is a deliberate choice to make the two drivers agree rather than
- * to have the queue hold a stricter policy than the application it serves. A deployment that wants
- * verification supplies `DATABASE_CA_CERT`; `.do/README.md` has the one `doctl` command that prints it.
+ * It was an `ssl` option first, and that was wrong: **pg-boss does not forward one.** The string "ssl"
+ * does not appear anywhere in its distributed build, so the option was accepted, ignored, and the worker
+ * went on failing in exactly the same way — which is the worst kind of fix, because the code reads as
+ * though it addresses the problem. What pg-boss does pass through is the connection string, so that is
+ * where the setting has to go, and `pg-connection-string` understands `sslmode`, `sslrootcert` and
+ * libpq's `no-verify`.
+ *
+ * ## The failure this exists for
+ *
+ * The worker died at boot with `SELF_SIGNED_CERT_IN_CHAIN` against the very cluster the web app was
+ * serving pages from. The difference is the driver: `postgres` reads `sslmode=require` the way libpq
+ * defines it — encrypt, do not verify — while `pg`, under pg-boss, verifies the chain anyway. So a
+ * connection string that asked for no verification got it from one driver and not the other, and the one
+ * that refused had no page to serve and nothing to fall back to.
+ *
+ * With a CA on disk the answer is the strong one: `verify-full`, against that file. Without one it is what
+ * the connection string actually asked for and no more, which is a deliberate choice to make the two
+ * drivers agree rather than to have the queue hold a stricter policy than the application it serves.
+ * `.do/README.md` has the one `doctl` command that prints the certificate.
  */
-export function jobQueueSsl(
-  connectionString: string,
-  caCertificate?: string,
-): { ca: string; rejectUnauthorized: true } | { rejectUnauthorized: false } | undefined {
-  const mode = new URL(connectionString).searchParams.get('sslmode')
-  // Local development and the integration suite: no TLS was asked for, so none is configured. Passing
-  // `rejectUnauthorized: false` here would still attempt TLS and fail against a cluster that has none.
-  if (mode === null || mode === 'disable') return undefined
-  if (caCertificate !== undefined && caCertificate.length > 0) {
-    return { ca: caCertificate, rejectUnauthorized: true }
+export function jobQueueConnectionString(connectionString: string, caPath?: string): string {
+  const url = new URL(connectionString)
+  const mode = url.searchParams.get('sslmode')
+  // Local development and the integration suite: no TLS was asked for, so nothing is changed. Forcing a
+  // mode here would attempt a handshake against a cluster that has none.
+  if (mode === null || mode === 'disable') return connectionString
+  if (caPath !== undefined && caPath.length > 0) {
+    url.searchParams.set('sslmode', 'verify-full')
+    url.searchParams.set('sslrootcert', caPath)
+    return url.toString()
   }
-  return { rejectUnauthorized: false }
+  url.searchParams.set('sslmode', 'no-verify')
+  url.searchParams.delete('sslrootcert')
+  return url.toString()
 }
 
 export function createJobQueue(options: JobQueueOptions): PgBoss {
   return new PgBoss({
-    connectionString: options.connectionString,
+    connectionString: jobQueueConnectionString(options.connectionString, options.caCertificatePath),
     schema: options.schema ?? PGBOSS_SCHEMA,
     max: options.max ?? 4,
-    ssl: jobQueueSsl(options.connectionString, options.caCertificate),
     // pg-boss owns and migrates its schema. Explicit rather than implicit, so a deployment that
     // lacks permission to create it fails at boot with a clear error.
     createSchema: true,

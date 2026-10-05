@@ -62,6 +62,21 @@ RUN pnpm install --frozen-lockfile
 ARG DATABASE_URL
 ENV DATABASE_URL=$DATABASE_URL
 
+# The origin every canonical URL and hreflang alternate is built from, and a BUILD argument because it is
+# read at render time — so for the statically rendered routes it is frozen into the HTML here.
+#
+# **A build argument with no matching `ARG` is silently dropped, and that is how this was found.** The app
+# spec set `SITE_ORIGIN` at build scope, App Platform passed it to `docker build`, this Dockerfile declared
+# nothing to receive it, and the build fell back to `SITE_ORIGIN_FALLBACK` in `@berelax/shared`. The staging
+# site then served `rel="canonical" href="https://berelaxmassage.com/"` — a preview asking Google to index
+# production copies of unreviewed pages, which is the exact harm that fallback's own comment names. Nothing
+# failed; the wrong URL was simply in every prerendered page.
+#
+# No default, for the same reason `DATABASE_URL` has none: the fallback is already the considered answer for
+# an unset value, and a default here would be a second one that disagrees with it silently.
+ARG SITE_ORIGIN
+ENV SITE_ORIGIN=$SITE_ORIGIN
+
 # `APP_ENV` for the build only — the `runtime` stage carries none, so the platform supplies it and a missing
 # one is refused at boot by `parseConfig`. `preview` is chosen because the build must not be able to select
 # a real provider: the refusal in `packages/config/src/env.ts` applies to every value but `production`, so
