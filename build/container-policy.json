@@ -35,6 +35,17 @@
       "noticeSource": "apps/worker/licences/THIRD-PARTY-NOTICES.md",
       "reason": "The worker image. ffmpeg is in it for the hero video renditions (W-SYS-06) and libvips is in it through sharp for the image derivatives (W-SYS-05); both are copyleft components this image conveys, which is why noticeSource has to be copied to noticePathInImage and why the gate fails if that COPY is removed.",
       "unverified": "This Dockerfile has never been built. There is no Docker daemon in the agent container that authored it, so what is proven today is every static rule in scripts/check-container.mjs. The first build is the `container` job in .github/workflows/ci.yml, which is also the first run of the vulnerability scan below — that is the right place for it to fail, and it is recorded here rather than left to be discovered."
+    },
+    {
+      "path": "apps/web/Dockerfile",
+      "unit": "none — deployment artefact, written after the 211-unit manifest was complete",
+      "status": "present",
+      "baseImage": "node:22-bookworm-slim",
+      "baseImageDigest": "sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5",
+      "reason": "The web image. It exists because apps/web cannot be built by a buildpack: the workspace packages ship TypeScript source that next.config.ts transpiles, and `next build` reads the database — `/` and `/ar` are prerendered from the premises row, the catalogue and the roster, so a build against an unseeded database fails by design. The same digest as the worker image on purpose: one base image to scan, one to bump.",
+      "installsNoOsPackages": "Nothing is apt-get installed, so this image conveys no operating-system component and `imageComponents` declares none against it. The worker image is the one that conveys ffmpeg and libvips, and it is the one that carries their licence texts and the written offer.",
+      "buildArguments": "DATABASE_URL is an ARG in the discarded `deps` stage. The shipped image is the `runtime` stage, whose history contains only its own instructions and which never declares it — the running container receives it from the platform's environment. It has to be the database the deployment serves and not a throwaway: a prerendered page is HTML frozen at build time, so a build pointed at a seed would ship fixture content to the public. PAYLOAD_SECRET is deliberately NOT a build argument: payloadSecret() falls back to a recognisable placeholder so the image can be built without the signing key, and assertPayloadSecretConfigured() refuses to serve the admin without a real one. The `container` job asserts both halves by reading `docker history` and the image's own Config.Env.",
+      "unverified": "This Dockerfile has never been built. There is no Docker daemon in the agent container that authored it, so what is proven today is every static rule in scripts/check-container.mjs plus the `pnpm --filter @berelax/web build` it runs, which is measured outside the image. The first build is the `container` job in .github/workflows/ci.yml, which is also the first run of the vulnerability scan over it, and the build needs a database reachable from the builder — recorded here rather than left to be discovered."
     }
   ],
   "imageComponents": [
@@ -94,7 +105,7 @@
     "ciJob": "container",
     "requiredSteps": ["docker build", "aquasecurity/trivy-action"],
     "severities": "HIGH,CRITICAL",
-    "reason": "Scanning an image's OS packages for CVEs needs an image, and H-HARD-02 deferred it for exactly as long as there was none. apps/worker/Dockerfile exists now, so the scan is enabled: a separate `container` job in the CI workflow builds the worker image and runs Trivy over it at HIGH and CRITICAL.",
+    "reason": "Scanning an image's OS packages for CVEs needs an image, and H-HARD-02 deferred it for exactly as long as there was none. apps/worker/Dockerfile exists now, so the scan is enabled: a separate `container` job in the CI workflow builds the worker image and runs Trivy over it at HIGH and CRITICAL. The deployment work added apps/web/Dockerfile, which the same job builds and scans: two images, one base digest, one Trivy step each.",
     "notInPnpmVerify": "It downloads a vulnerability database and builds a container image. `pnpm verify` runs on every unit by every agent and must work offline, so putting either in it would make a developer's verify depend on the network and add minutes to every run. The rules that need no image — tag pinning, the PostgreSQL major agreeing with the managed database, base-image digests, a non-root final user, no environment file in a layer, a .dockerignore behind a whole-context COPY, and every conveyed component declared with its licence obligation — are in pnpm verify and are proven to fire by known-bad fixtures in scripts/test-gates.mjs."
   }
 }

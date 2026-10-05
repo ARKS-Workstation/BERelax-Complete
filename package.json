@@ -96,7 +96,8 @@
     "verify": "pnpm lint && pnpm typecheck && pnpm boundaries && pnpm boundaries:test && pnpm purity && pnpm invisibles && pnpm secrets && pnpm rotation && pnpm pii && pnpm deps && pnpm licences && pnpm container && pnpm palette && pnpm tokens && pnpm colours && pnpm cms && pnpm documents && pnpm no-invoice-mutation && pnpm no-autofile && pnpm structured-data && pnpm redirects && pnpm chokepoint && pnpm send-chokepoint && pnpm private-documents && pnpm saq-a && pnpm egress && pnpm event-attributes && pnpm layout && pnpm jobs && pnpm alerts && pnpm processors && pnpm adr && pnpm docs-set && pnpm progress:check && pnpm media && pnpm fixtures && pnpm fonts && pnpm critique && pnpm a11y && pnpm touch-targets && pnpm coverage && pnpm coverage:core && pnpm test:integration && pnpm money-invariants && pnpm db:migrate:dry && pnpm db:drift && pnpm db:conventions && pnpm sqlstate && pnpm dry-runs && pnpm budgets && pnpm gate-registry && pnpm descriptor-lint && pnpm perf-layers && pnpm offline-money && pnpm headers && pnpm drill-age && pnpm findings && pnpm freeze && pnpm perf-budget && pnpm gates:test",
     "redirects": "tsx scripts/check-redirect-coverage.mjs",
     "redirects:import": "tsx scripts/import-crawl-baseline.mjs",
-    "coverage:core": "vitest run -c vitest.core-coverage.config.ts --coverage.enabled"
+    "coverage:core": "vitest run -c vitest.core-coverage.config.ts --coverage.enabled",
+    "deploy:preflight": "node scripts/check-deploy-preconditions.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { CMS_ROBOTS_TAG, CMS_ROUTE_PREFIXES, cmsRoutesIn, isCmsRoute } from '@berelax/cms'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import nextConfig from '../next.config.ts'
-import { assertPayloadSecretConfigured } from '../payload.config.ts'
+import { assertPayloadSecretConfigured, PAYLOAD_PLACEHOLDER_SECRET } from '../payload.config.ts'
 
 /**
  * W-SYS-08 — the admin is noindex, and it is not part of the public site.
@@ -161,5 +161,33 @@ describe('acceptance — only the CMS needs PAYLOAD_SECRET, and both its entry p
     // And the guard really is conditional on the environment rather than on nothing: with no NODE_ENV of
     // production it returns, which is what lets development and this suite import the config at all.
     expect(() => assertPayloadSecretConfigured()).not.toThrow()
+  })
+
+  /*
+   * The placeholder is in this repository, so a deployment that pastes it into the app's
+   * environment is signing admin session tokens with a public value — and the empty-string check above
+   * would wave it through. Asserted in production's shape, because that is the only shape either check
+   * applies in.
+   */
+  it('refuses the placeholder secret as loudly as a missing one', () => {
+    // `vi.stubEnv` rather than an assignment: `NODE_ENV` is typed read-only, and the restore is one call
+    // in a finally rather than three saved values that a failing expectation would skip.
+    try {
+      vi.stubEnv('NODE_ENV', 'production')
+      vi.stubEnv('NEXT_PHASE', undefined)
+
+      vi.stubEnv('PAYLOAD_SECRET', PAYLOAD_PLACEHOLDER_SECRET)
+      expect(() => assertPayloadSecretConfigured()).toThrow(/placeholder/i)
+
+      vi.stubEnv('PAYLOAD_SECRET', undefined)
+      expect(() => assertPayloadSecretConfigured()).toThrow(/required/i)
+
+      // The control: a real value is accepted, so the two refusals above are about the VALUE and not about
+      // the production branch refusing everything.
+      vi.stubEnv('PAYLOAD_SECRET', 'a-value-nobody-else-holds')
+      expect(() => assertPayloadSecretConfigured()).not.toThrow()
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 })

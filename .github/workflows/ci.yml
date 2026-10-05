@@ -535,6 +535,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
+    # The web image's build READS this database. `/` and `/ar` are prerendered from the `premises` row, the
+    # catalogue and the roster, so `docker build --file apps/web/Dockerfile` against nothing fails with "The
+    # home page has no facts to render". The worker image needs no database and is built in the same job
+    # because both images share one base digest: a bump that is made for one and not the other should fail
+    # in one place.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: berelax
+          POSTGRES_PASSWORD: berelax
+          POSTGRES_DB: berelax_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U berelax -d berelax_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+
     steps:
       - uses: actions/checkout@v4
 
@@ -542,6 +561,51 @@ jobs:
       # offline container rule was proven there and this is where the build itself is proven.
       - name: Build the worker image
         run: docker build --file apps/worker/Dockerfile --tag berelax-worker:ci .
+
+      # The content the web build prerenders. A seeded database and not an empty one: the measured failure
+      # of an unseeded build is the point of the two steps, and a deployment's own build reads the database
+      # it serves (see `build/container-policy.json` and `.do/README.md`).
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply migrations and seed the build's database
+        run: pnpm db:apply && pnpm seed
+
+      # `--network=host` so the builder reaches the service container on 127.0.0.1, and the credential is
+      # the workflow's throwaway one. The real deployment passes its own: the ARG lives in the discarded
+      # `deps` stage, so neither value is in the shipped image's history.
+      - name: Build the web image
+        run: |
+          docker build \
+            --network=host \
+            --file apps/web/Dockerfile \
+            --build-arg DATABASE_URL="$DATABASE_URL" \
+            --tag berelax-web:ci .
+
+      - name: Scan the web image for OS and library vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: berelax-web:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+      # The shipped stage must not carry the build's database credential. A multi-stage build discards the
+      # builder's history, and this asserts it rather than trusting it: `docker history` of the final image,
+      # and the image's own configured environment, are both read.
+      - name: The web image carries no build-time credential
+        run: |
+          ! docker history --no-trunc berelax-web:ci | grep -qi 'DATABASE_URL'
+          ! docker inspect --format '{{json .Config.Env}}' berelax-web:ci | grep -qi 'DATABASE_URL'
 
       # The image carries ffmpeg, which pulls in libavcodec and a long tail of codec libraries — the exact
       # reason docs/08 §8 calls ffmpeg in the worker image a cost that "must be budgeted", and the exact

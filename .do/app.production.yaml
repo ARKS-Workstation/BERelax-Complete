@@ -1,0 +1,247 @@
+# BE RELAX — DigitalOcean App Platform spec, PRODUCTION.
+#
+# ## Read this before applying it
+#
+# This file is complete and it is not a licence to run it. Three things are true at the time it was
+# written, and each of them is somebody's decision rather than a defect to fix in the spec:
+#
+#  1. **`pnpm go-no-go` returns no-go on five counts**, and its own closing line is the honest summary:
+#     "Nothing here can be fixed by a deploy: every one of these is a fact about the business." The five
+#     are 51 unresolved items in docs/OPEN-QUESTIONS.md, milestone M3 undemonstrated, no configured maximum
+#     age for the restore drill, no penetration test performed, and provisional settings unconfirmed.
+#     `scripts/check-deploy-preconditions.mjs` runs it and refuses, and it is what `pnpm deploy:preflight`
+#     is for. Applying this spec anyway is a decision somebody takes with their eyes open, not a default.
+#
+#  2. **The region below may be unlawful for part of this data.** DigitalOcean has no UAE region. ADR 0010
+#     records why that is unresolved rather than settled: UAE Federal Law 2 of 2019 may prohibit storing
+#     health data outside the country, and the licence classification that decides whether the rule applies
+#     to this business is `Y5-residency` — still open. The clinical schema is isolated so it can be moved to
+#     a UAE-hosted database in about a week; that is the mitigation, not an answer. Nothing in this
+#     repository may choose a jurisdiction on the owner's behalf.
+#
+#  3. **No real provider exists.** Every provider below is `fake` and that is not timidity: ADR 0005 and
+#     ADR 0022 make `real` resolve to `notImplemented`, so a production deployment with `SMS_PROVIDER=real`
+#     refuses to boot rather than sending anything. A production environment that takes bookings and sends
+#     nothing is the current state of this build, and the health panel says so.
+#
+# Applied with `doctl apps create --spec .do/app.production.yaml`, then `doctl apps update <id> --spec ...`.
+# `.do/README.md` is the order, the secret list and the two-phase migration sequence.
+
+name: berelax
+
+# Frankfurt — the nearest region with a managed PostgreSQL standby, and NOT a residency decision. See §2
+# above and ADR 0010. `fra1` is written here because a spec cannot be applied without a region; if
+# `Y5-residency` comes back saying health data must stay in the country, the answer is not a different slug
+# in this line — there is no UAE region — it is the clinical store moving to a UAE-hosted database while
+# the rest of the app stays here.
+region: fra1
+
+services:
+  - name: web
+    dockerfile_path: apps/web/Dockerfile
+    source_dir: /
+    github:
+      repo: ARKS-Workstation/BERelax-Complete
+      branch: main
+      # Deliberately false. A push to `main` must not deploy to production: `pnpm go-no-go` and
+      # `pnpm deploy:preflight` are the gate, and a git push is not a decision to release.
+      deploy_on_push: false
+
+    # Two, which is docs/02 §2's topology. It is availability and not throughput: App Platform's rolling
+    # deploy takes an instance out at a time, and with one instance a deploy is an outage.
+    #
+    # One consequence, recorded because it is already a known gap (the ISR cache task): the on-disk
+    # incremental cache is PER INSTANCE and App Platform gives no shared disk, so a revalidation served by
+    # one instance is not seen by the other until it revalidates too. For a catalogue the owner edits a few
+    # times a month that is a few minutes of skew, which is acceptable and is not the same thing as correct.
+    instance_count: 2
+    instance_size_slug: apps-s-1vcpu-2gb
+    http_port: 3000
+
+    health_check:
+      http_path: /
+      initial_delay_seconds: 20
+      period_seconds: 10
+      failure_threshold: 5
+
+    envs:
+      - key: APP_ENV
+        scope: RUN_TIME
+        value: production
+
+      # RUN_AND_BUILD_TIME, because the build prerenders `/` and `/ar` from the `premises` row, the
+      # catalogue and the roster. That is what makes the production database a BUILD dependency here, and
+      # `.do/README.md` §3 covers the trusted-sources consequence: a build container that cannot reach the
+      # cluster fails the deploy at the prerender step with "The home page has no facts to render".
+      #
+      # The ARG it feeds lives in the Dockerfile's discarded `deps` stage, so this credential is not in the
+      # shipped image's history. The `container` job in CI asserts that rather than asserting it here.
+      - key: DATABASE_URL
+        scope: RUN_AND_BUILD_TIME
+        value: ${db.DATABASE_URL}
+
+      # Read at RENDER time and therefore at BUILD time for the statically rendered routes — the second key
+      # after the database that has to be RUN_AND_BUILD_TIME. The value is `SITE_ORIGIN_FALLBACK` in
+      # `@berelax/shared` written out rather than left to the fallback: it is the live domain this relaunch
+      # takes over (docs/13 §5), and a canonical URL is not a thing to leave to a default. When Cloudflare
+      # is in front, this stays the customer-facing name and NOT the `*.ondigitalocean.app` origin behind it.
+      - key: SITE_ORIGIN
+        scope: RUN_AND_BUILD_TIME
+        value: https://berelaxmassage.com
+
+      - key: BUSINESS_TIMEZONE
+        scope: RUN_TIME
+        value: Asia/Dubai
+
+      - key: LOG_LEVEL
+        scope: RUN_TIME
+        value: info
+
+      # `fake` in production too, and this is the one line in this file most likely to be read as a mistake.
+      # It is not. There is no real adapter for any of these (ADR 0005, ADR 0022, and `Y7-gateway`,
+      # `Y1-analytics-credentials`, `Y6-email-sender` in docs/OPEN-QUESTIONS.md): `real` resolves to
+      # `notImplemented` and the process would refuse to start. Each becomes `real` on the day the
+      # credential behind it exists, one at a time, and the health panel is where that is visible.
+      - key: SMS_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: EMAIL_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: GOOGLE_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: PAYMENT_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: LLM_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: ANALYTICS_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: MEDIA_STORAGE
+        scope: RUN_TIME
+        value: fake
+
+      # Empty, and it has to be: `parseConfig` REFUSES a non-empty allowlist when `APP_ENV=production`,
+      # because there it would silently restrict delivery to a test handset instead of widening it.
+      - key: OUTBOUND_ALLOWLIST
+        scope: RUN_TIME
+        value: ''
+
+      # No secret is in this file. `.do/README.md` §4 is the list and the command, and the reason is brief
+      # rule 15: a placeholder in a committed spec is indistinguishable from a configured value. An app spec
+      # is DECLARATIVE — applying one that omits a secret REMOVES it from the app — so read that section
+      # before `doctl apps update --spec`.
+
+workers:
+  - name: worker
+    dockerfile_path: apps/worker/Dockerfile
+    source_dir: /
+    github:
+      repo: ARKS-Workstation/BERelax-Complete
+      branch: main
+      deploy_on_push: false
+
+    # One, which is docs/02 §2's topology, and one is load-bearing rather than frugal: pg-boss cron
+    # registrations are idempotent per queue but the nightly rollups and the campaign sender are written
+    # against a single consumer, and the send choke point's rate limiting is per process.
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-1gb
+
+    envs:
+      - key: APP_ENV
+        scope: RUN_TIME
+        value: production
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        value: ${db.DATABASE_URL}
+      - key: BUSINESS_TIMEZONE
+        scope: RUN_TIME
+        value: Asia/Dubai
+      - key: LOG_LEVEL
+        scope: RUN_TIME
+        value: info
+      # The worker needs it too: it mints the magic link a reminder carries, and that link goes into an SMS
+      # where a wrong origin is a dead tap.
+      - key: SITE_ORIGIN
+        scope: RUN_TIME
+        value: https://berelaxmassage.com
+      - key: SMS_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: EMAIL_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: GOOGLE_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: PAYMENT_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: LLM_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: ANALYTICS_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: MEDIA_STORAGE
+        scope: RUN_TIME
+        value: fake
+      - key: OUTBOUND_ALLOWLIST
+        scope: RUN_TIME
+        value: ''
+
+jobs:
+  # PRE_DEPLOY: after the image is built, before the new containers take traffic. The consequence worth
+  # stating is the one that will bite somebody — a migration that adds a column the BUILD reads cannot
+  # arrive in the same deploy as the code that reads it, because the build ran first. `.do/README.md` §5
+  # has the two-phase sequence for that case, and it is the normal case for this application rather than
+  # an edge one: `/` and `/ar` are prerendered from the database.
+  - name: migrate
+    kind: PRE_DEPLOY
+    dockerfile_path: apps/worker/Dockerfile
+    source_dir: /
+    github:
+      repo: ARKS-Workstation/BERelax-Complete
+      branch: main
+      deploy_on_push: false
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-1gb
+    run_command: pnpm db:apply
+    envs:
+      - key: APP_ENV
+        scope: RUN_TIME
+        value: production
+      # The DIRECT cluster credential, never a connection-pool one.
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        value: ${db.DATABASE_URL}
+
+databases:
+  # An EXISTING cluster, attached by name. App Platform can only create a development database from a spec,
+  # and a development database has no standby, no point-in-time restore and no connection pool — three
+  # things this one needs. `.do/README.md` §2 is the `doctl databases create` that makes it: PostgreSQL 16,
+  # 2 vCPU / 4 GB with a standby, which is docs/02 §2's sizing.
+  #
+  # `${db.DATABASE_URL}` above resolves to the cluster's DIRECT credential. The PgBouncer pool that ADR 0004
+  # is about is created separately and set as a RUN_TIME override on `web` and `worker` — a spec cannot bind
+  # a pool, and the migration job must not use one. README §4 has both commands.
+  - name: db
+    engine: PG
+    version: '16'
+    production: true
+    cluster_name: berelax-pg
+    db_name: berelax
+    db_user: berelax
+
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED
+
+# No `domains:` block. The custom domain is not in this repository and must not be guessed: nothing in the
+# eleven handover documents names one, `Y1-nap` is still open, and docs/02 §2 puts Cloudflare in front of
+# this app — so the hostname, its DNS and its WAF are configured where Cloudflare is, and the App Platform
+# default `*.ondigitalocean.app` hostname is the origin behind it. Adding a domain here before that is
+# decided would issue a certificate for a name nobody has.

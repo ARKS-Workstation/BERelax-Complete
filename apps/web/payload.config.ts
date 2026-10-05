@@ -82,7 +82,23 @@ function payloadSecret(): string {
 export function assertPayloadSecretConfigured(): void {
   const isBuild = process.env['NEXT_PHASE'] === 'phase-production-build'
   if (isBuild || process.env['NODE_ENV'] !== 'production') return
-  if ((process.env['PAYLOAD_SECRET'] ?? '') !== '') return
+  const configured = process.env['PAYLOAD_SECRET'] ?? ''
+  /*
+   * The placeholder is refused as loudly as an empty value, and it is a SEPARATE check because it fails for
+   * a different reason: empty means nobody set it, and this means somebody set it to the literal in this
+   * file. It was added with `.do/`, which gave the deployment a spec somebody would fill in — the app spec
+   * carries no secret placeholder for exactly this reason, and the check is what makes that a property of
+   * the application rather than a note in a README. Signing a session token with a value that is in a
+   * public repository is the same hole as signing it with a value an attacker guessed.
+   */
+  if (configured === PAYLOAD_PLACEHOLDER_SECRET) {
+    throw new Error(
+      'PAYLOAD_SECRET is set to the placeholder in apps/web/payload.config.ts, which is in this ' +
+        'repository and therefore known to everybody. Generate one — `openssl rand -base64 48` — and set ' +
+        'it as a secret on the app. See .do/README.md.',
+    )
+  }
+  if (configured !== '') return
   throw new Error(
     'PAYLOAD_SECRET is required to serve the CMS admin or its API. Without it every admin session token ' +
       'is signed with a value an attacker also knows. The public site does not need it and is unaffected.',

@@ -1,0 +1,215 @@
+# BE RELAX — DigitalOcean App Platform spec, STAGING.
+#
+# Applied with `doctl apps create --spec .do/app.staging.yaml` the first time and
+# `doctl apps update <id> --spec .do/app.staging.yaml` after that. `.do/README.md` is the order to do it
+# in, and it is not optional reading: the web build reads the database, so the database has to hold content
+# before the first deploy can succeed.
+#
+# What this environment is for: everything but real customers and real providers. `APP_ENV=staging` makes
+# `packages/config/src/env.ts` refuse `real` for every provider — a staging run cannot message a client,
+# cannot spend a model's budget, cannot write a real staff portrait into a real bucket and cannot
+# authorise a card. That refusal is the whole reason this file exists separately from the production one,
+# and it is enforced by the application rather than by this spec.
+#
+# The topology is docs/02 §2's: a `web` service, a `worker` worker, one managed PostgreSQL 16, with
+# Cloudflare in front of the web service in production. Staging runs one web instance rather than two —
+# it has no availability requirement, and a single instance makes an ISR cache that is per-instance
+# behave the same way twice running.
+
+name: berelax-staging
+
+# Frankfurt. DigitalOcean has no UAE region, and for staging that is a cost-and-latency question rather
+# than a legal one: no real clinical record and no real customer is in this environment. The production
+# spec does NOT get to make the same shrug — see `.do/app.production.yaml`.
+region: fra1
+
+services:
+  - name: web
+    dockerfile_path: apps/web/Dockerfile
+    source_dir: /
+    github:
+      repo: ARKS-Workstation/BERelax-Complete
+      branch: main
+      deploy_on_push: false
+
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-2gb
+    http_port: 3000
+
+    # `/` is prerendered, so the health check costs a static file read and not a database round trip. It is
+    # also the page that proves the build had facts: an instance that answers 200 here has the premises row,
+    # the catalogue and the roster baked in, which is the thing most likely to have gone wrong.
+    health_check:
+      http_path: /
+      initial_delay_seconds: 20
+      period_seconds: 10
+      failure_threshold: 5
+
+    envs:
+      - key: APP_ENV
+        scope: RUN_TIME
+        value: staging
+
+      # RUN_AND_BUILD_TIME, because the build prerenders `/` and `/ar` from this database. A build-time-only
+      # or run-time-only scope would each break one half.
+      - key: DATABASE_URL
+        scope: RUN_AND_BUILD_TIME
+        value: ${db.DATABASE_URL}
+
+      # PAYLOAD_SECRET is NOT in this file, and neither is any other secret. `.do/README.md` §4 is the list
+      # and the command. The reason is one line of brief rule 15: a placeholder in a committed spec is
+      # indistinguishable from a configured value, and this particular one would be worse than useless —
+      # `assertPayloadSecretConfigured()` refuses an EMPTY secret, so a placeholder somebody pasted would
+      # boot the admin and sign every session token with a value that is in a public repository.
+      #
+      # Read that README before running `doctl apps update --spec`: an app spec is DECLARATIVE, so applying
+      # a spec that omits a secret REMOVES it from the app.
+
+      # The origin every canonical URL and hreflang alternate is built from. It is read at RENDER time and
+      # therefore at BUILD time for the statically rendered routes, which is why this is the one key besides
+      # the database that has to be RUN_AND_BUILD_TIME: a staging build that did not set it would fall back
+      # to the live domain (`SITE_ORIGIN_FALLBACK` in `@berelax/shared`) and ask Google to index production
+      # copies of unreviewed pages.
+      #
+      # `${APP_URL}` is App Platform's own binding for this app's assigned hostname, so staging gets its
+      # real origin without anybody writing a guess here — and without a value that goes stale when the app
+      # is recreated.
+      - key: SITE_ORIGIN
+        scope: RUN_AND_BUILD_TIME
+        value: ${APP_URL}
+
+      - key: BUSINESS_TIMEZONE
+        scope: RUN_TIME
+        value: Asia/Dubai
+
+      - key: LOG_LEVEL
+        scope: RUN_TIME
+        value: debug
+
+      # Every provider fake, and in staging that is not a choice: `APP_ENV=staging` with any of these set
+      # to `real` is a refused configuration and the process will not boot. They are written out rather
+      # than left to their defaults so the health panel and this file say the same thing.
+      - key: SMS_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: EMAIL_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: GOOGLE_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: PAYMENT_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: LLM_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: ANALYTICS_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: MEDIA_STORAGE
+        scope: RUN_TIME
+        value: fake
+
+      # The named test handset, if there is one. Empty is the safe value: with nothing here every outbound
+      # message goes to the local outbox. A number added here must be one somebody consented to receive
+      # test traffic on.
+      - key: OUTBOUND_ALLOWLIST
+        scope: RUN_TIME
+        value: ''
+
+workers:
+  - name: worker
+    dockerfile_path: apps/worker/Dockerfile
+    source_dir: /
+    github:
+      repo: ARKS-Workstation/BERelax-Complete
+      branch: main
+      deploy_on_push: false
+
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-1gb
+
+    envs:
+      - key: APP_ENV
+        scope: RUN_TIME
+        value: staging
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        value: ${db.DATABASE_URL}
+      - key: BUSINESS_TIMEZONE
+        scope: RUN_TIME
+        value: Asia/Dubai
+      - key: LOG_LEVEL
+        scope: RUN_TIME
+        value: debug
+      # The worker needs it too, and for a sharper reason than the web service: it mints the magic link a
+      # reminder carries, and that link goes into an SMS where a wrong origin is a dead tap.
+      - key: SITE_ORIGIN
+        scope: RUN_TIME
+        value: ${APP_URL}
+      - key: SMS_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: EMAIL_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: GOOGLE_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: PAYMENT_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: LLM_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: ANALYTICS_PROVIDER
+        scope: RUN_TIME
+        value: fake
+      - key: MEDIA_STORAGE
+        scope: RUN_TIME
+        value: fake
+      - key: OUTBOUND_ALLOWLIST
+        scope: RUN_TIME
+        value: ''
+
+jobs:
+  # Migrations run BEFORE the new containers take traffic and AFTER the image is built. That ordering is a
+  # property of App Platform, not a choice, and it has one consequence worth stating here because it will
+  # bite somebody: a migration that adds a column the BUILD reads cannot arrive in the same deploy as the
+  # code that reads it. `.do/README.md` has the two-phase sequence for that case.
+  #
+  # It uses the worker image because that image already carries the whole workspace, pnpm and tsx, and
+  # `pnpm db:apply` is `node scripts/apply-migrations.mjs`. A third image for one command would be a third
+  # thing to scan and bump.
+  - name: migrate
+    kind: PRE_DEPLOY
+    dockerfile_path: apps/worker/Dockerfile
+    source_dir: /
+    github:
+      repo: ARKS-Workstation/BERelax-Complete
+      branch: main
+      deploy_on_push: false
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-1gb
+    run_command: pnpm db:apply
+    envs:
+      - key: APP_ENV
+        scope: RUN_TIME
+        value: staging
+      # The DIRECT cluster credential and never a connection-pool one. `scripts/apply-migrations.mjs` runs
+      # each migration in its own transaction and PgBouncer's transaction pooling is fine with that, but a
+      # pool also silently caps what a long `CREATE INDEX` may hold — and the one thing a half-applied
+      # migration run must not be is ambiguous.
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        value: ${db.DATABASE_URL}
+
+databases:
+  # A development database, which is what App Platform can create from a spec. It has no standby and no
+  # connection pool, and for staging neither is wanted: the point of this environment is the application,
+  # not the cluster. Production attaches a real cluster instead — see `.do/app.production.yaml`.
+  - name: db
+    engine: PG
+    version: '16'
+    production: false

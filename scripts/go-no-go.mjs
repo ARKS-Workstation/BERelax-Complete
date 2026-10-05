@@ -354,8 +354,16 @@ async function provisionalSettingsConfirmed() {
   const sql = postgres(url, { max: 2 })
   try {
     const keys = declared.map((setting) => setting.key)
+    /*
+     * `any(${keys})` and NOT `any(${sql.array(keys)})`, which is what this was and what made this
+     * requirement read UNKNOWN on every run: postgres.js sends `sql.array()` as a parameter of unknown
+     * type and PostgreSQL answers `op ANY/ALL (array) requires array on right side`. A plain JS array is
+     * the form the driver infers an element type for. The failure was invisible because an unreadable
+     * requirement is reported as UNKNOWN — which blocks a release exactly as hard as a refusal, so the
+     * verdict was right while its reason was a bug in the query.
+     */
     const rows = await sql`
-      select key, is_provisional from app_setting where key = any(${sql.array(keys)})
+      select key, is_provisional from app_setting where key = any(${keys})
     `
     const byKey = new Map(rows.map((row) => [row['key'], row['is_provisional']]))
     const unconfirmed = []
