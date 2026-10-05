@@ -102,7 +102,8 @@
     "db:bootstrap": "pnpm db:apply && pnpm db:deploy --adopt && pnpm cms:migrate && pnpm seed",
     "cms:user": "pnpm --filter @berelax/web exec tsx scripts/create-cms-user.mjs",
     "cms:migrate": "pnpm --filter @berelax/web exec payload migrate",
-    "deploy:migrate": "pnpm db:deploy && pnpm cms:migrate"
+    "deploy:migrate": "pnpm db:deploy && pnpm cms:migrate",
+    "cms:bootstrap": "pnpm cms:migrate && pnpm cms:user --email \"$CMS_USER_EMAIL\" --role \"${CMS_USER_ROLE:-owner}\""
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
