@@ -90,8 +90,22 @@ It is useless for a deployment, and that was measured rather than argued: the `m
 `pnpm db:apply` against the staging cluster, applied 134 migrations, and failed on the next deploy with
 *"berelax already holds 222 table(s)"*. A deployment that cannot apply migration 135 is not a deployment.
 
-So the job runs **`pnpm db:deploy`**, which keeps a `schema_migration(filename, checksum, applied_at)`
-ledger and:
+So the job runs **`pnpm deploy:migrate`**, which is two things, because there are two migration estates:
+
+- **`pnpm db:deploy`** for this repository's 134 hand-written SQL migrations, described below.
+- **`pnpm cms:migrate`** (`payload migrate`) for Payload's own tables. `payload.config.ts` sets
+  `push: false` in production on purpose — drizzle-kit syncing a schema nobody reviewed is right for
+  development and not for a live database — and its comment has always said "Production runs
+  `payload migrate` as a deploy step". Until the first real deployment nothing did: there were no
+  migration files and no step, so `/admin` answered 500 with `relation "payload.cms_user" does not
+  exist`. `apps/web/src/migrations/` now holds the initial one.
+
+  Regenerating it (`pnpm --filter @berelax/web exec payload migrate:create <name>`) reintroduces one
+  defect every time: Payload's generator imports `MigrateUpArgs` and `MigrateDownArgs` as VALUES, and
+  `@payloadcms/db-postgres` exports them as types, so ESM refuses the file at run time. Make that
+  `import type` and the file works; the committed one carries a comment saying so.
+
+`db:deploy` keeps a `schema_migration(filename, checksum, applied_at)` ledger and:
 
 - applies only the files that are not yet rows, in order, in one psql session behind an advisory lock —
   one session because a lock taken in a session that exits is a lock nobody holds;

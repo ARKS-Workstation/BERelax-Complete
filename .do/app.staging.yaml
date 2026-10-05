@@ -202,7 +202,9 @@ jobs:
     # `schema_migration` ledger, applies only what is pending, refuses a migration edited after it was
     # applied, and is a no-op when there is nothing to do. A database brought up by `db:apply` needs
     # `pnpm db:deploy --adopt` once before its first deploy; `.do/README.md` §2 has that step.
-    run_command: pnpm db:deploy
+    # `pnpm deploy:migrate` is `db:deploy` and `cms:migrate`: two migration estates, only one of them
+    # this repository's SQL. Payload owns its own tables and `push` is off in production.
+    run_command: pnpm deploy:migrate
     envs:
       - key: APP_ENV
         scope: RUN_TIME

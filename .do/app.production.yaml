@@ -222,7 +222,10 @@ jobs:
       branch: main
       deploy_on_push: false
     instance_count: 1
-    instance_size_slug: apps-s-1vcpu-1gb
+    # `basic-xs`, matching the worker. A job is billed per second it runs rather than per month, so this
+    # is about the file being true rather than about the bill: a spec naming a size the app does not use
+    # is a spec somebody will read and believe.
+    instance_size_slug: basic-xs
     # `pnpm db:deploy` and NOT `pnpm db:apply`. The two are different tools with different contracts:
     # `db:apply` takes an EMPTY schema to the current one and refuses anything else, which is right for CI
     # and useless for a deployment — measured here, on the first real deploy, which applied 134 migrations
@@ -230,7 +233,15 @@ jobs:
     # `schema_migration` ledger, applies only what is pending, refuses a migration edited after it was
     # applied, and is a no-op when there is nothing to do. A database brought up by `db:apply` needs
     # `pnpm db:deploy --adopt` once before its first deploy; `.do/README.md` §2 has that step.
-    run_command: pnpm db:deploy
+    #
+    # It runs `pnpm deploy:migrate`, which is `db:deploy` AND `cms:migrate`, because there are two
+    # migration estates and only one of them is this repository's SQL. Payload owns its own tables and
+    # `payload.config.ts` sets `push: false` in production deliberately — drizzle-kit syncing a schema
+    # nobody reviewed is right for development and not for a live database. That comment has always said
+    # "Production runs `payload migrate` as a deploy step", and until now nothing did: there were no
+    # migration files and no step. The CMS admin answered 500 on a fresh deployment with
+    # `relation "payload.cms_user" does not exist`.
+    run_command: pnpm deploy:migrate
     envs:
       - key: APP_ENV
         scope: RUN_TIME
