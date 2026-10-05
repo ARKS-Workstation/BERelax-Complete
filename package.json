@@ -98,7 +98,9 @@
     "redirects:import": "tsx scripts/import-crawl-baseline.mjs",
     "coverage:core": "vitest run -c vitest.core-coverage.config.ts --coverage.enabled",
     "deploy:preflight": "node scripts/check-deploy-preconditions.mjs",
-    "db:deploy": "node scripts/deploy-migrate.mjs"
+    "db:deploy": "node scripts/deploy-migrate.mjs",
+    "db:bootstrap": "pnpm db:apply && pnpm db:deploy --adopt && pnpm seed",
+    "cms:user": "tsx scripts/create-cms-user.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

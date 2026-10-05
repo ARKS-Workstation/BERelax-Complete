@@ -12,7 +12,9 @@
 #     `scripts/check-deploy-preconditions.mjs` runs it and refuses, and it is what `pnpm deploy:preflight`
 #     is for. Applying this spec anyway is a decision somebody takes with their eyes open, not a default.
 #
-#  2. **The region below may be unlawful for part of this data.** DigitalOcean has no UAE region. ADR 0010
+#  2. **The region below may be unlawful for part of this data, and India does not change that.** The owner
+#     chose Bangalore. DigitalOcean has no UAE region, so that is outside the country exactly as Frankfurt
+#     would be. ADR 0010
 #     records why that is unresolved rather than settled: UAE Federal Law 2 of 2019 may prohibit storing
 #     health data outside the country, and the licence classification that decides whether the rule applies
 #     to this business is `Y5-residency` — still open. The clinical schema is isolated so it can be moved to
@@ -29,12 +31,13 @@
 
 name: berelax
 
-# Frankfurt — the nearest region with a managed PostgreSQL standby, and NOT a residency decision. See §2
-# above and ADR 0010. `fra1` is written here because a spec cannot be applied without a region; if
-# `Y5-residency` comes back saying health data must stay in the country, the answer is not a different slug
-# in this line — there is no UAE region — it is the clinical store moving to a UAE-hosted database while
-# the rest of the app stays here.
-region: fra1
+# Bangalore, chosen by the owner, and NOT a residency answer. There is no UAE region, so `blr1` is outside
+# the country exactly as `fra1` would be: if `Y5-residency` comes back saying health data must stay in the
+# UAE, a different slug on this line does not fix it. The remedy stays what ADR 0010 designed — the
+# clinical store moves to a UAE-hosted database while the rest of the app stays here — and the clinical
+# schema is isolated so that takes about a week. Recorded here because the decision was explicit and
+# should not read as a default somebody picked.
+region: blr1
 
 services:
   - name: web
@@ -47,15 +50,20 @@ services:
       # `pnpm deploy:preflight` are the gate, and a git push is not a decision to release.
       deploy_on_push: false
 
-    # Two, which is docs/02 §2's topology. It is availability and not throughput: App Platform's rolling
-    # deploy takes an instance out at a time, and with one instance a deploy is an outage.
+    # **One instance, and `basic-s` rather than `apps-s-1vcpu-2gb`.** docs/02 §2 specifies two, and it is
+    # right about why — App Platform's rolling deploy takes an instance out at a time, so with one, a
+    # deploy is about thirty seconds of downtime. The owner weighed that against the bill and chose one:
+    # two instances of `apps-s-1vcpu-2gb` is $50 a month for a salon's website, and `basic-s` carries the
+    # same 2 GB for $20 where the professional tier charges $25. Scaling back up is one line here.
     #
-    # One consequence, recorded because it is already a known gap (the ISR cache task): the on-disk
-    # incremental cache is PER INSTANCE and App Platform gives no shared disk, so a revalidation served by
-    # one instance is not seen by the other until it revalidates too. For a catalogue the owner edits a few
-    # times a month that is a few minutes of skew, which is acceptable and is not the same thing as correct.
-    instance_count: 2
-    instance_size_slug: apps-s-1vcpu-2gb
+    # 2 GB and not `basic-xs`'s 1 GB: the Next server loads fifteen transpiled workspace packages, and
+    # revalidating a catalogue route rebuilds a page while serving others.
+    #
+    # One consequence of a single instance is now moot and worth saying so: the on-disk incremental cache
+    # is PER INSTANCE with no shared disk, which with two instances meant minutes of skew between them.
+    # With one there is one cache. It becomes a real question again the moment this goes back to two.
+    instance_count: 1
+    instance_size_slug: basic-s
     http_port: 3000
 
     health_check:
@@ -151,8 +159,10 @@ workers:
     # One, which is docs/02 §2's topology, and one is load-bearing rather than frugal: pg-boss cron
     # registrations are idempotent per queue but the nightly rollups and the campaign sender are written
     # against a single consumer, and the send choke point's rate limiting is per process.
+    # `basic-xs` is 1 GB for $10 where `apps-s-1vcpu-1gb` is 1 GB for $12. The queue holds no page cache
+    # and renders nothing, so 1 GB is the right size rather than a compromise.
     instance_count: 1
-    instance_size_slug: apps-s-1vcpu-1gb
+    instance_size_slug: basic-xs
 
     envs:
       - key: APP_ENV
@@ -245,7 +255,11 @@ databases:
     production: true
     cluster_name: berelax-pg
     db_name: berelax
-    db_user: berelax
+    # `doadmin` is the cluster's own superuser, which is what `doctl databases create` gives you. A
+    # dedicated least-privilege role is the better answer and it is a separate decision: pg-boss and
+    # Payload both CREATE their own schemas on first boot (`createSchema: true`, and ADR 0019's
+    # `schemaName`), so the role that runs them needs more than an application role should keep for ever.
+    db_user: doadmin
 
 alerts:
   - rule: DEPLOYMENT_FAILED
