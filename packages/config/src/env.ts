@@ -221,6 +221,23 @@ const schema = z
     PAYMENT_HOSTED_FIELDS_FRAME_ORIGIN: z.string().optional(),
     PAYMENT_HOSTED_FIELDS_SCRIPT_ORIGIN: z.string().optional(),
 
+    /**
+     * The PEM of the database server's certificate authority, when the deployment has one.
+     *
+     * NOT a secret — a CA certificate is public by construction, and `build/secret-inventory.json`
+     * classifies it that way rather than listing it. It is here because the alternative is an ambient
+     * `process.env` read in the one place that needs it, which is what this schema exists to prevent.
+     *
+     * DigitalOcean's managed PostgreSQL signs with its own CA, which is in no default trust store, and
+     * the two drivers in this build disagree about what to do with that: `postgres` reads
+     * `sslmode=require` as libpq defines it (encrypt, do not verify) while `pg`, under pg-boss, verifies
+     * the chain regardless. The worker died at boot with `SELF_SIGNED_CERT_IN_CHAIN` against the same
+     * cluster the web app was serving from. With this set, `jobQueueSsl` in `@berelax/db` verifies
+     * against it, which is the "TLS verify-full" docs/02 §2 asks for; unset, it falls back to what the
+     * connection string asked for and the two drivers agree again.
+     */
+    DATABASE_CA_CERT: z.string().optional(),
+
     SENTRY_DSN: z.string().optional(),
     LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
   })

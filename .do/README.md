@@ -124,12 +124,49 @@ doctl apps create --spec .do/app.staging.yaml
 doctl apps create --spec .do/app.production.yaml
 ```
 
-**One thing will go wrong here if nobody plans for it.** The web image's build needs the database, so the
-**build container** must be able to reach the cluster. If trusted sources are enabled on the cluster and the
-build container is not among them, the build fails at the prerender step with the "no facts to render" error
-from §2 — which looks like a content problem and is a firewall problem. Either keep the app's access open
-while the build runs, or add the build's egress to the cluster's trusted sources, and check which one is
-true for the account before blaming the seed data.
+### Two steps the first deploy needs, and neither is optional
+
+Both were measured on the first live deploy of this app rather than predicted, and both come from one
+platform fact: **App Platform does not interpolate a binding at build time.** A `${db.DATABASE_URL}` or
+`${APP_URL}` scoped to build time arrives as the literal `${...}` text, or as nothing.
+
+**1. A build-time `DATABASE_URL`.** `/` and `/ar` prerender from the database, so `next build` needs a real
+connection string. With the binding it got the nine characters `${db.DATABASE_URL}` and died with *"Failed
+to collect page data for /ar/treatments/[slug]"*. The committed spec therefore scopes the binding to
+`RUN_TIME` and the build gets a secret set on the app:
+
+```sh
+doctl databases connection <cluster-id> --format URI --no-header     # swap /defaultdb for /berelax
+# then add to the app, on the `web` component:
+#   key: DATABASE_URL  scope: RUN_AND_BUILD_TIME  type: SECRET  value: <that URI>
+```
+
+**2. A build-time `SITE_ORIGIN`, before the hostname is given to anybody.** This is the one that matters.
+`SITE_ORIGIN` is read at render time and therefore baked into every prerendered canonical URL. With
+`${APP_URL}` the build saw nothing, fell back to `SITE_ORIGIN_FALLBACK` in `@berelax/shared`, and the
+staging site served `rel="canonical" href="https://berelaxmassage.com/"` — a preview asking Google to index
+production copies of unreviewed pages, which is exactly the harm that fallback's own comment names. So
+immediately after creating a non-production app:
+
+```sh
+doctl apps get <app-id> --format DefaultIngress --no-header
+# set SITE_ORIGIN (scope RUN_AND_BUILD_TIME) to that URL, then redeploy ONCE before linking it anywhere
+```
+
+`pnpm deploy:preflight` refuses a spec that scopes a binding to build time, because that failure is silent
+until a site is already serving the wrong canonical.
+
+**3. Trusted sources.** The build container must be able to reach the cluster. If trusted sources are
+enabled and the build container is not among them, the build fails at the prerender step with the "no facts
+to render" error from §2 — which looks like a content problem and is a firewall problem.
+
+**4. `DATABASE_CA_CERT`, if you want verified TLS.** `doctl databases ca <cluster-id>` prints the cluster's
+CA certificate. Set it as a plain (non-secret) env var on `worker` and `web` and the pg-boss connection
+verifies the chain instead of merely encrypting — the "verify-full" half of docs/02 §2. Without it the
+worker still boots: `jobQueueSsl` falls back to what the connection string asked for. It is NOT optional in
+the other direction, though — pg-boss's driver verifies by default where postgres.js does not, and the
+worker died at boot with `SELF_SIGNED_CERT_IN_CHAIN` against the same cluster the web app was serving
+from.
 
 The database credential is passed into the build as a Docker build argument (`ARG DATABASE_URL`) in the
 **discarded** `deps` stage. The shipped image is the `runtime` stage, whose history contains only its own

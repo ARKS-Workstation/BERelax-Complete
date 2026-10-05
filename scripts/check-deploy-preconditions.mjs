@@ -89,6 +89,38 @@ for (const [index, raw] of specLines.entries()) {
   }
 }
 
+/*
+ * A platform binding (`${db.DATABASE_URL}`, `${APP_URL}`) scoped to BUILD time.
+ *
+ * This rule exists because the failure is silent and expensive. App Platform does not interpolate a
+ * binding at build time: the value arrives as the literal `${...}` text, or as nothing. Measured twice on
+ * the first live deploy — `DATABASE_URL` reached `next build` as the nine characters `${db.DATABASE_URL}`
+ * and the build died collecting page data, and `SITE_ORIGIN=${APP_URL}` quietly fell back to the LIVE
+ * DOMAIN, so the staging site served `rel="canonical" href="https://berelaxmassage.com/"` and asked
+ * Google to index production copies of unreviewed pages. The first failure is loud and costs a build; the
+ * second is silent and costs the thing the site is for.
+ *
+ * So a binding may be `RUN_TIME` and nothing else. A value the BUILD needs has to be a literal in the
+ * spec, or a secret set on the app — and `.do/README.md` makes that a step of creating the app.
+ */
+for (const [index, raw] of specLines.entries()) {
+  if (!/^\s*scope:\s*(?:RUN_AND_)?BUILD_TIME\s*$/.test(raw)) continue
+  // The value belongs to the same entry, so look forward to the next `- key:` and no further.
+  for (let at = index + 1; at < specLines.length; at += 1) {
+    if (/^\s*-\s*key:/.test(specLines[at])) break
+    const value = specLines[at].match(/^\s*value:\s*(.+?)\s*$/)
+    if (value === null) continue
+    if (!/\$\{[^}]+\}/.test(value[1])) break
+    problems.push(
+      `${SPEC}:${at + 1}  [binding-scoped-to-build-time] \`${value[1]}\` is a platform binding scoped ` +
+        'to build time, and App Platform does not interpolate one there — the build gets the literal ' +
+        '`${...}` text or nothing at all. Scope the binding to RUN_TIME and give the build a literal, or ' +
+        'a secret set on the app (.do/README.md §4).',
+    )
+    break
+  }
+}
+
 if (declaredEnvKeys.size === 0) {
   // ADR 0003's floor: if the spec were renamed or its shape changed, every rule above would examine
   // nothing and this check would print a clean result.

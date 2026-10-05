@@ -50,32 +50,35 @@ services:
         scope: RUN_TIME
         value: staging
 
-      # RUN_AND_BUILD_TIME, because the build prerenders `/` and `/ar` from this database. A build-time-only
-      # or run-time-only scope would each break one half.
+      # **Only `RUN_TIME`, and the binding is why.** App Platform does NOT interpolate a database binding
+      # at BUILD time — measured: the build received the literal nine-character string
+      # `${db.DATABASE_URL}` and `next build` died with `Failed to collect page data for
+      # /ar/treatments/[slug]`. Since `/` and `/ar` prerender from the database, the build needs a REAL
+      # url, and it cannot come from this file: a connection string in git is a credential in git.
+      #
+      # So the first deploy of a new app has one manual step, and `.do/README.md` §4 is it: set a
+      # `RUN_AND_BUILD_TIME` `DATABASE_URL` secret on the app with the cluster's own URI, which overrides
+      # this entry. `pnpm deploy:preflight` refuses a spec that tries to do it with a binding instead,
+      # because that failure is silent until a build is already running.
       - key: DATABASE_URL
-        scope: RUN_AND_BUILD_TIME
+        scope: RUN_TIME
         value: ${db.DATABASE_URL}
 
-      # PAYLOAD_SECRET is NOT in this file, and neither is any other secret. `.do/README.md` §4 is the list
-      # and the command. The reason is one line of brief rule 15: a placeholder in a committed spec is
-      # indistinguishable from a configured value, and this particular one would be worse than useless —
-      # `assertPayloadSecretConfigured()` refuses an EMPTY secret, so a placeholder somebody pasted would
-      # boot the admin and sign every session token with a value that is in a public repository.
+      # The origin every canonical URL and hreflang alternate is built from, read at RENDER time and
+      # therefore at BUILD time for the statically rendered routes.
       #
-      # Read that README before running `doctl apps update --spec`: an app spec is DECLARATIVE, so applying
-      # a spec that omits a secret REMOVES it from the app.
-
-      # The origin every canonical URL and hreflang alternate is built from. It is read at RENDER time and
-      # therefore at BUILD time for the statically rendered routes, which is why this is the one key besides
-      # the database that has to be RUN_AND_BUILD_TIME: a staging build that did not set it would fall back
-      # to the live domain (`SITE_ORIGIN_FALLBACK` in `@berelax/shared`) and ask Google to index production
-      # copies of unreviewed pages.
+      # **`${APP_URL}` cannot do this job, and the failure is the dangerous one.** A platform binding is
+      # not interpolated at build time, so the build saw no value, fell back to `SITE_ORIGIN_FALLBACK` in
+      # `@berelax/shared`, and the staging site served `rel="canonical" href="https://berelaxmassage.com/"`
+      # — a preview asking Google to index production copies of unreviewed pages, which is the exact harm
+      # that fallback's own comment names. Measured on the first live deploy.
       #
-      # `${APP_URL}` is App Platform's own binding for this app's assigned hostname, so staging gets its
-      # real origin without anybody writing a guess here — and without a value that goes stale when the app
-      # is recreated.
+      # The assigned hostname is not knowable before the app exists, so it cannot be a literal here
+      # either. `.do/README.md` §3 makes setting it a STEP of creating the app rather than a thing to
+      # remember: a `RUN_AND_BUILD_TIME` `SITE_ORIGIN` of the app's own URL, then one redeploy, before the
+      # hostname is given to anybody. `RUN_TIME` alone is not enough, because the pages are prerendered.
       - key: SITE_ORIGIN
-        scope: RUN_AND_BUILD_TIME
+        scope: RUN_TIME
         value: ${APP_URL}
 
       - key: BUSINESS_TIMEZONE

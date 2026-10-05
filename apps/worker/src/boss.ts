@@ -28,12 +28,21 @@ export { PGBOSS_SCHEMA }
 export const DRAIN_DEADLINE_MS = 25_000
 
 export interface BossOptions {
-  readonly config: Pick<Config, 'DATABASE_URL'>
+  readonly config: Pick<Config, 'DATABASE_URL' | 'DATABASE_CA_CERT'>
   readonly max?: number
 }
 
 export function createBoss(options: BossOptions): PgBoss {
-  return createJobQueue({ connectionString: options.config.DATABASE_URL, max: options.max ?? 4 })
+  const ca = options.config.DATABASE_CA_CERT
+  return createJobQueue({
+    connectionString: options.config.DATABASE_URL,
+    max: options.max ?? 4,
+    // Verified TLS when the deployment has supplied its cluster's CA, and what the connection string
+    // asked for when it has not. `jobQueueSsl` carries the measured reason the two drivers differ.
+    // Spread rather than `caCertificate: ca`, because `exactOptionalPropertyTypes` distinguishes an
+    // absent property from one present and undefined, and the option genuinely means absent.
+    ...(ca === undefined ? {} : { caCertificate: ca }),
+  })
 }
 
 /**

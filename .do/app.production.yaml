@@ -69,22 +69,26 @@ services:
         scope: RUN_TIME
         value: production
 
-      # RUN_AND_BUILD_TIME, because the build prerenders `/` and `/ar` from the `premises` row, the
-      # catalogue and the roster. That is what makes the production database a BUILD dependency here, and
-      # `.do/README.md` §3 covers the trusted-sources consequence: a build container that cannot reach the
-      # cluster fails the deploy at the prerender step with "The home page has no facts to render".
+      # **Only `RUN_TIME`, and the binding is why.** App Platform does NOT interpolate a database binding
+      # at BUILD time — measured: the build received the literal nine-character string
+      # `${db.DATABASE_URL}` and `next build` died with `Failed to collect page data for
+      # /ar/treatments/[slug]`. Since `/` and `/ar` prerender from the database, the build needs a REAL
+      # url, and it cannot come from this file: a connection string in git is a credential in git.
       #
-      # The ARG it feeds lives in the Dockerfile's discarded `deps` stage, so this credential is not in the
-      # shipped image's history. The `container` job in CI asserts that rather than asserting it here.
+      # So the first deploy of a new app has one manual step, and `.do/README.md` §4 is it: set a
+      # `RUN_AND_BUILD_TIME` `DATABASE_URL` secret on the app with the cluster's own URI, which overrides
+      # this entry. `pnpm deploy:preflight` refuses a spec that tries to do it with a binding instead,
+      # because that failure is silent until a build is already running.
       - key: DATABASE_URL
-        scope: RUN_AND_BUILD_TIME
+        scope: RUN_TIME
         value: ${db.DATABASE_URL}
 
-      # Read at RENDER time and therefore at BUILD time for the statically rendered routes — the second key
-      # after the database that has to be RUN_AND_BUILD_TIME. The value is `SITE_ORIGIN_FALLBACK` in
-      # `@berelax/shared` written out rather than left to the fallback: it is the live domain this relaunch
-      # takes over (docs/13 §5), and a canonical URL is not a thing to leave to a default. When Cloudflare
-      # is in front, this stays the customer-facing name and NOT the `*.ondigitalocean.app` origin behind it.
+      # Read at RENDER time and therefore at BUILD time for the statically rendered routes, which is why
+      # this one IS `RUN_AND_BUILD_TIME` where the database is not: it is a literal, so it interpolates.
+      # The value is `SITE_ORIGIN_FALLBACK` in `@berelax/shared` written out rather than left to the
+      # fallback — it is the live domain this relaunch takes over (docs/13 §5), and a canonical URL is not
+      # a thing to leave to a default. With Cloudflare in front this stays the customer-facing name and
+      # NOT the `*.ondigitalocean.app` origin behind it.
       - key: SITE_ORIGIN
         scope: RUN_AND_BUILD_TIME
         value: https://berelaxmassage.com
