@@ -28,6 +28,15 @@ describe('pgDriverConnectionString', () => {
     expect(out).not.toContain('no-verify')
   })
 
+  it('hands back a value it cannot parse, rather than throwing over it', () => {
+    // `payload.config.ts` passes `process.env['DATABASE_URL'] ?? ''`, so an unset variable arrives as the
+    // empty string. `new URL('')` throws, which turned a clear "DATABASE_URL is required" refusal into a
+    // TypeError from a TLS helper. The callers downstream already say the useful thing.
+    expect(pgDriverConnectionString('')).toBe('')
+    expect(pgDriverConnectionString('not-a-url')).toBe('not-a-url')
+    expect(pgDriverConnectionString('', '/run/ca.pem')).toBe('')
+  })
+
   it('leaves a connection string that asked for no TLS exactly as it is', () => {
     // Local development and the integration suite. Forcing a mode here would attempt a handshake against
     // a cluster that has none, so the string comes back unchanged rather than normalised.

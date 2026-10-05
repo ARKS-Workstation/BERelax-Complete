@@ -25,10 +25,17 @@
  *    the shell history and in the process list of every other process on the box;
  *  - it prints the email and the role and never the password.
  *
+ * ## Why it lives in `apps/web/scripts/` and not in `scripts/`
+ *
+ * It was in `scripts/` first and could not run: `payload` is a dependency of `apps/web`, and Node resolves
+ * a bare import from the importing FILE's location rather than the working directory, so a root script
+ * cannot see it under pnpm's isolated layout. Running it with `--filter @berelax/web` changes the cwd and
+ * not the resolution, which is the part that was wrong.
+ *
  * Usage: `CMS_USER_PASSWORD=… pnpm cms:user --email someone@example.com [--role owner]`
  */
 import { getPayload } from 'payload'
-import config from '../apps/web/payload.config.ts'
+import config from '../payload.config.ts'
 
 const flag = (name) => {
   const at = process.argv.indexOf(`--${name}`)

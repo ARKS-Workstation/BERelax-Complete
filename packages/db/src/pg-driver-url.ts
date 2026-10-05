@@ -34,7 +34,21 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 export function pgDriverConnectionString(connectionString: string, caPath?: string): string {
-  const url = new URL(connectionString)
+  /*
+   * An unparseable value is handed back untouched, and that is not defensive padding — it was a real
+   * crash. `payload.config.ts` passes `process.env['DATABASE_URL'] ?? ''`, so an unset variable arrives
+   * here as the empty string and `new URL('')` throws `TypeError: Invalid URL`, which replaced a clear
+   * refusal with a stack trace from a TLS helper. Nothing here can improve on the error the caller
+   * already has: `createConnection` in `@berelax/db` says "DATABASE_URL is required to create a
+   * connection", and `pg` says what it cannot parse. This function's job is TLS, so a string it cannot
+   * read is one it has nothing to say about.
+   */
+  let url: URL
+  try {
+    url = new URL(connectionString)
+  } catch {
+    return connectionString
+  }
   const mode = url.searchParams.get('sslmode')
   if (mode === null || mode === 'disable') return connectionString
   if (caPath !== undefined && caPath.length > 0) {
