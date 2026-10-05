@@ -1,8 +1,8 @@
-import type { Config } from '@berelax/config'
-import { createJobQueue, PGBOSS_SCHEMA } from '@berelax/db'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { Config } from '@berelax/config'
+import { createJobQueue, PGBOSS_SCHEMA } from '@berelax/db'
 import type { PgBoss } from 'pg-boss'
 
 /**
