@@ -170,6 +170,23 @@ export default buildConfig({
      * against that certificate; without it, for exactly what the connection string asked for.
      */
     pool: {
+      /*
+       * `max: 2`, where this pool had NO cap at all.
+       *
+       * It was the one pool in this build without one — `facts/runtime.ts` takes 2, `session.ts` and
+       * `security/rate-limit.ts` take 1 each, and `ConnectionOptions` in `@berelax/db` says why: "Keep
+       * small: PgBouncer multiplexes, and DO Managed Postgres has a hard connection ceiling." Payload
+       * inherited node-postgres's default of 10.
+       *
+       * Measured, on a deployment: `next build` loads this config in each of its page workers, and the
+       * prerender of `/about` — the first route that reads CMS content — died with `remaining connection
+       * slots are reserved for roles with the SUPERUSER attribute`. Ten per worker against a cluster whose
+       * ceiling is around twenty, while the running worker and the previous web instance held theirs.
+       *
+       * Two is enough for an admin that serves one editor at a time, and it is the number the rest of this
+       * application already uses for the same reason.
+       */
+      max: 2,
       connectionString: pgDriverConnectionString(
         process.env['DATABASE_URL'] ?? '',
         writeCaCertificateFile(process.env['DATABASE_CA_CERT']),
