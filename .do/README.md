@@ -75,8 +75,38 @@ Then migrate and load content, from a machine that can reach the cluster:
 ```sh
 export DATABASE_URL="$(doctl databases connection <cluster-id> --format URI --no-header)"
 export APP_ENV=production
-pnpm db:apply          # scripts/apply-migrations.mjs — hand-written, numbered, one transaction each
+pnpm db:apply            # from NOTHING: scripts/apply-migrations.mjs, hand-written, numbered
+pnpm db:deploy --adopt   # then record what it just did, so the next deploy can resume
 ```
+
+### Two migration tools, and which one a deploy uses
+
+`pnpm db:apply` takes an **empty** schema to the current one and refuses anything else. That contract is
+deliberate (its header explains why: the migrations are not idempotent, and an early attempt to tolerate a
+second run half-applied `0011` and reported it as a skip) and it is exactly right for CI, which creates the
+database in a service container.
+
+It is useless for a deployment, and that was measured rather than argued: the `migrate` job ran
+`pnpm db:apply` against the staging cluster, applied 134 migrations, and failed on the next deploy with
+*"berelax already holds 222 table(s)"*. A deployment that cannot apply migration 135 is not a deployment.
+
+So the job runs **`pnpm db:deploy`**, which keeps a `schema_migration(filename, checksum, applied_at)`
+ledger and:
+
+- applies only the files that are not yet rows, in order, in one psql session behind an advisory lock —
+  one session because a lock taken in a session that exits is a lock nobody holds;
+- is a no-op when there is nothing pending, which is what makes it safe as a step on every deploy;
+- **refuses a migration edited after it was applied**, by checksum. That failure is the quiet one: every
+  database that already ran it has the old shape, every new one gets the new shape, and nothing in a schema
+  dump says which;
+- refuses a database that is ahead of the checkout, which would be a downgrade;
+- refuses to run against a populated schema with no ledger, and names `--adopt`, which records every
+  migration on disk as applied **without running any of them**. That is the one-off step for a database
+  brought up by `db:apply`, and it refuses an empty schema because adopting one would skip every migration
+  for ever.
+
+It does not wrap the migrations: 109 of the 134 carry their own `BEGIN;`/`COMMIT;`, and nesting would turn
+each one's COMMIT into a warning.
 
 What loads the content is **not** `pnpm seed`. Seeding is a fixture estate for tests. The real path is the
 migration workstream: `docs/runbooks/cutover.md` and `scripts/cutover.mjs` are the eleven declared steps,

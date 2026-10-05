@@ -192,7 +192,14 @@ jobs:
       deploy_on_push: false
     instance_count: 1
     instance_size_slug: apps-s-1vcpu-1gb
-    run_command: pnpm db:apply
+    # `pnpm db:deploy` and NOT `pnpm db:apply`. The two are different tools with different contracts:
+    # `db:apply` takes an EMPTY schema to the current one and refuses anything else, which is right for CI
+    # and useless for a deployment — measured here, on the first real deploy, which applied 134 migrations
+    # and then failed the next time with "already holds 222 table(s)". `db:deploy` keeps a
+    # `schema_migration` ledger, applies only what is pending, refuses a migration edited after it was
+    # applied, and is a no-op when there is nothing to do. A database brought up by `db:apply` needs
+    # `pnpm db:deploy --adopt` once before its first deploy; `.do/README.md` §2 has that step.
+    run_command: pnpm db:deploy
     envs:
       - key: APP_ENV
         scope: RUN_TIME

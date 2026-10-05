@@ -97,7 +97,8 @@
     "redirects": "tsx scripts/check-redirect-coverage.mjs",
     "redirects:import": "tsx scripts/import-crawl-baseline.mjs",
     "coverage:core": "vitest run -c vitest.core-coverage.config.ts --coverage.enabled",
-    "deploy:preflight": "node scripts/check-deploy-preconditions.mjs"
+    "deploy:preflight": "node scripts/check-deploy-preconditions.mjs",
+    "db:deploy": "node scripts/deploy-migrate.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
