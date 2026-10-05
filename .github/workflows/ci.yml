@@ -288,6 +288,14 @@ jobs:
       - name: Unit tests and coverage thresholds
         run: pnpm coverage
 
+      # And the same suites again over `packages/core` alone. Not redundant: the strict floors on the
+      # ledger, money and tax modules are measured differently in a whole-repo run — v8 attributes a line
+      # to whichever test file loaded the module first — so `money.ts` reads 55/55 scoped and 45/55
+      # aggregated. `vitest.core-coverage.config.ts` carries the floors that actually hold the domain to
+      # account, and it has to be its own run to be meaningful.
+      - name: Coverage floors over the domain core
+        run: pnpm coverage:core
+
       # The integration suite needs a MIGRATED database, and nothing here was giving it one: the service
       # container creates `berelax_test` empty, and `pnpm db:migrate:dry` below runs afterwards into a
       # throwaway database it then drops. Every integration file would have failed on an empty schema.

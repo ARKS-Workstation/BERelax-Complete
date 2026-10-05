@@ -95,6 +95,15 @@
       "licenceTextInImage": "/usr/share/common-licenses/LGPL-3",
       "reason": "The image pipeline W-SYS-05 is built on, reaching this image inside sharp's prebuilt platform package rather than as an OS package. It is declared here as well as in build/licence-policy.json because the licence gate can see the npm package and cannot see whether the IMAGE carries the notice — and the notice is the whole obligation. H-HARD-02 wrote that duty down and said it lands on the unit that writes this Dockerfile.",
       "obligation": "The image must carry libvips' LGPL text (asserted at /usr/share/common-licenses/LGPL-3, with /usr/share/common-licenses/GPL-3 because LGPL-3.0 incorporates GPL-3.0 by reference) and must honour the offer to supply the library's complete corresponding source or to permit its replacement. The library is a shared object loaded at runtime, unmodified and not statically linked into anything here, so LGPL §4's combined-work terms are satisfied by the shared-library mechanism already in place. Found while discharging this: the @img/sharp-libvips-linux-x64 package ships NO copy of the LGPL text — its contents are README.md, package.json, versions.json and lib/ — so an image built by copying node_modules carries the library and not its licence, and nothing in pnpm install, pnpm licences or a code review would have said so. Debian's own copy is used and its presence is asserted in the build."
+    },
+    {
+      "component": "postgresql-client",
+      "installedBy": "apt",
+      "dockerfile": "apps/worker/Dockerfile",
+      "licence": "PostgreSQL",
+      "disposition": "permissive",
+      "reason": "`psql`, which `scripts/apply-migrations.mjs` uses to apply each numbered migration with ON_ERROR_STOP=1 — hand-written SQL per ADR 0006, so there is no ORM migration runner to stand in for it. The worker image is what the `migrate` PRE_DEPLOY job in `.do/app.staging.yaml` and `.do/app.production.yaml` runs, so without this package a deployment applies no schema at all. Measured rather than argued: the first real deploy built the image and the job died with `spawnSync psql ENOENT`.",
+      "notInLicencePolicy": "build/licence-policy.json reads pnpm-lock.yaml and classifies npm packages; an operating-system package is not in that graph. So this component is governed here, by pnpm container."
     }
   ],
   "imageVulnerabilityScanning": {

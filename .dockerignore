@@ -29,6 +29,11 @@ test-results
 coverage
 *.tsbuildinfo
 
+# Heavy test and build traces. Nothing in an image is built from them, and a local `docker build` would
+# otherwise copy gigabytes of them into the context before the first layer.
+logs
+**/logs
+
 # Git history, worktrees and editor state. `.claude/worktrees` is a parallel checkout of this same
 # repository — copying it would put every other agent's work in progress into the image.
 .git

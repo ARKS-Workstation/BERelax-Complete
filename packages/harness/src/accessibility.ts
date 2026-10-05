@@ -77,22 +77,29 @@ interface RawAxeResults {
 /** Runs axe against an already-rendered page. */
 export async function auditPage(page: Page, target: CaptureTarget): Promise<AccessibilityResult> {
   /*
-   * `addInitScript` and not `addScriptTag`, and the reason is H-HARD-01.
+   * `evaluate` and not `addScriptTag`, and the reason is H-HARD-01.
    *
-   * That unit gave the admin and public estates a NONCE content-security policy, which is exactly what
-   * it should do — and a nonce policy refuses an inline script, which is what `addScriptTag({content})`
-   * injects. At the integrating verify it failed 22 audits across every browser suite with
-   * `Refused to execute inline script`, and the policy was right each time.
+   * That unit gave the admin and public estates a NONCE content-security policy, which is exactly what it
+   * should do — and a nonce policy refuses an inline script, which is what `addScriptTag({content})`
+   * injects. At the integrating verify it failed 22 audits across every browser suite with `Refused to
+   * execute inline script`, and the policy was right each time.
    *
-   * `addInitScript` is delivered through the devtools protocol before the document's own scripts run, so
-   * it is not subject to the page's CSP — the mechanism Playwright documents for this. The page is then
-   * reloaded so the injection takes effect on a document that is already open, and the audit runs
-   * against the same bytes a visitor gets. The alternative, a context with `bypassCSP`, would have the
-   * browser ignore the policy for every suite that audits anything, which is a strictly larger change
-   * and would hide a real CSP regression from every one of them.
+   * `evaluate` runs the bundle through the devtools protocol in the page's main world, which is not
+   * subject to the document's `script-src` — the same mechanism as `addInitScript` and without its one
+   * fatal requirement. **That requirement is what this comment is really about.** `addInitScript` only
+   * takes effect on the NEXT navigation, so injecting it into an open document meant reloading the page —
+   * and a reload DISCARDS a document that was put there with `setContent`. Every known-bad fixture in
+   * `scripts/test-gates.mjs` is a `setContent` fragment, so the a11y gate's three gate tests audited a
+   * blank document instead: the button with no accessible name was not there to find, and what came back
+   * was `[document-title]` and `[html-has-lang]` on an empty page. The gate reported violations, so it
+   * looked like it was working. ADR 0002's failure exactly — and it was found by its own known-bad
+   * fixtures, which is ADR 0003 paying for itself.
+   *
+   * The alternative, a context with `bypassCSP`, would have the browser ignore the policy for every suite
+   * that audits anything, which is a strictly larger change and would hide a real CSP regression from
+   * every one of them.
    */
-  await page.addInitScript({ content: axeBundle() })
-  await page.reload({ waitUntil: 'load' })
+  await page.evaluate(axeBundle())
   const raw = (await page.evaluate(async (tags: readonly string[]) => {
     const globals = globalThis as unknown as {
       axe: { run(context: unknown, options: unknown): Promise<unknown> }

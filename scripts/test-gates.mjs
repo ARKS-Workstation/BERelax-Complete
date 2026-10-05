@@ -5543,9 +5543,19 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       'leave_request_decision_has_an_instant',
     )
 
+    /*
+     * `('15', '19')` and not `('15', '20')`, which is what this was.
+     *
+     * `staffSpan` builds UTC hours and trading runs to 02:00 Asia/Dubai, so a period ending at 20:00Z ends
+     * exactly at Dubai midnight — and P-HR's `assert_leave_period_is_not_calendar_bounded()` refuses a
+     * calendar-bounded leave day before the overlap constraint is ever consulted. The probe was rejected,
+     * by the wrong rule, which is why it read as a failure rather than as a pass: `checkRejectedBy` holds
+     * the refusal to its NAME. 19:00Z is 23:00 Dubai — inside the session, still overlapping 12–18, and
+     * the overlap exclusion is the only thing left to refuse it.
+     */
     checkRejectedBy(
       'staff gate rejects two overlapping approved leaves for one employee',
-      staffProbe([approvedLeave('12', '18'), approvedLeave('15', '20')].join('; ')),
+      staffProbe([approvedLeave('12', '18'), approvedLeave('15', '19')].join('; ')),
       'leave_request_no_overlapping_approved',
     )
 
@@ -9399,6 +9409,15 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   const BUSINESS = `${CORE}/business.ts`
   const GRAPH = `${CORE}/graph.ts`
   const CONTENT = `${CORE}/content.ts`
+  /*
+   * The publishing guard is HERE and not in `content.ts`, which is where this block used to neuter it.
+   * `therapistPublishingRefusals` was extracted to `packages/core/src/seo/therapist-publishable.ts`, and
+   * the extraction left the fixture's anchor behind: the block threw "the consent guard is no longer in
+   * packages/core/src/seo/jsonld/content.ts" and took the whole gate suite down with it — which is the
+   * right failure, loudly, and is why the anchor is a thrown error rather than a silent no-op.
+   * `content.ts` still calls the function, so `content.test.ts` is still the suite that fails.
+   */
+  const PUBLISHABLE = 'packages/core/src/seo/therapist-publishable.ts'
   const OFFERINGS = `${CORE}/offerings.ts`
   const VOCABULARY = `${CORE}/vocabulary.ts`
   const suite = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
@@ -9650,11 +9669,11 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   //      — worse for SEO than having none", with the added property that a machine would repeat it.
   {
     const result = withEditedFile(
-      CONTENT,
+      PUBLISHABLE,
       (original) => {
         const anchor = '  if (candidate.photographyConsentRecordedAt === null) refusals.push('
         if (!original.includes(anchor))
-          throw new Error(`the consent guard is no longer in ${CONTENT}`)
+          throw new Error(`the consent guard is no longer in ${PUBLISHABLE}`)
         return original.replace(anchor, '  if (false) refusals.push(')
       },
       () => runExpectingFailure('pnpm', suite(`${CORE}/content.test.ts`)),
@@ -67045,6 +67064,11 @@ export function chargebackNetEffectFils(`,
     // Registered because that is what makes dropping it from CI a failing build rather than the silent
     // loss of the one check that re-derives those four claims over every row the database holds.
     'pnpm domain-invariants',
+    // H-MIG-09's migration driver, declared CI-only in `scripts/check-gate-registry.mjs` because it
+    // creates and drops a database of its own. Registered here because the completeness check runs in
+    // BOTH directions: the workflow invoked it and this list did not know about it, which is the half
+    // that catches a step somebody added to CI and nobody registered.
+    'pnpm dry-run:ci',
     'pnpm db:migrate:dry',
     'pnpm db:drift',
     'pnpm db:conventions',

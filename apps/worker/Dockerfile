@@ -55,8 +55,15 @@ RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 # their obligation, and `apps/worker/licences/THIRD-PARTY-NOTICES.md` carries the notice and the offer.
 # Only ffmpeg: the official Node image already carries ca-certificates, and every package named here is a
 # component this image conveys and therefore a reviewed decision with a licence attached.
+#
+# `postgresql-client` for the second reason: `scripts/apply-migrations.mjs` applies each numbered migration
+# by handing the file to `psql` with `ON_ERROR_STOP=1`, and `pnpm db:apply` is the `PRE_DEPLOY` job in
+# `.do/*.yaml` — so without it the deployment's migration step is `spawnSync psql ENOENT` and no schema is
+# ever applied. Found exactly that way, on the first real deploy: the image built, the job died with a
+# circular spawn error naming no command. It is PostgreSQL-licensed and permissive, so unlike the two above
+# it conveys no obligation beyond its notice, and `build/container-policy.json` records it that way.
 RUN apt-get update \
- && apt-get install --yes --no-install-recommends ffmpeg \
+ && apt-get install --yes --no-install-recommends ffmpeg postgresql-client \
  && rm -rf /var/lib/apt/lists/*
 
 # The licence texts the two copyleft components in this image oblige it to carry, asserted rather than
