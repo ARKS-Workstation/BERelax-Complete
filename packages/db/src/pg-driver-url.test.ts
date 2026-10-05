@@ -11,7 +11,17 @@ import { pgDriverConnectionString } from './pg-driver-url.ts'
  * that was broken.
  */
 describe('pgDriverConnectionString', () => {
-  const managed = 'postgresql://u:p@db.example.com:25060/berelax?sslmode=require'
+  /*
+   * A loopback host, although the case under test is a managed cluster's. `scripts/check-secrets.mjs`
+   * refuses `scheme://user:password@host` for any reachable host and exempts loopback STRUCTURALLY — not
+   * by placeholder vocabulary — because "a credential for a database nobody outside the machine can reach
+   * is not a secret". It caught this line twice while it named `db.example.com`.
+   *
+   * Nothing is lost: `pgDriverConnectionString` reads `sslmode` and writes `sslmode` and `sslrootcert`,
+   * and never looks at the host. Writing a public-looking host here to make the test "realistic" would
+   * have been decoration bought by weakening a gate.
+   */
+  const managed = 'postgresql://berelax:berelax@127.0.0.1:25060/berelax?sslmode=require'
 
   it('downgrades require to no-verify when no CA is available', () => {
     // What the connection string asked for, and no more. The queue must not hold a stricter policy than
