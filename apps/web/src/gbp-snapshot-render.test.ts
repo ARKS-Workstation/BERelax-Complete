@@ -1,4 +1,5 @@
 import type { GbpConsistencyFinding } from '@berelax/core'
+import { adminMain } from '@berelax/fixtures'
 import { describe, expect, it } from 'vitest'
 import { snapshotFromForm } from '../app/(admin)/agents/seo/gbp-snapshot/handler.ts'
 import { renderGbpSnapshotHtml } from '../app/(admin)/agents/seo/gbp-snapshot/render.ts'
@@ -110,7 +111,9 @@ describe('the Google profile snapshot screen', () => {
     // typeable passed it.
     expect(inputs(refused).length).toBeGreaterThan(1)
     for (const input of inputs(refused)) expect(input, input).toContain('disabled')
-    expect(refused).not.toContain('<button type="submit">')
+    // Scoped to the screen's own markup: the claim is about what this SCREEN offers, and the shell's
+    // topbar carries a sign-out control that is not a way to do any of these things.
+    expect(adminMain(refused)).not.toContain('<button type="submit">')
     expect(refused).toContain('read-only')
 
     // The control: the permitted render offers the button and disables nothing, or the assertions above

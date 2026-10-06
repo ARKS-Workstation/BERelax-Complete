@@ -1,6 +1,7 @@
 import { safeText } from '@berelax/core'
 import type { PipelineBoard, PipelineCard, PipelineColumn } from '@berelax/db'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   type AdminChrome,
@@ -520,9 +521,15 @@ export function renderPipelineHtml(view: PipelineView): string {
     // brand appears, and an internal board naming it would be citing the wrong entity. The rule is about
     // how the brand is written, so not writing it is compliant.
     '<title>Pipeline board — admin</title>',
-    `<style>${tokensCss()}${PIPELINE_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${PIPELINE_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Pipeline',
+      path: '/crm/pipeline',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>Pipeline</h1>',
@@ -543,6 +550,7 @@ export function renderPipelineHtml(view: PipelineView): string {
     moveForm(view),
     '</main>',
     inlineScriptTag(view.chrome.cspNonce, PIPELINE_SCRIPT),
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('\n')

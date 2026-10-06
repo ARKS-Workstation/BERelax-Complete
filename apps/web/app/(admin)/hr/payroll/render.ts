@@ -1,5 +1,6 @@
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   type AdminChrome,
@@ -210,9 +211,15 @@ export function renderPayrollHtml(view: PayrollPageView): string {
     // No brand in the title: docs/09's "brand collision" forbids the bare brand in any title, and
     // `apps/web/src/seo/brand.test.ts` scans every title-bearing line in `apps/web` for it.
     '<title>Payroll — HR admin</title>',
-    `<style>${tokensCss()}${PAYROLL_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${PAYROLL_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Payroll',
+      path: '/hr/payroll',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>Payroll</h1>',
@@ -298,6 +305,7 @@ export function renderPayrollHtml(view: PayrollPageView): string {
           )
           .join('')}</ul>`,
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('')

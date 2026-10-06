@@ -12,6 +12,7 @@ import {
 } from '@berelax/core'
 import { escapeHtml, renderTestingExpiry, type TestingExpiryView } from '@berelax/google'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   type AdminChrome,
@@ -442,9 +443,15 @@ export function renderIntegrationsPage(view: IntegrationsView): string {
     // something it does not mean. The compliance calendar and the template editor title themselves the
     // same way; the Messages inbox is exempt instead, which is the arrangement this avoids extending.
     '<title>Integrations — admin</title>',
-    `<style>${tokensCss()}${CARD_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${CARD_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Integrations',
+      path: '/settings/integrations',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>Integrations</h1>',
@@ -459,6 +466,7 @@ export function renderIntegrationsPage(view: IntegrationsView): string {
     body,
     '</div>',
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('')

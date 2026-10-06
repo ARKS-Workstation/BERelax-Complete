@@ -38,6 +38,7 @@ import {
 } from '@berelax/messaging'
 import type { MessagingControlKey } from '@berelax/shared'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   type AdminChrome,
@@ -233,9 +234,15 @@ export function renderControlsHtml(view: ControlsView): string {
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     '<meta name="robots" content="noindex, nofollow, noarchive">',
     '<title>Promotional controls — messaging admin</title>',
-    `<style>${tokensCss()}${ADMIN_BANNER_CSS}${CONTROLS_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${ADMIN_BANNER_CSS}${CONTROLS_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Controls',
+      path: '/messaging/controls',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>Promotional controls</h1>',
@@ -256,6 +263,7 @@ export function renderControlsHtml(view: ControlsView): string {
       .map((control) => `<li>${controlArticle(control, view.mayToggle)}</li>`)
       .join('')}</ol>`,
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('')

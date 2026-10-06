@@ -1,6 +1,7 @@
 import { safeText } from '@berelax/core'
 import type { GbpSnapshotFormField } from '@berelax/google'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   type AdminChrome,
   GOOGLE_REAUTH_BANNER_CSS,
@@ -162,9 +163,15 @@ export function renderGbpSnapshotHtml(
     // No brand in the title: docs/09's brand-collision rule forbids the bare brand in any title, and
     // `apps/web/src/seo/brand.test.ts` scans every title-bearing line in `apps/web` for it.
     '<title>Google profile snapshot — agents admin</title>',
-    `<style>${tokensCss()}${SNAPSHOT_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${SNAPSHOT_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Gbp snapshot',
+      path: '/agents/seo/gbp-snapshot',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>Google profile snapshot</h1>',
@@ -214,6 +221,7 @@ export function renderGbpSnapshotHtml(
           '</form>',
         ].join(''),
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('\n')

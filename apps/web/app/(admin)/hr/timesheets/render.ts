@@ -1,5 +1,6 @@
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   type AdminChrome,
@@ -265,9 +266,15 @@ export function renderTimesheetsHtml(view: TimesheetPageView): string {
     // No brand in the title: docs/09's "brand collision" forbids the bare brand in any title, and
     // `apps/web/src/seo/brand.test.ts` scans every title-bearing line in `apps/web` for it.
     '<title>Timesheets — HR admin</title>',
-    `<style>${tokensCss()}${TIMESHEET_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${TIMESHEET_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Timesheets',
+      path: '/hr/timesheets',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>Timesheets</h1>',
@@ -324,6 +331,7 @@ export function renderTimesheetsHtml(view: TimesheetPageView): string {
       'ATTENDED rather than what was rostered — so the two differ every period somebody is ill, late or ' +
       'asked to stay. Nothing on this page is money: payroll is P-HR-12’s.</p>',
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('')

@@ -1,5 +1,6 @@
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   type AdminChrome,
@@ -223,9 +224,15 @@ export function renderReviewsPasteHtml(
     // No brand in the title: docs/09's brand-collision rule forbids the bare brand in any title, and
     // `apps/web/src/seo/brand.test.ts` scans every title-bearing line in `apps/web` for it.
     '<title>Paste a review — reviews admin</title>',
-    `<style>${tokensCss()}${PASTE_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${PASTE_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Paste',
+      path: '/reviews/paste',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>Paste a review</h1>',
@@ -273,6 +280,7 @@ export function renderReviewsPasteHtml(
     '<h2>Forwarded messages nothing could read</h2>',
     queue(view),
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('')

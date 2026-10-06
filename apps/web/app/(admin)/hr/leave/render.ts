@@ -1,5 +1,6 @@
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   type AdminChrome,
@@ -103,9 +104,15 @@ export function renderLeaveFilingHtml(view: LeaveFilingPageView): string {
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     '<meta name="robots" content="noindex, nofollow, noarchive">',
     '<title>File leave — HR admin</title>',
-    `<style>${tokensCss()}${FILING_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${FILING_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Leave',
+      path: '/hr/leave',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>File leave for a member of staff</h1>',
@@ -156,6 +163,7 @@ export function renderLeaveFilingHtml(view: LeaveFilingPageView): string {
           '</form>',
         ].join(''),
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('')

@@ -9,6 +9,7 @@ import {
   MESSAGE_CLASSES,
 } from '@berelax/shared'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   type AdminChrome,
@@ -624,9 +625,15 @@ export function renderFlowBuilderHtml(view: BuilderView): string {
     '<meta name="robots" content="noindex, nofollow, noarchive">',
     // No brand in the title: docs/09's brand-collision rule, scanned by `apps/web/src/seo/brand.test.ts`.
     '<title>Journey builder — CRM admin</title>',
-    `<style>${tokensCss()}${ADMIN_BANNER_CSS}${BUILDER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${ADMIN_BANNER_CSS}${BUILDER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Builder',
+      path: '/crm/flows/builder',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     `<h1>Journey builder: <code>${safeText(view.flowKey)}</code></h1>`,
@@ -668,6 +675,7 @@ export function renderFlowBuilderHtml(view: BuilderView): string {
         'are a property of a valid document.</p>'
       : `<pre data-canonical>${safeText(view.canonical)}</pre>`,
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('')

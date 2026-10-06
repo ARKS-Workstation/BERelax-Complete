@@ -1,3 +1,4 @@
+import { adminMain } from '@berelax/fixtures'
 import { describe, expect, it } from 'vitest'
 import {
   type RotaObservanceView,
@@ -139,7 +140,9 @@ describe('the rota document', () => {
     expect(html).toContain('satisfies every rule and can be published')
     // READ-ONLY: no form, no button, no method that is not GET. Publishing is a write with an actor and
     // there is no admin session until W-SYS-01.
-    expect(html).not.toMatch(/<form|<button|method=/i)
+    // Scoped to the screen's own markup: the claim is about what this SCREEN offers, and the shell's
+    // topbar carries a sign-out control that is not a way to do any of these things.
+    expect(adminMain(html)).not.toMatch(/<form|<button|method=/i)
   })
 
   it('prints the forecast and the unpriced count in the same document', () => {

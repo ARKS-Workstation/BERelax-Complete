@@ -1,5 +1,6 @@
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import { KPI_TILE_CSS, renderKpiTile } from '@berelax/ui/reporting'
 import {
   ADMIN_BANNER_CSS,
@@ -177,9 +178,15 @@ export function renderDashboardHtml(view: DashboardView): string {
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     '<meta name="robots" content="noindex, nofollow, noarchive">',
     '<title>Reports — admin</title>',
-    `<style>${tokensCss()}${CSS}${KPI_TILE_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${CSS}${KPI_TILE_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Reports',
+      path: '/reports',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     `<div data-dashboard="${safeText(view.dashboard)}" data-scope="${safeText(view.scope.kind)}">`,
@@ -211,6 +218,7 @@ export function renderDashboardHtml(view: DashboardView): string {
       'today is absent from a denominator for a month it was in service for.</p>',
     '</div>',
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('')

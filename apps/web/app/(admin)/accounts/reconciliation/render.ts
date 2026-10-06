@@ -1,5 +1,6 @@
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   type AdminChrome,
@@ -244,9 +245,15 @@ export function renderMonthReconciliationHtml(view: ReconciliationView): string 
     // No brand in the title: docs/09's "brand collision" forbids the bare brand in any title, and a
     // back-office working paper has no reason to name the business at all.
     '<title>Month reconciliation — admin</title>',
-    `<style>${tokensCss()}${RECONCILIATION_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${RECONCILIATION_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Reconciliation',
+      path: '/accounts/reconciliation',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     `<h1>Reconciliation for ${safeText(view.periodId)}</h1>`,
@@ -281,6 +288,7 @@ export function renderMonthReconciliationHtml(view: ReconciliationView): string 
       '<th scope="col">Ledger</th><th scope="col">Verdict</th>' +
       `</tr></thead><tbody>${view.lines.map(lineRow).join('')}</tbody></table>`,
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('')

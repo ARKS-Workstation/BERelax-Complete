@@ -1,5 +1,6 @@
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   type AdminChrome,
@@ -243,9 +244,15 @@ export function renderCommissionHtml(view: CommissionPageView): string {
     // No brand in the title: docs/09's "brand collision" forbids the bare brand in any title, and
     // `apps/web/src/seo/brand.test.ts` scans every title-bearing line in `apps/web` for it.
     '<title>Commission — HR admin</title>',
-    `<style>${tokensCss()}${COMMISSION_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${COMMISSION_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Commission',
+      path: '/hr/commission',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>Commission</h1>',
@@ -316,6 +323,7 @@ export function renderCommissionHtml(view: CommissionPageView): string {
       'was PAID. A no-show, a cancellation and a completed-but-unpaid visit each earn nothing, and a ' +
       'package redemption earns on the value it RECOGNISED — not on what the course sold for.</p>',
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('')

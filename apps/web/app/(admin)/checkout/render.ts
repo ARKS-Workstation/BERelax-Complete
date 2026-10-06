@@ -1,6 +1,7 @@
 import { safeText } from '@berelax/core'
 import { CHECKOUT_FIELDS } from '@berelax/payments'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   renderAdminBanner,
@@ -199,9 +200,15 @@ export function renderCheckout(view: CheckoutView): string {
     // No brand in the title: docs/09's brand-collision rule forbids the bare brand in any title, and
     // `apps/web/src/seo/brand.test.ts` scans every title-bearing line in `apps/web` for it.
     '<title>Take a card payment — payments admin</title>',
-    `<style>${tokensCss()}${CHECKOUT_CSS}${TILL_OFFLINE_PANEL_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${CHECKOUT_CSS}${TILL_OFFLINE_PANEL_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Checkout',
+      path: '/checkout',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>Take a card payment</h1>',
@@ -256,6 +263,7 @@ export function renderCheckout(view: CheckoutView): string {
     '</form>',
     '</div>',
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('')

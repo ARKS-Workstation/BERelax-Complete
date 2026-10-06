@@ -1422,6 +1422,26 @@ export const ROUTES = [
       'claims no other route and a prefix would be a claim on paths nothing serves.',
   },
   {
+    id: 'admin-logout',
+    path: '/logout',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'Ends a staff session. It exists because the admin gained a topbar and a topbar with no sign-out ' +
+      'control is a dead end — and because every piece of it was already written and never wired up: ' +
+      '`revokeStaffSession` in @berelax/db with its audit row, and `clearedAdminSessionCookie` in ' +
+      'session-cookie.ts, neither with a caller anywhere in app/. A session could be waited out and not ' +
+      'ended, which is what a shared front-desk terminal needs most. POST only: a GET that ended a ' +
+      'session could be triggered by an <img> on any page the reader happens to be looking at, and an ' +
+      'unexported GET is answered 405 by the framework rather than by a handler of its own. Not ' +
+      'indexable and not in the sitemap: /logout is in ADMIN_GROUP_PREFIXES, and a crawler that could ' +
+      "reach it would be handed a Set-Cookie clearing somebody's session.",
+  },
+  {
     id: 'derivative',
     path: '/m/[mediaId]/[contentHash]/[filename]',
     kind: 'handler',
@@ -2207,6 +2227,15 @@ export const ADMIN_GROUP_PREFIXES: readonly string[] = [
   // commit that remembers to.
   '/checkout',
   '/clients',
+  /*
+   * `POST /logout`, which ends a staff session.
+   *
+   * A bare path and not a prefix: nothing else will ever live under it, because signing out is one verb
+   * on one session. It is in this list for the ordinary reason — `noindex` and refused by the proxy to
+   * anybody outside the group — and for one specific to it: a crawler that could GET it would be handed
+   * a Set-Cookie clearing somebody's session, which is why the route answers 405 to GET as well.
+   */
+  '/logout',
   '/compliance',
   '/crm',
   // H-HARD-08. `/day-sheet` holds one route today — the printable paper fallback — and it is a PREFIX

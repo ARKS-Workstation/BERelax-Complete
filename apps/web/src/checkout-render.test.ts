@@ -1,3 +1,4 @@
+import { adminMain } from '@berelax/fixtures'
 import type { HostedFieldsConfiguration } from '@berelax/payments'
 import {
   CARD_DATA_FIELD_NAMES,
@@ -137,7 +138,7 @@ describe('the unconfigured gateway', () => {
     expect(html).toContain('disabled')
     // The control: with a gateway configured the same button is enabled, so the assertion above is about the
     // configuration and not about a button that is always disabled.
-    expect(documentFor(CONFIGURED)).not.toContain('disabled')
+    expect(adminMain(documentFor(CONFIGURED))).not.toContain('disabled')
   })
 })
 

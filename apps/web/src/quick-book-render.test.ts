@@ -1,4 +1,5 @@
 import type { BookableVariantRow } from '@berelax/db'
+import { adminMain } from '@berelax/fixtures'
 import { WHATSAPP_REF_CODE_HTML_PATTERN, WHATSAPP_REF_CODE_LENGTH } from '@berelax/shared'
 import { describe, expect, it } from 'vitest'
 import { firstGridStart, gridStartsFor } from '../app/(admin)/quick-book/handler.ts'
@@ -366,7 +367,9 @@ describe('the assignment is displayed before the confirm', () => {
     // that id can never pass. It did not, which is how this was found; a looser version of the same check
     // would have passed by accident on the state where the entry form IS present.
     expect(html).not.toContain('id="quick-book-phone"')
-    expect(html.split('<form ').length - 1).toBe(2)
+    // Over the screen's own markup: the shell's topbar adds a sign-out form, which is not one of the
+    // live pair this assertion is about.
+    expect(adminMain(html).split('<form ').length - 1).toBe(2)
     expect(html).toContain('data-testid="quick-book-override-form"')
   })
 

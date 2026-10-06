@@ -1,6 +1,7 @@
 import type { DuplicateQueue, DuplicateQueueRow } from '@berelax/core'
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   type AdminChrome,
@@ -246,9 +247,15 @@ export function renderDuplicateQueueHtml(view: DuplicateQueueView): string {
     // brand appears, and an internal review queue naming it would be citing the wrong entity. The rule is
     // about how the brand is written, so not writing it is compliant.
     '<title>Duplicate review queue — admin</title>',
-    `<style>${tokensCss()}${QUEUE_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${QUEUE_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Duplicates',
+      path: '/clients/duplicates',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>Duplicate review queue</h1>',
@@ -272,6 +279,7 @@ export function renderDuplicateQueueHtml(view: DuplicateQueueView): string {
         'at all, every pair below the band, or every pair already merged.</p></section>'
       : `<ol class="rows">${view.queue.rows.map((row) => rowArticle(row, scope)).join('')}</ol>`,
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('\n')

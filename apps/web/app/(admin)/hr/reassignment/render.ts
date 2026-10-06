@@ -1,5 +1,6 @@
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   type AdminChrome,
@@ -185,9 +186,15 @@ export function renderReassignmentQueueHtml(view: ReassignmentQueueView): string
     // `apps/web/src/seo/brand.test.ts` scans every title-bearing line in `apps/web` for it. An internal
     // back-office screen has no reason to name the business at all.
     '<title>Reassignment queue — HR admin</title>',
-    `<style>${tokensCss()}${QUEUE_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${QUEUE_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Reassignment',
+      path: '/hr/reassignment',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>Reassignment queue</h1>',
@@ -206,6 +213,7 @@ export function renderReassignmentQueueHtml(view: ReassignmentQueueView): string
     '</div>',
     body,
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('')

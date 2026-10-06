@@ -1,5 +1,6 @@
 import { HUNDREDTHS_PER_DAY, type PortalBankView, safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   type AdminChrome,
@@ -237,9 +238,15 @@ export function renderStaffPortalHtml(view: PortalPageView): string {
     // No brand in the title: docs/09's "brand collision" forbids the bare brand in any title, and
     // `apps/web/src/seo/brand.test.ts` scans every title-bearing line in `apps/web` for it.
     '<title>Your details — staff</title>',
-    `<style>${tokensCss()}${PORTAL_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${PORTAL_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Me',
+      path: '/hr/me',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>Your details</h1>',
@@ -375,6 +382,7 @@ export function renderStaffPortalHtml(view: PortalPageView): string {
     '<h2>Where you are paid</h2>',
     renderBank(view.bank),
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('')

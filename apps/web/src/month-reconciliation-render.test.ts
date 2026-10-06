@@ -18,7 +18,12 @@ import {
  * for the split — the served bytes are the integration suite's business, and the decisions are here.
  */
 
-const CHROME = { googleReauth: null, sendBacklog: null } as unknown as ReconciliationView['chrome']
+const CHROME = {
+  googleReauth: null,
+  sendBacklog: null,
+  // `owner` is the widest menu, so this fixture can never hide a sidebar link an assertion looks for.
+  role: 'owner' as const,
+} as unknown as ReconciliationView['chrome']
 
 const line = (
   id: string,

@@ -196,7 +196,18 @@ function resolve(from: string, site: ImportSite): readonly string[] {
     }
     return [path]
   }
-  const index = SYMBOLS.get(site.specifier)
+  /*
+   * A subpath specifier resolves against its PACKAGE's index. `@berelax/ui/admin` and
+   * `@berelax/ui/reporting` are export-map entries, not separate packages, and `symbolIndex` already
+   * walked every file under `packages/ui/src` — so the names are in the `@berelax/ui` index and the only
+   * thing missing was the lookup. Before this, the first subpath import in any walked file was reported as
+   * a workspace package missing from the map, which is the right failure for a real hole and the wrong one
+   * for this.
+   */
+  const packageKey = site.specifier.startsWith('@berelax/')
+    ? site.specifier.split('/').slice(0, 2).join('/')
+    : site.specifier
+  const index = SYMBOLS.get(site.specifier) ?? SYMBOLS.get(packageKey)
   if (index === undefined) {
     // A third-party package. Nothing in `node_modules` writes an appointment status, and following it would
     // make the walk unbounded; but a WORKSPACE package missing from the map would silently shrink the answer,

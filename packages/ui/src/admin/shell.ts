@@ -1,5 +1,4 @@
 import { type AdminNavGroup, adminNavFor, adminNavLocate, type Role, safeText } from '@berelax/core'
-import { tokensCss } from '../tokens/emit.ts'
 
 /**
  * The admin's chrome: a fixed sidebar, a topbar, and a content column.
@@ -41,11 +40,10 @@ import { tokensCss } from '../tokens/emit.ts'
  * for the sake of tidiness.
  */
 
-export interface AdminShellOptions {
+export interface AdminChromeOptions {
   /** The `<title>`, which this appends `— admin` to. No brand: see the note in `till/render.ts`. */
   readonly title: string
   /** The `<h1>`. Defaults to `title`, and differs where a screen's heading carries a period or a name. */
-  readonly heading?: string | undefined
   /** The path being served, for the sidebar's current item and the breadcrumb. */
   readonly path: string
   /**
@@ -65,13 +63,9 @@ export interface AdminShellOptions {
    * several build them conditionally. A shell that owned them would be a second author of a contract
    * forty render modules already have with their tests.
    */
-  readonly htmlAttributes?: string | undefined
   /** The screen's own CSS, appended after the shell's. */
-  readonly pageCss?: string | undefined
   /** Markup placed above the heading — the Google re-auth banner and its kin. */
-  readonly banner?: string | undefined
   /** The screen's content, which replaces everything it used to put inside `<main>` below its `<h1>`. */
-  readonly body: string
   /**
    * The window the sidebar's window-requiring links should carry.
    *
@@ -85,14 +79,6 @@ export interface AdminShellOptions {
   readonly window?:
     | { readonly from: string; readonly to: string; readonly period: string }
     | undefined
-  /**
-   * Markup placed after `</main>`, which in practice is the one inline `<script>` six screens carry.
-   *
-   * A slot rather than appending it to `body`, because `security-headers.test.ts` walks `app/(admin)` and
-   * requires every inline script to carry a `nonce=`; keeping the script outside the content keeps that
-   * scan reading the same shape it always has.
-   */
-  readonly afterMain?: string
 }
 
 /** The rail's width, and the only place it is stated. */
@@ -107,7 +93,7 @@ export const ADMIN_SHELL_CSS = `
     font-size: 1.0625rem;
     line-height: 1.5;
   }
-  .shell { display: grid; grid-template-columns: ${RAIL_REM}rem minmax(0, 1fr); min-height: 100vh; }
+  .shell { display: grid; grid-template-columns: ${RAIL_REM}rem minmax(0, 1fr); min-height: 100dvh; }
   /*
    * The rail scrolls independently and stays put. "position: sticky" with "align-self: start" rather than
    * "position: fixed": fixed would take the rail out of the grid and the content column would slide under
@@ -117,7 +103,7 @@ export const ADMIN_SHELL_CSS = `
     position: sticky;
     top: 0;
     align-self: start;
-    height: 100vh;
+    height: 100dvh;
     overflow-y: auto;
     background: var(--color-ground-sunk);
     border-inline-end: 1px solid var(--color-border);
@@ -241,7 +227,7 @@ export const ADMIN_SHELL_CSS = `
 
 function navItemHref(
   item: AdminNavGroup['items'][number],
-  window: AdminShellOptions['window'],
+  window: AdminChromeOptions['window'],
 ): string | null {
   if (item.needsWindow === undefined) return item.href
   if (window === undefined) return null
@@ -251,7 +237,7 @@ function navItemHref(
 }
 
 /** The options once the role refusal below has run, so the two renderers need no second check. */
-type ReadableShell = AdminShellOptions & { readonly role: Role }
+type ReadableShell = AdminChromeOptions & { readonly role: Role }
 
 function renderRail(options: ReadableShell): string {
   const groups = adminNavFor(options.role)
@@ -315,7 +301,36 @@ function renderTopbar(options: ReadableShell): string {
   return `<div class="topbar">${crumbs}${whoami}</div>`
 }
 
-export function renderAdminShell(options: AdminShellOptions): string {
+/**
+ * The chrome as an OPEN and a CLOSE, because every admin screen already assembles its own document.
+ *
+ * The thirty-one screens converted to this build their own `<head>`, their own `<html>` attributes, their
+ * own `<h1>` and their own `<main>`, and several have tests asserting the exact bytes of all four. A
+ * whole-document renderer would have meant restructuring forty modules to hand their pieces to a shell,
+ * for tidiness, with those tests as the casualties. There WAS such a renderer here for one commit, used by
+ * one screen, and it broke the walk in `google-reauth-banner.test.ts` that identifies a document by its
+ * doctype — which is the walk telling the truth: a screen that no longer emits its own document is no
+ * longer the shape the rest of the admin is.
+ *
+ * So a converted screen inserts the chrome around the `<main>` it already has: this pair, plus
+ * `ADMIN_SHELL_CSS` in the `<style>` it already emits. Three additions, nothing moved, nothing rewritten.
+ * The page keeps its `<h1>`, and the breadcrumb in the topbar says where the reader is.
+ */
+export function renderAdminChromeOpen(options: AdminChromeOptions): string {
+  assertReadable(options)
+  return ['<div class="shell">', renderRail(options), '<div>', renderTopbar(options)].join('')
+}
+
+/** Closes what {@link renderAdminChromeOpen} opened: the content column, then the shell grid. */
+export function renderAdminChromeClose(): string {
+  return '</div></div>'
+}
+
+/*
+ * An assertion signature, so the two renderers need no second check and no cast: `asserts options is
+ * ReadableShell` is what lets the compiler agree with the refusal rather than be talked round it.
+ */
+function assertReadable(options: AdminChromeOptions): asserts options is ReadableShell {
   /*
    * A missing role REFUSES, and that is what makes `AdminChrome.role` safe to leave optional.
    *
@@ -327,36 +342,8 @@ export function renderAdminShell(options: AdminShellOptions): string {
    */
   if (options.role === undefined) {
     throw new Error(
-      '[admin-shell-no-role] renderAdminShell was given no role, so the sidebar would have been empty. ' +
+      '[admin-shell-no-role] the admin chrome was given no role, so the sidebar would have been empty. ' +
         'The role comes from `AdminChrome`, which `adminChromeFor` fills from the signed-in session.',
     )
   }
-  const readable: ReadableShell = { ...options, role: options.role }
-  const heading = options.heading ?? options.title
-  return [
-    '<!doctype html>',
-    `<html lang="en"${options.htmlAttributes ?? ''}>`,
-    '<head>',
-    '<meta charset="utf-8">',
-    '<meta name="viewport" content="width=device-width, initial-scale=1">',
-    '<meta name="robots" content="noindex, nofollow, noarchive">',
-    `<title>${safeText(options.title)} — admin</title>`,
-    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${options.pageCss ?? ''}</style>`,
-    '</head>',
-    '<body>',
-    '<div class="shell">',
-    renderRail(readable),
-    '<div>',
-    renderTopbar(readable),
-    '<main>',
-    options.banner ?? '',
-    `<h1>${safeText(heading)}</h1>`,
-    options.body,
-    '</main>',
-    options.afterMain ?? '',
-    '</div>',
-    '</div>',
-    '</body>',
-    '</html>',
-  ].join('')
 }

@@ -1,5 +1,6 @@
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   type AdminChrome,
   GOOGLE_REAUTH_BANNER_CSS,
@@ -174,9 +175,15 @@ export function renderSeoSuggestionsHtml(
     // No brand in the title: docs/09's brand-collision rule forbids the bare brand in any title, and
     // `apps/web/src/seo/brand.test.ts` scans every title-bearing line in `apps/web` for it.
     '<title>SEO suggestions — agents admin</title>',
-    `<style>${tokensCss()}${SUGGESTIONS_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${SUGGESTIONS_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Suggestions',
+      path: '/agents/seo/suggestions',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>SEO suggestions</h1>',
@@ -207,6 +214,7 @@ export function renderSeoSuggestionsHtml(
       ? '<p class="empty">Nothing has been refused.</p>'
       : `<ul class="queue">${view.refusals.map(renderCard).join('')}</ul>`,
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('\n')

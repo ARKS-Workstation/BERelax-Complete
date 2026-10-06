@@ -1,5 +1,6 @@
 import { type DataQualityState, safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import { KPI_TILE_CSS, type KpiTileProps, renderKpiTile } from '@berelax/ui/reporting'
 import {
   ADMIN_BANNER_CSS,
@@ -199,9 +200,15 @@ export function renderDataQualityHtml(view: DataQualityView): string {
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     '<meta name="robots" content="noindex, nofollow, noarchive">',
     '<title>Data quality — admin</title>',
-    `<style>${tokensCss()}${CSS}${KPI_TILE_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${CSS}${KPI_TILE_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Data quality',
+      path: '/reports/data-quality',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>Data quality</h1>',
@@ -229,6 +236,7 @@ export function renderDataQualityHtml(view: DataQualityView): string {
       ].join(''),
     ),
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('')

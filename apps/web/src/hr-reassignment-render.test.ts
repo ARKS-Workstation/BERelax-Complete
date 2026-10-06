@@ -1,3 +1,4 @@
+import { adminMain } from '@berelax/fixtures'
 import { describe, expect, it } from 'vitest'
 import {
   type ReassignmentQueueEntryView,
@@ -123,8 +124,10 @@ describe('the reassignment queue document', () => {
     // Read-only, and asserted as markup rather than promised in a comment: reassigning needs an actor, a
     // reason and a client gender no table holds, so a form here would offer a therapist the transaction
     // then refuses.
-    expect(html).not.toContain('<form')
-    expect(html).not.toContain('<button')
+    expect(adminMain(html)).not.toContain('<form')
+    // Scoped to the screen's own markup: the claim is about what this SCREEN offers, and the shell's
+    // topbar carries a sign-out control that is not a way to do any of these things.
+    expect(adminMain(html)).not.toContain('<button')
     expect(html).toContain('noindex, nofollow, noarchive')
   })
 })

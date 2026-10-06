@@ -1,4 +1,5 @@
 import type { PipelineBoard, PipelineCard } from '@berelax/db'
+import { adminMain } from '@berelax/fixtures'
 import { describe, expect, it } from 'vitest'
 import {
   cardLabel,
@@ -257,7 +258,9 @@ describe('the no-JavaScript path exists and names both halves of a move', () => 
     expect(html).toContain('name="toStageKey"')
     // One form, not one per card: forty identically-named submit buttons is a page `button-name` cannot
     // fault and nobody can use.
-    expect(html.match(/<form/g)).toHaveLength(1)
+    // Over the screen's own markup: the shell's topbar carries a sign-out form, which is not a way to
+    // move a card.
+    expect(adminMain(html).match(/<form/g)).toHaveLength(1)
     expect(html.match(/<option/g)).toHaveLength(6)
   })
 
@@ -272,7 +275,7 @@ describe('the no-JavaScript path exists and names both halves of a move', () => 
         },
       }),
     )
-    expect(html).not.toContain('<form')
+    expect(adminMain(html)).not.toContain('<form')
     expect(html).toContain('No cards in this column.')
   })
 })

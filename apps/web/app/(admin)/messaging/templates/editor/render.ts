@@ -28,6 +28,7 @@
  */
 import { type SmsCostPreview, safeText, smsCost, smsUnitsOf } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   type AdminChrome,
@@ -273,9 +274,15 @@ export function renderEditorHtml(body: string, chrome: AdminChrome): string {
     // this unit's first verify. The full trading name on an internal authoring tool would say something it
     // does not mean, and no mention at all is not a violation: the rule is about how the brand is written.
     '<title>Template editor — admin</title>',
-    `<style>${tokensCss()}${EDITOR_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${EDITOR_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Editor',
+      path: '/messaging/templates/editor',
+      role: chrome.role,
+      staffReference: chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(chrome),
     '<h1>Template editor</h1>',
@@ -318,6 +325,7 @@ export function renderEditorHtml(body: string, chrome: AdminChrome): string {
     `<pre class="split" data-figure="split">${safeText(figures.split)}</pre>`,
     '</main>',
     inlineScriptTag(chrome.cspNonce, EDITOR_SCRIPT),
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('')

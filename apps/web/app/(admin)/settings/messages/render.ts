@@ -30,6 +30,7 @@
 import { maskRecipient, safeText } from '@berelax/core'
 import type { InboxEntry } from '@berelax/db'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   type AdminChrome,
@@ -301,9 +302,15 @@ export function renderInboxHtml(view: InboxView): string {
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     '<meta name="robots" content="noindex, nofollow, noarchive">',
     '<title>Messages — BE RELAX admin</title>',
-    `<style>${tokensCss()}${INBOX_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${INBOX_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Messages',
+      path: '/settings/messages',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>Messages</h1>',
@@ -329,6 +336,7 @@ export function renderInboxHtml(view: InboxView): string {
     '</dl>',
     body,
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('')

@@ -1,5 +1,6 @@
 import { aedFrom, formatMoney, safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   type AdminChrome,
@@ -307,9 +308,15 @@ export function renderRotaHtml(view: RotaPageView): string {
     // No brand in the title: docs/09's "brand collision" forbids the bare brand in any title, and
     // `apps/web/src/seo/brand.test.ts` scans every title-bearing line in `apps/web` for it.
     '<title>Rota — HR admin</title>',
-    `<style>${tokensCss()}${ROTA_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${ROTA_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Rota',
+      path: '/hr/rota',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>Rota</h1>',
@@ -380,6 +387,7 @@ export function renderRotaHtml(view: RotaPageView): string {
       'buckets, so the two differ every month somebody is ill, late or asked to stay — and this figure is ' +
       'never what anybody is paid.</p>',
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('')

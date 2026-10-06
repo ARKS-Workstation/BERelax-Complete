@@ -1,5 +1,6 @@
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   renderAdminBanner,
@@ -559,9 +560,15 @@ export function renderQuickBookHtml(view: QuickBookView): string {
     // brand appears, and an internal screen naming it would be citing the wrong entity. The rule is about
     // how the brand is written, so not writing it is compliant.
     '<title>Quick-book — admin</title>',
-    `<style>${tokensCss()}${QUICK_BOOK_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${QUICK_BOOK_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Quick book',
+      path: '/quick-book',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>Quick-book</h1>',
@@ -595,6 +602,7 @@ export function renderQuickBookHtml(view: QuickBookView): string {
     assumptionsPanel(view),
     '</main>',
     inlineScriptTag(view.chrome.cspNonce, QUICK_BOOK_SCRIPT),
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('\n')

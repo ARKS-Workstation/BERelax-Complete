@@ -1,3 +1,4 @@
+import { adminMain } from '@berelax/fixtures'
 import { describe, expect, it } from 'vitest'
 import {
   type LeaveApprovalPageView,
@@ -164,8 +165,10 @@ describe('the document says what an operator has to act on', () => {
           },
         }),
       )
-      expect(html, role).not.toContain('<form')
-      expect(html, role).not.toContain('<button')
+      expect(adminMain(html), role).not.toContain('<form')
+      // Scoped to the screen's own markup: the claim is about what this SCREEN offers, and the shell's
+      // topbar carries a sign-out control that is not a way to do any of these things.
+      expect(adminMain(html), role).not.toContain('<button')
       expect(html, role).toContain('Read-only.')
     }
   })

@@ -1,5 +1,6 @@
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   type AdminChrome,
@@ -202,9 +203,15 @@ export function renderPrivacyHtml(view: PrivacyPageView): string {
     // No brand in the title: docs/09's "brand collision" forbids the bare brand in any title, and
     // `apps/web/src/seo/brand.test.ts` scans every title-bearing line in `apps/web` for it.
     '<title>Data-subject rights — privacy admin</title>',
-    `<style>${tokensCss()}${PRIVACY_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${PRIVACY_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Privacy',
+      path: '/settings/privacy',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>Data-subject rights</h1>',
@@ -287,6 +294,7 @@ export function renderPrivacyHtml(view: PrivacyPageView): string {
       'the suppression entry refuses the send even if the number were typed in by hand.</p>',
     retentionList(view),
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('')

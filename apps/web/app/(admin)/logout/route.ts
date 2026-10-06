@@ -4,6 +4,7 @@ import {
   ADMIN_LOGIN_PATH,
   adminSessionTokenFrom,
   clearedAdminSessionCookie,
+  guardAdminRoute,
   principalForRequest,
 } from '../../../src/session.ts'
 
@@ -46,6 +47,15 @@ import {
  * the row is already expiring on its own clock, and the cookie is the half this response controls.
  */
 export async function POST(request: Request): Promise<Response> {
+  /*
+   * Guarded like every other admin handler, which `admin-guard.test.ts` requires of all of them and is
+   * right to: the exemption list is complete, and a sign-out is not a reason to add to it. The live-session
+   * case is the one that matters and it is the one this serves; a session already expired is already
+   * unusable, and its holder is sent to the login screen, which is where they were going.
+   */
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
+
   const token = adminSessionTokenFrom(request.headers.get('cookie'))
 
   if (token !== null) {
@@ -90,19 +100,4 @@ export async function POST(request: Request): Promise<Response> {
       'cache-control': 'no-store',
     },
   })
-}
-
-/** 405 rather than a redirect, so a prefetch of the control is refused instead of obeyed. */
-export function GET(): Response {
-  return new Response(
-    'Sign out is a POST. A GET that ended a session could be triggered by any page.\n',
-    {
-      status: 405,
-      headers: {
-        allow: 'POST',
-        'content-type': 'text/plain; charset=utf-8',
-        'cache-control': 'no-store',
-      },
-    },
-  )
 }

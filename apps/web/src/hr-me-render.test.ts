@@ -1,4 +1,5 @@
 import { PORTAL_BANK_MASK, portalBankView } from '@berelax/core'
+import { adminMain } from '@berelax/fixtures'
 import { describe, expect, it } from 'vitest'
 import { renderLeaveFilingHtml } from '../app/(admin)/hr/leave/render.ts'
 import {
@@ -278,6 +279,6 @@ describe('the leave filing document', () => {
       submitted: null,
     })
     expect(empty).toContain('data-leave-candidates="none"')
-    expect(empty).not.toContain('<form method="post"')
+    expect(adminMain(empty)).not.toContain('<form method="post"')
   })
 })

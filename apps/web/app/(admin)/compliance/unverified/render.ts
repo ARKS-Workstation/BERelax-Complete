@@ -1,5 +1,6 @@
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   type AdminChrome,
@@ -207,9 +208,15 @@ export function renderComplianceQuestionsHtml(view: ComplianceQuestionsView): st
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     '<meta name="robots" content="noindex, nofollow, noarchive">',
     '<title>Open compliance questions — admin</title>',
-    `<style>${tokensCss()}${QUESTIONS_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${QUESTIONS_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Unverified',
+      path: '/compliance/unverified',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>Open compliance questions</h1>',
@@ -253,6 +260,7 @@ export function renderComplianceQuestionsHtml(view: ComplianceQuestionsView): st
     '</section>',
 
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('')

@@ -5,6 +5,7 @@
  * this is a generator rather than a SQL file, and `synthetic.ts` for the rules that keep it
  * unmistakably fake and physically undialable.
  */
+export * from './admin-document.ts'
 export * from './admin-principal.ts'
 export * from './cash-up.ts'
 export * from './checkout.ts'

@@ -1,5 +1,6 @@
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   type AdminChrome,
@@ -121,9 +122,15 @@ export function renderCampaignsHtml(view: CampaignsView): string {
     // No brand in the title: `apps/web/src/seo/brand.test.ts` requires the full trading name wherever the
     // brand appears, and an internal screen naming it would be citing the wrong entity.
     '<title>Campaigns — admin</title>',
-    `<style>${tokensCss()}${CAMPAIGNS_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${CAMPAIGNS_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Campaigns',
+      path: '/crm/campaigns',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>Campaigns</h1>',
@@ -151,6 +158,7 @@ export function renderCampaignsHtml(view: CampaignsView): string {
           '</table>',
         ].join(''),
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('\n')

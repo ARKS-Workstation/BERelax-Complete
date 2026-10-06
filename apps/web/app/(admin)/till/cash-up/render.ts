@@ -1,5 +1,6 @@
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import type { AdminChrome } from '../../../../src/components/admin/google-reauth-banner.ts'
 import {
   ADMIN_BANNER_CSS,
@@ -276,9 +277,15 @@ export function renderCashUpHtml(view: CashUpView): string {
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     '<meta name="robots" content="noindex, nofollow, noarchive">',
     '<title>Cash-up — admin</title>',
-    `<style>${tokensCss()}${TILL_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${TILL_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Cash up',
+      path: '/till/cash-up',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>Cash-up</h1>',
@@ -306,6 +313,7 @@ export function renderCashUpHtml(view: CashUpView): string {
     '</div>',
     '</div>',
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('\n')

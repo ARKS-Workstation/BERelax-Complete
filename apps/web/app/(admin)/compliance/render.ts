@@ -1,5 +1,6 @@
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   type AdminChrome,
@@ -317,9 +318,15 @@ export function renderComplianceCalendarHtml(view: ComplianceCalendarView): stri
     // No brand in the title: docs/09's "brand collision" forbids the bare brand in any title, and an
     // internal back-office screen has no reason to name the business at all.
     '<title>Compliance calendar — admin</title>',
-    `<style>${tokensCss()}${CALENDAR_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${CALENDAR_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Compliance',
+      path: '/compliance',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>Compliance calendar</h1>',
@@ -359,6 +366,7 @@ export function renderComplianceCalendarHtml(view: ComplianceCalendarView): stri
     '<h2>Occurrences</h2>',
     occurrences,
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('')

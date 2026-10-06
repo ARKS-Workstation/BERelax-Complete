@@ -5,7 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./admin": "./src/admin/shell.ts",
+    "./admin": "./src/admin/index.ts",
     "./analytics": "./src/analytics/index.ts",
     "./analytics/collector-island": "./src/analytics/collector.island.tsx",
     "./arabic.css": "./src/theme/arabic.css",

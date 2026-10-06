@@ -1,6 +1,7 @@
 import type { CredentialAssessment, CredentialEvaluation, CredentialStatus } from '@berelax/core'
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import { ADMIN_SHELL_CSS, renderAdminChromeClose, renderAdminChromeOpen } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   type AdminChrome,
@@ -232,9 +233,15 @@ export function renderCredentialsHtml(view: CredentialsView): string {
     // because its title reads "BE RELAX admin"; this page needs no exemption, because an internal
     // back-office screen has no reason to name the business at all.
     '<title>Credentials — HR admin</title>',
-    `<style>${tokensCss()}${CREDENTIALS_CSS}${ADMIN_BANNER_CSS}</style>`,
+    `<style>${tokensCss()}${ADMIN_SHELL_CSS}${CREDENTIALS_CSS}${ADMIN_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
+    renderAdminChromeOpen({
+      title: 'Credentials',
+      path: '/hr/credentials',
+      role: view.chrome.role,
+      staffReference: view.chrome.staffReference,
+    }),
     '<main>',
     renderAdminBanner(view.chrome),
     '<h1>Credentials</h1>',
@@ -259,6 +266,7 @@ export function renderCredentialsHtml(view: CredentialsView): string {
     '</div>',
     body,
     '</main>',
+    renderAdminChromeClose(),
     '</body>',
     '</html>',
   ].join('')
