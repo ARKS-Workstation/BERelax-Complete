@@ -8,6 +8,7 @@
  *   - MUST NOT read the clock directly; time is always injected
  */
 
+export * from './access/admin-nav.ts'
 export * from './access/permissions.ts'
 export * from './access/principal-policy.ts'
 export * from './access/principals/customer-link.ts'
