@@ -719,7 +719,7 @@ describe('completing an occurrence', () => {
         })
         await completeObligationInstance(uow, {
           instanceId,
-          role: 'owner',
+          role: 'owner' as const,
           actorLabel: 'M-VAT-10 itest',
         })
         const [row] = await uow.sql<{ status: string }[]>`

@@ -152,7 +152,7 @@ const VAT_FILS = 952
 const CALLER: Actor = { kind: 'staff', label: MARKER }
 const OWNER: TransitionActor = {
   kind: 'staff',
-  role: 'owner',
+  role: 'owner' as const,
   id: '00000000-0000-4000-8000-00000000d501',
   label: MARKER,
 }

@@ -45,13 +45,19 @@ export interface AdminShellOptions {
   /** The `<title>`, which this appends `— admin` to. No brand: see the note in `till/render.ts`. */
   readonly title: string
   /** The `<h1>`. Defaults to `title`, and differs where a screen's heading carries a period or a name. */
-  readonly heading?: string
+  readonly heading?: string | undefined
   /** The path being served, for the sidebar's current item and the breadcrumb. */
   readonly path: string
-  /** The reader's role, which decides what the sidebar contains. */
-  readonly role: Role
+  /**
+   * The reader's role, which decides what the sidebar contains.
+   *
+   * Typed as possibly absent and REFUSED at run time rather than required by the compiler, because its
+   * source is `AdminChrome.role`, which is optional for the reason that field documents. The refusal is
+   * in the function body, by name, so the failure is loud rather than a document with no menu.
+   */
+  readonly role?: Role | undefined
   /** The reader's `employee.staff_reference`. No name of a person is in this build (brief rule 10). */
-  readonly staffReference?: string
+  readonly staffReference?: string | undefined
   /**
    * Extra attributes for `<html>`, already escaped by the caller.
    *
@@ -59,11 +65,11 @@ export interface AdminShellOptions {
    * several build them conditionally. A shell that owned them would be a second author of a contract
    * forty render modules already have with their tests.
    */
-  readonly htmlAttributes?: string
+  readonly htmlAttributes?: string | undefined
   /** The screen's own CSS, appended after the shell's. */
-  readonly pageCss?: string
+  readonly pageCss?: string | undefined
   /** Markup placed above the heading — the Google re-auth banner and its kin. */
-  readonly banner?: string
+  readonly banner?: string | undefined
   /** The screen's content, which replaces everything it used to put inside `<main>` below its `<h1>`. */
   readonly body: string
   /**
@@ -76,7 +82,17 @@ export interface AdminShellOptions {
    * refusals they are: present, labelled, and marked `aria-disabled`, so the menu still tells you the
    * screen exists.
    */
-  readonly window?: { readonly from: string; readonly to: string; readonly period: string }
+  readonly window?:
+    | { readonly from: string; readonly to: string; readonly period: string }
+    | undefined
+  /**
+   * Markup placed after `</main>`, which in practice is the one inline `<script>` six screens carry.
+   *
+   * A slot rather than appending it to `body`, because `security-headers.test.ts` walks `app/(admin)` and
+   * requires every inline script to carry a `nonce=`; keeping the script outside the content keeps that
+   * scan reading the same shape it always has.
+   */
+  readonly afterMain?: string
 }
 
 /** The rail's width, and the only place it is stated. */
@@ -234,7 +250,10 @@ function navItemHref(
     : `${item.href}?from=${encodeURIComponent(window.from)}&to=${encodeURIComponent(window.to)}`
 }
 
-function renderRail(options: AdminShellOptions): string {
+/** The options once the role refusal below has run, so the two renderers need no second check. */
+type ReadableShell = AdminShellOptions & { readonly role: Role }
+
+function renderRail(options: ReadableShell): string {
   const groups = adminNavFor(options.role)
   const here = adminNavLocate(options.path)
   const parts = [
@@ -268,7 +287,7 @@ function renderRail(options: AdminShellOptions): string {
   return parts.join('')
 }
 
-function renderTopbar(options: AdminShellOptions): string {
+function renderTopbar(options: ReadableShell): string {
   const here = adminNavLocate(options.path)
   const crumbs = [
     '<p class="crumbs" aria-label="Breadcrumb">',
@@ -297,6 +316,22 @@ function renderTopbar(options: AdminShellOptions): string {
 }
 
 export function renderAdminShell(options: AdminShellOptions): string {
+  /*
+   * A missing role REFUSES, and that is what makes `AdminChrome.role` safe to leave optional.
+   *
+   * `google-reauth-banner.ts` states the rule this follows: an optional field is safe when its absence
+   * fails loudly, and unsafe when it fails invisibly. A document rendered with no navigation is the
+   * invisible kind — it looks like a screen that simply has no menu — so the absence is converted into
+   * the loud kind here. The route's `catch` turns it into a 503 and the operator is told, rather than
+   * being handed an admin with no way out of the page they are on.
+   */
+  if (options.role === undefined) {
+    throw new Error(
+      '[admin-shell-no-role] renderAdminShell was given no role, so the sidebar would have been empty. ' +
+        'The role comes from `AdminChrome`, which `adminChromeFor` fills from the signed-in session.',
+    )
+  }
+  const readable: ReadableShell = { ...options, role: options.role }
   const heading = options.heading ?? options.title
   return [
     '<!doctype html>',
@@ -310,14 +345,15 @@ export function renderAdminShell(options: AdminShellOptions): string {
     '</head>',
     '<body>',
     '<div class="shell">',
-    renderRail(options),
+    renderRail(readable),
     '<div>',
-    renderTopbar(options),
+    renderTopbar(readable),
     '<main>',
     options.banner ?? '',
     `<h1>${safeText(heading)}</h1>`,
     options.body,
     '</main>',
+    options.afterMain ?? '',
     '</div>',
     '</div>',
     '</body>',

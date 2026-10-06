@@ -71,7 +71,7 @@ const SHORTFALLS: readonly RotaShortfallView[] = [
 
 function view(overrides: Partial<RotaPageView> = {}): RotaPageView {
   return {
-    chrome: { googleReauth: null, sendBacklog: null, returnTo: '/hr/rota' },
+    chrome: { googleReauth: null, sendBacklog: null, role: 'owner' as const, returnTo: '/hr/rota' },
     readAtIso: '2026-07-06T06:00:00.000Z',
     fromTradingDate: '2026-07-06',
     toTradingDate: '2026-07-12',
@@ -308,6 +308,7 @@ describe('the rota document', () => {
             googleEmail: 'google-admin@example.invalid',
           },
           sendBacklog: null,
+          role: 'owner' as const,
           returnTo: '/hr/rota',
         },
       }),

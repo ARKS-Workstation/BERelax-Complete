@@ -109,7 +109,7 @@ const PREPARER = {
 const REVIEWER = {
   userId: `${PREFIX}-${RUN}-reviewer`,
   displayName: 'Proprietor',
-  role: 'owner',
+  role: 'owner' as const,
 } as const
 
 /** Instants, from constants. Nothing in this suite reads an ambient clock. */

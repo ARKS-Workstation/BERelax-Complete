@@ -86,7 +86,7 @@ const screen = (
 })
 
 const view = (overrides: Partial<AgentConsoleView> = {}): AgentConsoleView => ({
-  chrome: { googleReauth: null, sendBacklog: null, returnTo: '/agents' },
+  chrome: { googleReauth: null, sendBacklog: null, role: 'owner' as const, returnTo: '/agents' },
   screen: screen([row()]),
   mayToggle: true,
   direction: 'ltr',
@@ -370,6 +370,7 @@ describe('the queue, the kill switch and the landmarks', () => {
             googleEmail: null,
           },
           sendBacklog: { queued: 31, threshold: 20 },
+          role: 'owner' as const,
           returnTo: '/agents',
         },
       }),

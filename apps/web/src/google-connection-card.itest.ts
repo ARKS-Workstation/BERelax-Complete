@@ -196,7 +196,7 @@ async function setSetting(key: string, value: unknown): Promise<void> {
   // in the append-only history, which is the path an admin takes. A hand-written row would let this file
   // store a value the registry would have refused — and both new settings exist precisely to refuse one.
   await withUnitOfWork(sql, { kind: 'system', label: 'gconn07-card-itest' }, (uow) =>
-    writeSetting(uow, { key, value, role: 'owner', actorLabel: 'gconn07-card-itest' }),
+    writeSetting(uow, { key, value, role: 'owner' as const, actorLabel: 'gconn07-card-itest' }),
   )
 }
 
@@ -207,7 +207,12 @@ async function cardHtml(options: { readonly now?: Instant } = {}): Promise<strin
     connectionId,
     // No banner, so this file's screenshots do not diff when another suite leaves a broken connection
     // behind (brief rule 12). `google-reauth-banner.itest.ts` photographs the banner itself.
-    chrome: { googleReauth: null, sendBacklog: null, returnTo: '/settings/integrations' },
+    chrome: {
+      googleReauth: null,
+      sendBacklog: null,
+      role: 'owner' as const,
+      returnTo: '/settings/integrations',
+    },
   })
   return renderIntegrationsPage(view)
 }

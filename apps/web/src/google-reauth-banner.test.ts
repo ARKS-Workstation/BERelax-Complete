@@ -281,7 +281,12 @@ describe('the banner is absent where it must be', () => {
   it('renders the empty string for a healthy connection', () => {
     expect(renderGoogleReauthBanner(bannerFor({}), '/calendar')).toBe('')
     expect(
-      renderAdminBanner({ googleReauth: null, sendBacklog: null, returnTo: '/calendar' }),
+      renderAdminBanner({
+        googleReauth: null,
+        sendBacklog: null,
+        role: 'owner' as const,
+        returnTo: '/calendar',
+      }),
     ).toBe('')
   })
 

@@ -17,6 +17,7 @@ import {
 const CHROME = {
   googleReauth: null,
   sendBacklog: null,
+  role: 'owner' as const,
   returnTo: '/messaging/templates/editor',
 } as const
 

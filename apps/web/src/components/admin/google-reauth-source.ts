@@ -4,6 +4,7 @@ import {
   pageReauthBanner,
   parseReturnPath,
   type ReauthBannerView,
+  type Role,
 } from '@berelax/core'
 import { ALERT_OBSERVERS, readAlertThresholdSettings, readSetting, type Sql } from '@berelax/db'
 import {
@@ -14,6 +15,7 @@ import {
 } from '@berelax/google'
 import { alertDefinition, RECONNECT_SCREEN_PATH } from '@berelax/shared'
 import { CSP_NONCE_HEADER } from '../../security/headers.ts'
+import { principalForRequest } from '../../session.ts'
 import type { AdminChrome } from './google-reauth-banner.ts'
 import type { SendBacklogView } from './messages-delayed-banner.ts'
 
@@ -122,10 +124,33 @@ export async function adminChromeFor(args: {
   readonly sql: Sql
   readonly now: Instant
   readonly request: Request
+  /**
+   * The reader, when the caller already has one.
+   *
+   * Every guarded route does — `guardAdminRoute` returns it — but threading it through forty-two call
+   * sites whose local variable is named differently in each would be a large diff for a small gain, so
+   * this resolves the session itself when it is absent. That is a second read of the row the guard just
+   * read, by its token hash, which is indexed; on a front-desk terminal it is not a cost worth a
+   * forty-two-file refactor. Passing it explicitly removes the query, and a caller that cares may.
+   */
+  readonly principal?: { readonly role: Role; readonly staffReference: string }
 }): Promise<AdminChrome> {
   const url = new URL(args.request.url)
   const nonce = args.request.headers.get(CSP_NONCE_HEADER)
+  const reader =
+    args.principal ??
+    (await (async () => {
+      const resolved = await principalForRequest(
+        args.sql,
+        args.request,
+        new Date(args.now).toISOString(),
+      )
+      return resolved.kind === 'principal'
+        ? { role: resolved.principal.role, staffReference: resolved.principal.staffReference }
+        : undefined
+    })())
   return {
+    ...(reader === undefined ? {} : { role: reader.role, staffReference: reader.staffReference }),
     googleReauth: await googleReauthBannerFor({ sql: args.sql, now: args.now }),
     // The trading date is not needed by this observer and is still supplied rather than faked, because
     // `AlertObservationContext` is one shape for six observers and a call site that invented a value for

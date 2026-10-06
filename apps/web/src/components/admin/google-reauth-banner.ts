@@ -1,4 +1,4 @@
-import { escapeHtml, type ReauthBannerView, safeText } from '@berelax/core'
+import { escapeHtml, type ReauthBannerView, type Role, safeText } from '@berelax/core'
 import { RECONNECT_SCREEN_PATH } from '@berelax/shared'
 import {
   MESSAGES_DELAYED_BANNER_CSS,
@@ -166,6 +166,21 @@ export interface AdminChrome {
    * `adminChromeFor` reads it off the request header the proxy sets, so no document has to remember to.
    */
   readonly cspNonce?: string
+  /**
+   * The signed-in reader's role and staff reference, for the shell's sidebar and topbar.
+   *
+   * OPTIONAL, following `cspNonce` one field up rather than `sendBacklog` two fields up, and for the
+   * reason that comment gives: the question is which direction a missing value fails in. `sendBacklog`
+   * must be required because a missing banner is INVISIBLE. A missing role here is made LOUD instead —
+   * `renderAdminShell` throws `[admin-shell-no-role]` rather than rendering a document with no
+   * navigation — so the property that makes an optional field safe is satisfied by the renderer, and this
+   * unit does not edit forty-one `AdminChrome` literals across other units' tests to buy it.
+   *
+   * `adminChromeFor` fills both: from the `principal` a caller passes, or by resolving the session itself
+   * when one does not.
+   */
+  readonly role?: Role
+  readonly staffReference?: string
 }
 
 /**

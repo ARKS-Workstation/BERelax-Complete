@@ -188,7 +188,7 @@ describe('session tokens', () => {
 
 describe('login stage — TOTP is unrepresentable to skip', () => {
   const input = (overrides: Partial<LoginInput>): LoginInput => ({
-    role: 'owner',
+    role: 'owner' as const,
     passwordVerified: true,
     totpEnrolled: true,
     totpVerified: true,

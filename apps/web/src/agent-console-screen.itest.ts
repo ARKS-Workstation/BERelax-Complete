@@ -147,7 +147,12 @@ describe('acceptance — the console is generated from the registry', () => {
     // And the RENDERED count, which is the figure the acceptance line is about: a query that grew and a
     // page that did not would satisfy the assertion above.
     const html = renderAgentConsoleHtml({
-      chrome: { googleReauth: null, sendBacklog: null, returnTo: '/agents' },
+      chrome: {
+        googleReauth: null,
+        sendBacklog: null,
+        role: 'owner' as const,
+        returnTo: '/agents',
+      },
       screen: after,
       mayToggle: true,
       direction: 'ltr',
@@ -332,7 +337,7 @@ describe('acceptance — the kill switch is audited and refused by role', () => 
       expect(row?.actorId).toBe(principal.employeeId)
       expect(row?.entityId).toBe('nightly_rollups')
       expect(row?.operation).toBe('update')
-      expect(row?.after).toMatchObject({ role: 'owner', desired: 'on' })
+      expect(row?.after).toMatchObject({ role: 'owner' as const, desired: 'on' })
       const [agent] = await sql<{ killSwitch: boolean }[]>`
         select kill_switch as "killSwitch" from agent_definition where agent_key = 'nightly_rollups'
       `
@@ -543,7 +548,12 @@ describe('acceptance — axe, and a pixel diff of zero on a second run', () => {
       name: 'agent-console',
       html: (options: { direction: 'ltr' | 'rtl'; theme: 'light' | 'dark' }) =>
         renderAgentConsoleHtml({
-          chrome: { googleReauth: null, sendBacklog: null, returnTo: '/agents' },
+          chrome: {
+            googleReauth: null,
+            sendBacklog: null,
+            role: 'owner' as const,
+            returnTo: '/agents',
+          },
           screen,
           mayToggle: true,
           direction: options.direction,

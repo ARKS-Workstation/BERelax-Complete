@@ -89,7 +89,7 @@ async function restoreDisengaged(): Promise<void> {
     toggleMessagingControl(uow, {
       controlKey: 'marketing_kill_switch',
       engaged: false,
-      role: 'owner',
+      role: 'owner' as const,
       actorLabel: MARKER,
       reason: 'Test teardown: restoring the seeded disengaged state.',
       at: ENGAGED_AT + 3_600_000,
@@ -164,7 +164,7 @@ describe('the switch has one home, and the gate reads its argument from there', 
         toggleMessagingControl(uow, {
           controlKey: 'marketing_kill_switch',
           engaged: true,
-          role: 'owner',
+          role: 'owner' as const,
           actorLabel: MARKER,
           reason: 'Stopping marketing.',
           at: ENGAGED_AT,
@@ -175,7 +175,7 @@ describe('the switch has one home, and the gate reads its argument from there', 
           toggleMessagingControl(uow, {
             controlKey: 'marketing_kill_switch',
             engaged: true,
-            role: 'owner',
+            role: 'owner' as const,
             actorLabel: MARKER,
             // The realistic shape: a double-submitted form, with a different reason attached.
             reason: 'Stopping marketing again.',
@@ -246,7 +246,7 @@ describe('every toggle writes an audit_event carrying the actor, the direction a
         toggleMessagingControl(uow, {
           controlKey: 'marketing_kill_switch',
           engaged: true,
-          role: 'owner',
+          role: 'owner' as const,
           actorLabel: MARKER,
           reason: '   ',
           at: ENGAGED_AT,

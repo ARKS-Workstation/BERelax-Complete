@@ -210,7 +210,7 @@ describe('acceptance — switching to advisory is owner-only, audited and justif
         withUnitOfWork(sql, OWNER, (uow) =>
           setGenderMatching(uow, {
             mode: 'advisory',
-            role: 'owner',
+            role: 'owner' as const,
             actorLabel: 'Owner',
             reason,
           }),
@@ -227,7 +227,7 @@ describe('acceptance — switching to advisory is owner-only, audited and justif
         writeSetting(uow, {
           key: GENDER_MATCHING_SETTING_KEY,
           value: 'off',
-          role: 'owner',
+          role: 'owner' as const,
           actorLabel: 'Owner',
           justification: WRITTEN_BASIS,
         }),
@@ -248,7 +248,7 @@ describe('acceptance — switching to advisory is owner-only, audited and justif
     const result = await withUnitOfWork(sql, OWNER, (uow) =>
       setGenderMatching(uow, {
         mode: 'advisory',
-        role: 'owner',
+        role: 'owner' as const,
         actorLabel: 'Owner',
         reason: WRITTEN_BASIS,
       }),
@@ -302,7 +302,7 @@ describe('acceptance — switching to advisory is owner-only, audited and justif
     await withUnitOfWork(sql, OWNER, (uow) =>
       setGenderMatching(uow, {
         mode: 'strict',
-        role: 'owner',
+        role: 'owner' as const,
         actorLabel: 'Owner',
         reason: 'B-AVAIL-05 probe: restoring the strict default.',
       }),
@@ -318,7 +318,7 @@ describe('acceptance — switching to advisory is owner-only, audited and justif
       withUnitOfWork(sql, OWNER, async (uow) => {
         await setGenderMatching(uow, {
           mode: 'advisory',
-          role: 'owner',
+          role: 'owner' as const,
           actorLabel: 'Owner',
           reason: WRITTEN_BASIS,
         })

@@ -106,7 +106,7 @@ const CALLER: Actor = { kind: 'staff', label: 'B-LIFE-03 pair itest' }
 const ACTOR_ID = '00000000-0000-4000-8000-00000000b301'
 const OWNER: TransitionActor = {
   kind: 'staff',
-  role: 'owner',
+  role: 'owner' as const,
   id: ACTOR_ID,
   label: 'B-LIFE-03 pair itest',
 }

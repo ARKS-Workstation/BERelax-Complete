@@ -74,7 +74,12 @@ const TURNAROUND_MINUTES = 20
 const OWN_ROSTERED_MINUTES = 180
 const OTHER_ROSTERED_MINUTES = 180
 
-const CHROME: AdminChrome = { googleReauth: null, sendBacklog: null, returnTo: DASHBOARD_PATH }
+const CHROME: AdminChrome = {
+  googleReauth: null,
+  sendBacklog: null,
+  role: 'owner' as const,
+  returnTo: DASHBOARD_PATH,
+}
 
 let sql: Sql
 

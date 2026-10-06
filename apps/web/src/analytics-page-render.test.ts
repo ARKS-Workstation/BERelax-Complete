@@ -154,7 +154,12 @@ function pageData(overrides: Partial<AnalyticsPageData> = {}): AnalyticsPageData
 }
 
 const view = (overrides: Partial<AnalyticsPageView> = {}): AnalyticsPageView => ({
-  chrome: { googleReauth: null, sendBacklog: null, returnTo: `/analytics?date=${DATE}` },
+  chrome: {
+    googleReauth: null,
+    sendBacklog: null,
+    role: 'owner' as const,
+    returnTo: `/analytics?date=${DATE}`,
+  },
   data: pageData(),
   direction: 'ltr',
   ...overrides,
@@ -401,6 +406,7 @@ describe('the document', () => {
         googleEmail: null,
       },
       sendBacklog: { queued: 31, threshold: 20 },
+      role: 'owner' as const,
       returnTo: `/analytics?date=${DATE}`,
     }
     const html = renderAnalyticsPageHtml(view({ chrome }))

@@ -402,7 +402,7 @@ describe('acceptance — a login without a TOTP factor cannot produce a session 
    * actually work, so "mandatory TOTP" is proven positively as well as negatively.
    */
   it('admits an owner WITH an enrolled factor and a valid code, and burns the code', async () => {
-    const owner = await principal({ role: 'owner', withSession: false, enrolTotp: true })
+    const owner = await principal({ role: 'owner' as const, withSession: false, enrolTotp: true })
     const secret = owner.totpSecret ?? ''
     expect(secret).not.toBe('')
 

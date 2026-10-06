@@ -87,7 +87,7 @@ describe('writeSetting', () => {
       writeSetting(uow, {
         key: 'booking.turnaround_minutes_standard',
         value: 25,
-        role: 'owner',
+        role: 'owner' as const,
         actorLabel: 'Owner',
       }),
     )
@@ -102,7 +102,7 @@ describe('writeSetting', () => {
         writeSetting(uow, {
           key: 'booking.turnaround_minutes_standard',
           value: 999,
-          role: 'owner',
+          role: 'owner' as const,
           actorLabel: 'Owner',
         }),
       ),
@@ -129,7 +129,7 @@ describe('writeSetting', () => {
         writeSetting(uow, {
           key: 'booking.same_gender_matching',
           value: 'advisory',
-          role: 'owner',
+          role: 'owner' as const,
           actorLabel: 'Owner',
         }),
       ),
@@ -141,7 +141,7 @@ describe('writeSetting', () => {
       writeSetting(uow, {
         key: 'booking.same_gender_matching',
         value: 'advisory',
-        role: 'owner',
+        role: 'owner' as const,
         actorLabel: 'Owner',
         justification: 'ADDED confirmed in writing on 2026-09-18, ref ABC/123.',
       }),
@@ -164,7 +164,7 @@ describe('writeSetting', () => {
       writeSetting(uow, {
         key: 'booking.turnaround_minutes_standard',
         value: 15,
-        role: 'owner',
+        role: 'owner' as const,
         actorLabel: 'Owner',
       }),
     )
@@ -180,7 +180,7 @@ describe('writeSetting', () => {
         await writeSetting(uow, {
           key: 'booking.min_lead_minutes',
           value: 30,
-          role: 'owner',
+          role: 'owner' as const,
           actorLabel: 'Owner',
         })
         throw new Error('deliberate rollback')
@@ -201,7 +201,7 @@ describe('history', () => {
         writeSetting(uow, {
           key: 'booking.turnaround_minutes_standard',
           value,
-          role: 'owner',
+          role: 'owner' as const,
           actorLabel: 'Owner',
         }),
       )
@@ -225,7 +225,7 @@ describe('history', () => {
       writeSetting(uow, {
         key: 'booking.same_gender_matching',
         value: 'advisory',
-        role: 'owner',
+        role: 'owner' as const,
         actorLabel: 'Owner',
         justification: 'Y9-gender confirmed with the licensing authority on 2026-09-18',
       }),
@@ -246,7 +246,7 @@ describe('history', () => {
       writeSetting(uow, {
         key: 'theme.density',
         value: 'compact',
-        role: 'owner',
+        role: 'owner' as const,
         actorLabel: 'Owner',
       }),
     )
@@ -262,7 +262,7 @@ describe('history', () => {
       writeSetting(uow, {
         key: 'theme.density',
         value: 'compact',
-        role: 'owner',
+        role: 'owner' as const,
         actorLabel: 'Owner',
       }),
     )

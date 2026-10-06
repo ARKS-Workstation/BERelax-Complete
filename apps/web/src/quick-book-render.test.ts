@@ -30,6 +30,7 @@ import {
 const CHROME = {
   googleReauth: null,
   sendBacklog: null,
+  role: 'owner' as const,
   returnTo: '/settings/integrations',
 } as const
 

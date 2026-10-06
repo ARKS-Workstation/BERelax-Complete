@@ -140,7 +140,7 @@ describe('who may use the portal at all', () => {
     expect(() =>
       assertPortalSubject({
         surface: 'leave',
-        role: 'owner',
+        role: 'owner' as const,
         viewerEmployeeId: VIEWER,
         subjectEmployeeId: COLLEAGUE,
       }),

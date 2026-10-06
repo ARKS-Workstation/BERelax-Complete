@@ -78,7 +78,12 @@ function board(): PipelineBoard {
 
 function view(overrides: Partial<PipelineView> = {}): PipelineView {
   return {
-    chrome: { googleReauth: null, sendBacklog: null, returnTo: '/crm/pipeline' },
+    chrome: {
+      googleReauth: null,
+      sendBacklog: null,
+      role: 'owner' as const,
+      returnTo: '/crm/pipeline',
+    },
     board: board(),
     direction: 'ltr',
     vocabularyOpenQuestion: 'Y9-crm-pipeline',

@@ -338,7 +338,7 @@ describe('who may move a control', () => {
         // The realistic version: somebody adds a control for the traffic that must never be stoppable.
         controlKey: 'transactional_kill_switch' as never,
         direction: 'engage',
-        role: 'owner',
+        role: 'owner' as const,
         reason: 'Stopping everything.',
       }),
     ).toThrow(/not a messaging control/)

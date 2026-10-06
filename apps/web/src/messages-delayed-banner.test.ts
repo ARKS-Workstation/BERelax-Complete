@@ -75,6 +75,7 @@ describe('the messages-delayed banner', () => {
         googleEmail: null,
       },
       sendBacklog: { queued: 40, threshold: 20 },
+      role: 'owner' as const,
       returnTo: '/messaging',
     })
     expect(html.indexOf('messages-delayed')).toBeGreaterThanOrEqual(0)
@@ -87,6 +88,7 @@ describe('the messages-delayed banner', () => {
     const backlogOnly = renderAdminBanner({
       googleReauth: null,
       sendBacklog: { queued: 40, threshold: 20 },
+      role: 'owner' as const,
       returnTo: '/messaging',
     })
     expect(backlogOnly).toContain('messages-delayed')
@@ -94,6 +96,7 @@ describe('the messages-delayed banner', () => {
     const neither = renderAdminBanner({
       googleReauth: null,
       sendBacklog: null,
+      role: 'owner' as const,
       returnTo: '/messaging',
     })
     expect(neither).toBe('')

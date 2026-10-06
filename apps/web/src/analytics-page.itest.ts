@@ -332,7 +332,12 @@ describe('acceptance — all nine panels render, and every headline is its own q
   it('compares the rendered headline against a second, independent call of each panel’s reader', async () => {
     const result = await withCohort(async (tx, at) => {
       const html = renderAnalyticsPageHtml({
-        chrome: { googleReauth: null, sendBacklog: null, returnTo: '/analytics' },
+        chrome: {
+          googleReauth: null,
+          sendBacklog: null,
+          role: 'owner' as const,
+          returnTo: '/analytics',
+        },
         data: await readAnalyticsPage(tx, at),
         direction: 'ltr',
       })
@@ -580,7 +585,12 @@ describe('acceptance — axe, and a pixel diff of zero on a second run', () => {
       name: 'admin-analytics',
       html: (options: { direction: 'ltr' | 'rtl'; theme: 'light' | 'dark' }) =>
         renderAnalyticsPageHtml({
-          chrome: { googleReauth: null, sendBacklog: null, returnTo: '/analytics' },
+          chrome: {
+            googleReauth: null,
+            sendBacklog: null,
+            role: 'owner' as const,
+            returnTo: '/analytics',
+          },
           data,
           direction: options.direction,
         }),

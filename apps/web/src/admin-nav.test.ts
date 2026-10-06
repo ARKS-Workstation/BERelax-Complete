@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { ADMIN_NAV, PERMISSIONS, ROLES, adminNavFor, adminNavLocate, can } from '@berelax/core'
+import { ADMIN_NAV, adminNavFor, adminNavLocate, can, PERMISSIONS, ROLES } from '@berelax/core'
 import { describe, expect, it } from 'vitest'
 
 /**
@@ -59,16 +59,18 @@ describe('ADMIN_NAV', () => {
     for (const role of ROLES) {
       const visible = adminNavFor(role).flatMap((group) => group.items)
       for (const item of visible) {
-        expect(can(role, item.permission), `${role} sees ${item.href} without ${item.permission}`).toBe(
-          true,
-        )
+        expect(
+          can(role, item.permission),
+          `${role} sees ${item.href} without ${item.permission}`,
+        ).toBe(true)
       }
       const hiddenButPermitted = ADMIN_NAV.flatMap((group) => group.items)
         .filter((item) => can(role, item.permission))
         .filter((item) => !visible.some((shown) => shown.href === item.href))
-      expect(hiddenButPermitted.map((item) => item.href), `hidden from ${role} despite access`).toEqual(
-        [],
-      )
+      expect(
+        hiddenButPermitted.map((item) => item.href),
+        `hidden from ${role} despite access`,
+      ).toEqual([])
     }
   })
 

@@ -49,7 +49,7 @@ const FIXTURE_ACCOUNT_HOLDER = 'FIXTURE ACCOUNT HOLDER (not a real person)'
 const PREFIX = 'PHR01-'
 const reference = (name: string) => `${PREFIX}${name}`
 
-const OWNER = { role: 'owner', actor: { kind: 'staff', label: 'phr01-owner' } } as const
+const OWNER = { role: 'owner' as const, actor: { kind: 'staff', label: 'phr01-owner' } } as const
 const MANAGER = { role: 'manager', actor: { kind: 'staff', label: 'phr01-manager' } } as const
 const RECEPTIONIST = {
   role: 'receptionist',

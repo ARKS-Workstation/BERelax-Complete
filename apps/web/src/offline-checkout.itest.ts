@@ -68,6 +68,7 @@ const AMOUNT_FILS = '20000'
 const chrome = () => ({
   googleReauth: null,
   sendBacklog: null,
+  role: 'owner' as const,
   returnTo: '/checkout',
 })
 
@@ -151,7 +152,7 @@ async function moneyRows(reference: string): Promise<{
 
 beforeAll(async () => {
   sql = createConnection({ url, max: 2 })
-  principal = await createFixturePrincipal(sql, { role: 'owner', enrolTotp: true })
+  principal = await createFixturePrincipal(sql, { role: 'owner' as const, enrolTotp: true })
 }, 30_000)
 
 afterAll(async () => {

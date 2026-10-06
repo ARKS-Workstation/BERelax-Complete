@@ -69,7 +69,7 @@ function row(overrides: Partial<QueuedReview> = {}): QueuedReview {
 }
 
 const queueView = (overrides: Partial<ReviewsQueueView> = {}): ReviewsQueueView => ({
-  chrome: { googleReauth: null, sendBacklog: null, returnTo: '/reviews' },
+  chrome: { googleReauth: null, sendBacklog: null, role: 'owner' as const, returnTo: '/reviews' },
   direction: 'ltr',
   readOnDate: '2026-09-21',
   listings: [{ connectionId: 'c', placeId: PLACE, googleEmail: 'owner@example.test' }],
@@ -87,7 +87,7 @@ const detailView = (
   source: QueuedReview = row(),
   overrides: Partial<ReviewDetailView> = {},
 ): ReviewDetailView => ({
-  chrome: { googleReauth: null, sendBacklog: null, returnTo: '/reviews' },
+  chrome: { googleReauth: null, sendBacklog: null, role: 'owner' as const, returnTo: '/reviews' },
   direction: 'ltr',
   readOnDate: '2026-09-21',
   listing: { connectionId: 'c', placeId: PLACE, googleEmail: 'owner@example.test' },

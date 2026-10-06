@@ -99,7 +99,7 @@ async function setPublishingStatus(value: 'testing' | 'production'): Promise<voi
     writeSetting(uow, {
       key: PUBLISHING_STATUS,
       value,
-      role: 'owner',
+      role: 'owner' as const,
       actorLabel: 'gconn06-fragment-itest',
     }),
   )

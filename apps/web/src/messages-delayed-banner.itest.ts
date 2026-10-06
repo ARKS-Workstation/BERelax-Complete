@@ -108,7 +108,7 @@ async function setThreshold(value: number): Promise<void> {
     writeSetting(uow, {
       key: SEND_BACKLOG_THRESHOLD_SETTING_KEY,
       value,
-      role: 'owner',
+      role: 'owner' as const,
       actorLabel: 'hhard05-banner-itest',
     }),
   )

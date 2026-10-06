@@ -91,7 +91,12 @@ function view(entries: readonly InboxEntry[], overrides: Partial<InboxView> = {}
   return {
     // No banner: the inbox's screenshots must not diff when another suite leaves a broken Google
     // connection behind (brief rule 12), and the banner is photographed by its own suite.
-    chrome: { googleReauth: null, sendBacklog: null, returnTo: '/settings/messages' },
+    chrome: {
+      googleReauth: null,
+      sendBacklog: null,
+      role: 'owner' as const,
+      returnTo: '/settings/messages',
+    },
     entries,
     filter: { templateKey: null, recipient: null, status: null, limit: 50 },
     smsProvider: 'fake',

@@ -54,6 +54,7 @@ const MEASURED = 120 * 1024
 const CHROME: AdminChrome = {
   googleReauth: null,
   sendBacklog: null,
+  role: 'owner' as const,
   returnTo: SEO_SUGGESTIONS_PATH,
 }
 
@@ -62,7 +63,7 @@ const OWNER: SuggestionsPrincipal = {
   id: '00000000-0000-7000-8000-00000000f001',
   // The employment record's handle. An audit label that names no person (ADR 0020, brief rule 10).
   staffReference: 'Employee 0007',
-  role: 'owner',
+  role: 'owner' as const,
 }
 const RECEPTIONIST: SuggestionsPrincipal = { ...OWNER, role: 'receptionist' }
 
@@ -294,7 +295,11 @@ describe('the suggestions queue', () => {
     const row = await storeProposed(surfaceFor('query'))
     const response = await handleSeoSuggestionsWrite(
       {
-        searchParams: new URLSearchParams({ role: 'owner', suggestion: row.id, action: 'approve' }),
+        searchParams: new URLSearchParams({
+          role: 'owner' as const,
+          suggestion: row.id,
+          action: 'approve',
+        }),
         body: new URLSearchParams(),
         principal: RECEPTIONIST,
         chrome: CHROME,

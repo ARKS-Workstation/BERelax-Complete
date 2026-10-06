@@ -450,7 +450,7 @@ describe('completing an occurrence', () => {
       obligationCompletionRefusal({ definition: owed, role: 'manager', hasEvidence: true }),
     ).toBeNull()
     expect(
-      obligationCompletionRefusal({ definition: owed, role: 'owner', hasEvidence: true }),
+      obligationCompletionRefusal({ definition: owed, role: 'owner' as const, hasEvidence: true }),
     ).toBeNull()
     // And an obligation that requires no evidence completes without one.
     expect(

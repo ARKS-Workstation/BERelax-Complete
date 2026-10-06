@@ -35,7 +35,7 @@ const UNCONFIGURED: HostedFieldsConfiguration = {
 }
 
 const input = (hostedFields: HostedFieldsConfiguration) => ({
-  chrome: { googleReauth: null, sendBacklog: null, returnTo: '/checkout' },
+  chrome: { googleReauth: null, sendBacklog: null, role: 'owner' as const, returnTo: '/checkout' },
   hostedFields,
   gatewayName: 'fake-card-gateway',
   nowIso: '2026-09-29T11:30:00.000Z',
@@ -113,6 +113,7 @@ describe('the checkout renders no card field of its own', () => {
               googleEmail: null,
             },
             sendBacklog: null,
+            role: 'owner' as const,
             returnTo: '/checkout',
           },
         },

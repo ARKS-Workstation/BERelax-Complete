@@ -665,7 +665,7 @@ describe('acceptance — the whole chain, in one browser session', () => {
         actor: {
           kind: 'staff',
           id: principals[0]?.employeeId ?? '',
-          role: 'owner',
+          role: 'owner' as const,
           label: 'bm1-walkthrough',
         },
         reason: 'the M1 walkthrough confirms what the public flow left requested',

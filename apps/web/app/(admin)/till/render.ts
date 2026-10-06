@@ -1,5 +1,5 @@
 import { DISCOUNT_REASONS, safeText } from '@berelax/core'
-import { tokensCss } from '@berelax/ui'
+import { renderAdminShell } from '@berelax/ui/admin'
 import {
   ADMIN_BANNER_CSS,
   renderAdminBanner,
@@ -509,68 +509,62 @@ function issuerPanel(view: TillView): string {
 export function renderTillHtml(view: TillView): string {
   const refused = view.refusal
   const issued = view.issued
-  return [
-    '<!doctype html>',
-    `<html lang="en" dir="${view.direction}"` +
+  const title = view.screen === 'preview' ? 'Invoice preview' : 'Till'
+  return renderAdminShell({
+    title,
+    path: '/till',
+    role: view.chrome.role,
+    staffReference: view.chrome.staffReference,
+    // The data attributes this screen's tests assert on, passed through verbatim. The shell does not
+    // compose them: forty render modules have a contract with their tests about these exact strings.
+    htmlAttributes:
+      ` dir="${view.direction}"` +
       `${refused === null ? '' : ` data-till-refusal="${safeText(refused.code)}"`}` +
-      ` data-till-screen="${safeText(view.screen)}">`,
-    '<head>',
-    '<meta charset="utf-8">',
-    '<meta name="viewport" content="width=device-width, initial-scale=1">',
-    '<meta name="robots" content="noindex, nofollow, noarchive">',
-    // No brand in the title: `apps/web/src/seo/brand.test.ts` requires the full trading name wherever the
-    // brand appears, and an internal screen naming it would be citing the wrong entity. The rule is about
-    // how the brand is written, so not writing it is compliant.
-    `<title>${view.screen === 'preview' ? 'Invoice preview' : 'Till'} — admin</title>`,
-    `<style>${tokensCss()}${TILL_CSS}${ADMIN_BANNER_CSS}</style>`,
-    '</head>',
-    '<body>',
-    '<main>',
-    renderAdminBanner(view.chrome),
-    `<h1>${view.screen === 'preview' ? 'Invoice preview' : 'Till'}</h1>`,
-    tillNav(view),
-    '<div class="lede">',
-    `<p><strong>${safeText(view.dayLabel)}</strong></p>`,
-    `<p data-testid="till-lede">${safeText(view.lede)}</p>`,
-    '</div>',
-    // `role="status"` with `aria-live="polite"`: on this screen every outcome arrives as a new document, so
-    // the live region is what a screen-reader user hears instead of being told to go and look for it.
-    `<p class="live" role="status" aria-live="polite" data-testid="till-live">${safeText(view.announcement)}</p>`,
-    refused === null
-      ? ''
-      : `<div class="notice" data-testid="till-refusal" ${attribute('data-refusal', refused.code)}>` +
-        `<p>${safeText(refused.sentence)}</p>` +
-        (refused.openQuestionId === null
-          ? ''
-          : `<p>Waiting on <code data-testid="till-refusal-question">${safeText(refused.openQuestionId)}</code>.</p>`) +
-        '</div>',
-    issued === null
-      ? ''
-      : '<div class="issued" data-testid="till-issued">' +
-        '<h2>Issued</h2><dl>' +
-        `<dt>Document</dt><dd data-field="number">${safeText(issued.displayNumber)}</dd>` +
-        `<dt>Form</dt><dd data-field="kind">${safeText(issued.documentKind)}</dd>` +
-        `<dt>Series</dt><dd data-field="series">${safeText(issued.seriesCode)}</dd>` +
-        `<dt>Total</dt><dd data-field="gross">${safeText(issued.grossLabel)}</dd>` +
-        `<dt>Tendered</dt><dd data-field="tenders">${safeText(issued.tenderLabels.join(', '))}</dd>` +
-        '</dl></div>',
-    '<div class="desk">',
-    '<div class="entry">',
-    basketForm(view),
-    tenderForm(view),
-    keypad(view),
-    '</div>',
-    '<div class="totals" data-testid="till-total-column">',
-    basketPanel(view.basket),
-    postingPanel(view.posting),
-    '</div>',
-    '</div>',
-    view.screen === 'preview' ? mandatoryPanel(view.mandatory) : '',
-    issuerPanel(view),
-    assumptionsPanel(view),
-    '</main>',
-    inlineScriptTag(view.chrome.cspNonce, TILL_SCRIPT),
-    '</body>',
-    '</html>',
-  ].join('\n')
+      ` data-till-screen="${safeText(view.screen)}"`,
+    pageCss: `${TILL_CSS}${ADMIN_BANNER_CSS}`,
+    banner: renderAdminBanner(view.chrome),
+    afterMain: inlineScriptTag(view.chrome.cspNonce, TILL_SCRIPT),
+    body: [
+      tillNav(view),
+      '<div class="lede">',
+      `<p><strong>${safeText(view.dayLabel)}</strong></p>`,
+      `<p data-testid="till-lede">${safeText(view.lede)}</p>`,
+      '</div>',
+      // `role="status"` with `aria-live="polite"`: on this screen every outcome arrives as a new document, so
+      // the live region is what a screen-reader user hears instead of being told to go and look for it.
+      `<p class="live" role="status" aria-live="polite" data-testid="till-live">${safeText(view.announcement)}</p>`,
+      refused === null
+        ? ''
+        : `<div class="notice" data-testid="till-refusal" ${attribute('data-refusal', refused.code)}>` +
+          `<p>${safeText(refused.sentence)}</p>` +
+          (refused.openQuestionId === null
+            ? ''
+            : `<p>Waiting on <code data-testid="till-refusal-question">${safeText(refused.openQuestionId)}</code>.</p>`) +
+          '</div>',
+      issued === null
+        ? ''
+        : '<div class="issued" data-testid="till-issued">' +
+          '<h2>Issued</h2><dl>' +
+          `<dt>Document</dt><dd data-field="number">${safeText(issued.displayNumber)}</dd>` +
+          `<dt>Form</dt><dd data-field="kind">${safeText(issued.documentKind)}</dd>` +
+          `<dt>Series</dt><dd data-field="series">${safeText(issued.seriesCode)}</dd>` +
+          `<dt>Total</dt><dd data-field="gross">${safeText(issued.grossLabel)}</dd>` +
+          `<dt>Tendered</dt><dd data-field="tenders">${safeText(issued.tenderLabels.join(', '))}</dd>` +
+          '</dl></div>',
+      '<div class="desk">',
+      '<div class="entry">',
+      basketForm(view),
+      tenderForm(view),
+      keypad(view),
+      '</div>',
+      '<div class="totals" data-testid="till-total-column">',
+      basketPanel(view.basket),
+      postingPanel(view.posting),
+      '</div>',
+      '</div>',
+      view.screen === 'preview' ? mandatoryPanel(view.mandatory) : '',
+      issuerPanel(view),
+      assumptionsPanel(view),
+    ].join('\n'),
+  })
 }

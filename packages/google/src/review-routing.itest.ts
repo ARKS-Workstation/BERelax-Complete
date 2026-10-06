@@ -125,7 +125,7 @@ afterAll(async () => {
     writeSetting(uow, {
       key: REVIEW_AUTOSEND_SETTING_KEY,
       value: false,
-      role: 'owner',
+      role: 'owner' as const,
       actorLabel: 'Owner',
       justification: 'G-REV-03 integration test restoring the compliance-locked default',
     }),
@@ -484,7 +484,7 @@ describe('acceptance — compliance-locked, against real app_setting rows', () =
         writeSetting(uow, {
           key: REVIEW_AUTOSEND_SETTING_KEY,
           value: true,
-          role: 'owner',
+          role: 'owner' as const,
           actorLabel: 'Owner',
         }),
       ),
@@ -512,7 +512,7 @@ describe('acceptance — compliance-locked, against real app_setting rows', () =
         writeSetting(uow, {
           key: 'agents.review_autosend_cooling_off_hours',
           value: 1,
-          role: 'owner',
+          role: 'owner' as const,
           actorLabel: 'Owner',
           justification: 'we want replies to go out faster',
         }),
@@ -526,7 +526,7 @@ describe('acceptance — compliance-locked, against real app_setting rows', () =
       writeSetting(uow, {
         key: REVIEW_AUTOSEND_SETTING_KEY,
         value: true,
-        role: 'owner',
+        role: 'owner' as const,
         actorLabel: 'Owner',
         justification:
           'G-REV-03 integration test: owner enabling auto-send for quiet 5-star reviews',

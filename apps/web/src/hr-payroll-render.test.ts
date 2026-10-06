@@ -24,6 +24,7 @@ import {
 const CHROME: PayrollPageView['chrome'] = {
   googleReauth: null,
   sendBacklog: null,
+  role: 'owner' as const,
   returnTo: '/hr/payroll',
 }
 

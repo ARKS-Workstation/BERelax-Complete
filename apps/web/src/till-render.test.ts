@@ -23,7 +23,12 @@ import {
  * count — are `till.itest.ts`'s, and that file says why.
  */
 
-const CHROME = { googleReauth: null, sendBacklog: null, returnTo: '/till' } as const
+const CHROME = {
+  googleReauth: null,
+  sendBacklog: null,
+  role: 'owner' as const,
+  returnTo: '/till',
+} as const
 
 function view(overrides: Partial<TillView> = {}): TillView {
   const base: TillView = {
@@ -179,8 +184,18 @@ describe('acceptance — the till document says what it can and cannot do', () =
     expect(html).toContain('data-field="trn" data-absent="1"')
     expect(html).toContain('<span class="absent">not entered</span> <code>Y1-trn</code>')
     expect(html).not.toContain('TRN-PENDING')
-    // Each form has exactly ONE submit button, which is what makes Enter do the one thing that form is for.
-    expect(html.match(/type="submit"/g)).toHaveLength(2)
+    /*
+      Each form has exactly ONE submit button, which is what makes Enter do the one thing that form is for.
+
+      Asserted as an IDENTITY between the two counts rather than as the literal 2 it used to be. The shell
+      put a sign-out form in the topbar, so the document now holds three forms and three submits, and the
+      number 2 was never the property under test — it was the arithmetic of the day it was written. The
+      identity says what the comment says, and it keeps saying it when the chrome gains a control.
+    */
+    const forms = html.match(/<form\b/g) ?? []
+    const submits = html.match(/type="submit"/g) ?? []
+    expect(forms.length).toBeGreaterThanOrEqual(2)
+    expect(submits).toHaveLength(forms.length)
   })
 
   it('renders the same bytes twice for the same view', () => {

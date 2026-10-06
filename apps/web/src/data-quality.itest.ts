@@ -86,7 +86,12 @@ const VAT_FILS = 952
 /** The revenue account the probe's sale credits. `4010` is treatment revenue in the standard chart. */
 const TREATMENT_REVENUE = '4010'
 
-const CHROME: AdminChrome = { googleReauth: null, sendBacklog: null, returnTo: DATA_QUALITY_PATH }
+const CHROME: AdminChrome = {
+  googleReauth: null,
+  sendBacklog: null,
+  role: 'owner' as const,
+  returnTo: DATA_QUALITY_PATH,
+}
 
 const AS = (role: DataQualityPrincipal['role']): DataQualityPrincipal => ({
   role,

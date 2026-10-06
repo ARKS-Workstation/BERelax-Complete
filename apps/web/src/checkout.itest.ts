@@ -120,7 +120,7 @@ beforeAll(async () => {
 
   // The checkout is behind `guardAdminRoute`, so the suite mints a session and presents the cookie (brief:
   // a query parameter may never choose a principal, and a repository-wide scan refuses one).
-  principal = await createFixturePrincipal(sql, { role: 'owner', enrolTotp: true })
+  principal = await createFixturePrincipal(sql, { role: 'owner' as const, enrolTotp: true })
 
   const gateway = await startGatewayOrigin()
   gatewayOrigin = gateway.server

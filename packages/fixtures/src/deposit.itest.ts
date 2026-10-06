@@ -842,7 +842,7 @@ describe('the deposit policy is a provisional setting and changing it is audited
       writeSetting(uow, {
         key: DEPOSIT_ENABLED_SETTING_KEY,
         value: true,
-        role: 'owner',
+        role: 'owner' as const,
         actorLabel: 'Y-PAY-06 deposit itest',
       }),
     )

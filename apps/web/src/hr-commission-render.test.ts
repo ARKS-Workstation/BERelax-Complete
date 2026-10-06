@@ -22,6 +22,7 @@ import {
 const CHROME: CommissionPageView['chrome'] = {
   googleReauth: null,
   sendBacklog: null,
+  role: 'owner' as const,
   returnTo: '/hr/commission',
 }
 

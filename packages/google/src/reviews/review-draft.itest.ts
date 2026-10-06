@@ -268,7 +268,7 @@ afterAll(async () => {
     writeSetting(uow, {
       key: LLM_PROVIDER_SETTING_KEY,
       value: DEFAULT_LLM_PROVIDER,
-      role: 'owner',
+      role: 'owner' as const,
       actorLabel: 'Owner',
     }),
   )
@@ -687,7 +687,7 @@ describe('acceptance — the provider is selectable in settings', () => {
 
     await saveLlmProviderChoice(
       { sql, actor: OWNER, adapterFor: providersFor },
-      { provider: MINIMAX, apiKey: ACCEPTED_KEY, role: 'owner', actorLabel: 'Owner' },
+      { provider: MINIMAX, apiKey: ACCEPTED_KEY, role: 'owner' as const, actorLabel: 'Owner' },
     )
     expect(await readSetting(sql, LLM_PROVIDER_SETTING_KEY)).toBe(MINIMAX)
   })
@@ -703,7 +703,7 @@ describe('acceptance — the provider is selectable in settings', () => {
         {
           provider: DEEPSEEK,
           apiKey: `${ACCEPTED_KEY}${REJECTED_KEY_MARKER}`,
-          role: 'owner',
+          role: 'owner' as const,
           actorLabel: 'Owner',
         },
       ),
@@ -721,14 +721,14 @@ describe('acceptance — the provider is selectable in settings', () => {
     await expect(
       saveLlmProviderChoice(
         { sql, actor: OWNER, adapterFor: providersFor },
-        { provider: DEEPSEEK, apiKey: '', role: 'owner', actorLabel: 'Owner' },
+        { provider: DEEPSEEK, apiKey: '', role: 'owner' as const, actorLabel: 'Owner' },
       ),
     ).rejects.toThrow(/API key is empty/)
 
     await expect(
       saveLlmProviderChoice(
         { sql, actor: OWNER, adapterFor: providersFor },
-        { provider: 'gpt-9', apiKey: ACCEPTED_KEY, role: 'owner', actorLabel: 'Owner' },
+        { provider: 'gpt-9', apiKey: ACCEPTED_KEY, role: 'owner' as const, actorLabel: 'Owner' },
       ),
     ).rejects.toThrow(/is not an LLM provider this build knows/)
 

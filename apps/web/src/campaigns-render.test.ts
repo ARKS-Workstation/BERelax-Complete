@@ -13,6 +13,7 @@ import type { AdminChrome } from './components/admin/google-reauth-banner.ts'
 const CHROME: AdminChrome = {
   googleReauth: null,
   sendBacklog: null,
+  role: 'owner' as const,
   returnTo: '/crm/campaigns',
 }
 

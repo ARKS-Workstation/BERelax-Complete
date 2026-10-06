@@ -497,7 +497,7 @@ describe('the Y5-residency gate', () => {
         writeSetting(uow, {
           key: CLINICAL_REAL_INTAKE_SETTING_KEY,
           value: true,
-          role: 'owner',
+          role: 'owner' as const,
           actorLabel: 'fixture owner',
           justification:
             'fixture: proving the gate is a configuration change and not a code change',
@@ -512,7 +512,7 @@ describe('the Y5-residency gate', () => {
         writeSetting(uow, {
           key: CLINICAL_REAL_INTAKE_SETTING_KEY,
           value: false,
-          role: 'owner',
+          role: 'owner' as const,
           actorLabel: 'fixture owner',
           justification: 'fixture teardown: back to the strict default',
         }),
@@ -529,7 +529,7 @@ describe('the Y5-residency gate', () => {
         writeSetting(uow, {
           key: CLINICAL_REAL_INTAKE_SETTING_KEY,
           value: true,
-          role: 'owner',
+          role: 'owner' as const,
           actorLabel: 'fixture owner',
         }),
       ),
@@ -671,7 +671,7 @@ describe('the read gate and the audit trail', () => {
         writeSetting(uow, {
           key: CLINICAL_STEP_UP_WINDOW_SETTING_KEY,
           value: 60,
-          role: 'owner',
+          role: 'owner' as const,
           actorLabel: 'fixture owner',
           justification: 'fixture: attempting a window above the ceiling',
         }),

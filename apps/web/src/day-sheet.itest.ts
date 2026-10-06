@@ -53,6 +53,7 @@ const ROOM_CODE = 'hhard08-sheet-room'
 const CHROME: AdminChrome = {
   googleReauth: null,
   sendBacklog: null,
+  role: 'owner' as const,
   returnTo: '/day-sheet/print',
 }
 

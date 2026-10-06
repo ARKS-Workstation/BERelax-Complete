@@ -26,6 +26,7 @@ import type { AdminChrome } from './components/admin/google-reauth-banner.ts'
 const CHROME: AdminChrome = {
   googleReauth: null,
   sendBacklog: null,
+  role: 'owner' as const,
   returnTo: '/hr/me',
 }
 
@@ -222,7 +223,12 @@ describe('the staff portal document', () => {
 
 describe('the leave filing document', () => {
   const html = renderLeaveFilingHtml({
-    chrome: { googleReauth: null, sendBacklog: null, returnTo: '/hr/leave' },
+    chrome: {
+      googleReauth: null,
+      sendBacklog: null,
+      role: 'owner' as const,
+      returnTo: '/hr/leave',
+    },
     readAtLabel: '25 Sep 2026, 14:00',
     actorLabel: 'Manager 01',
     candidates: [
@@ -257,7 +263,12 @@ describe('the leave filing document', () => {
 
   it('says so when there is nobody to file for', () => {
     const empty = renderLeaveFilingHtml({
-      chrome: { googleReauth: null, sendBacklog: null, returnTo: '/hr/leave' },
+      chrome: {
+        googleReauth: null,
+        sendBacklog: null,
+        role: 'owner' as const,
+        returnTo: '/hr/leave',
+      },
       readAtLabel: '25 Sep 2026, 14:00',
       actorLabel: 'Manager 01',
       candidates: [],

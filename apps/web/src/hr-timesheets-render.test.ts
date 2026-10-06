@@ -71,7 +71,12 @@ function employee(overrides: Partial<TimesheetEmployeeView> = {}): TimesheetEmpl
 
 function view(overrides: Partial<TimesheetPageView> = {}): TimesheetPageView {
   return {
-    chrome: { googleReauth: null, sendBacklog: null, returnTo: '/hr/timesheets' },
+    chrome: {
+      googleReauth: null,
+      sendBacklog: null,
+      role: 'owner' as const,
+      returnTo: '/hr/timesheets',
+    },
     readAtIso: '2026-08-10T06:00:00.000Z',
     fromTradingDate: '2026-08-03',
     toTradingDate: '2026-08-09',

@@ -88,7 +88,7 @@ const insert = async (over: Record<string, unknown> = {}): Promise<void> => {
     kind: 'reactive',
     step: 'reactive_0h',
     rung_index: 1,
-    to_role: 'owner',
+    to_role: 'owner' as const,
     channel: 'email',
     outcome: 'sent',
     skipped_reason: null,

@@ -564,7 +564,7 @@ describe('who may read a payslip', () => {
     expect(() => assertMayReadPayslip({ role: 'therapist', ...other })).toThrow(
       /only their own payslip/,
     )
-    expect(() => assertMayReadPayslip({ role: 'owner', ...other })).not.toThrow()
+    expect(() => assertMayReadPayslip({ role: 'owner' as const, ...other })).not.toThrow()
   })
 })
 

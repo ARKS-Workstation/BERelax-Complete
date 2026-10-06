@@ -83,7 +83,7 @@ const PREPARER = {
 const REVIEWER = {
   userId: `${PREFIX}-${RUN}-reviewer`,
   displayName: 'Proprietor',
-  role: 'owner',
+  role: 'owner' as const,
 } as const
 /**
  * Whoever performs the export. A third person, and deliberately not one of the signatories.
