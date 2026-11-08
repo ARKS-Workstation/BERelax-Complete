@@ -132,7 +132,7 @@ const json = (status: number, body: unknown): Response =>
     },
   })
 
-interface ParsedDelivery {
+export interface ParsedDelivery {
   readonly serviceVariantId: string
   readonly shape: ServiceShape
   readonly roomId: string
@@ -315,35 +315,52 @@ async function priceFor(
 }
 
 /**
- * One parsed delivery turned into a `BookingDeliveryInput`, or the `Response` that refuses it.
+ * What the three lookups found, as a value rather than as a `Response`.
+ *
+ * Named refusals and not HTTP, because this endpoint is no longer the only caller. `/record-visit` needs
+ * the same variant, trading-date and price resolution for a treatment that already happened, and it answers
+ * in HTML with a sentence per refusal — so a `Response` would be a 409 it had to parse back out of a JSON
+ * body to find out what went wrong. The status codes stay where they belong, in {@link resolveDelivery},
+ * which is one `switch` over this.
+ */
+export type DeliveryResolution =
+  | { readonly kind: 'resolved'; readonly delivery: BookingDeliveryInput }
+  | { readonly kind: 'unknown_service_variant'; readonly serviceVariantId: string }
+  | {
+      readonly kind: 'outside_trading_hours'
+      readonly reason: string
+      readonly calendarDate: string
+    }
+  | { readonly kind: 'no_applicable_price'; readonly serviceVariantId: string }
+
+/**
+ * One parsed delivery turned into a `BookingDeliveryInput`, or the named reason it cannot be.
  *
  * Three lookups, each with its own refusal: the variant (which carries the duration and the catalogue
- * gross), the trading date, and the resolved price. Returning the `Response` rather than throwing keeps
- * each refusal's own status code and body beside the check that produced it.
+ * gross), the trading date, and the resolved price. The caller supplies `startsAt` and this computes
+ * `endsAt` from the variant's own duration — which is why a backdated entry cannot be given a length the
+ * catalogue does not sell, and why the two paths cannot disagree about how long a treatment is.
  */
-async function resolveDelivery(
+export async function resolveDeliveryInput(
   sql: Sql,
   delivery: ParsedDelivery,
-): Promise<BookingDeliveryInput | Response> {
+): Promise<DeliveryResolution> {
   const [variant] = await sql<VariantRow[]>`
     select id::text as id, duration_minutes, gross_price_fils::text as gross_price_fils
       from service_variant where id = ${delivery.serviceVariantId}
   `
   if (variant === undefined) {
-    return json(404, {
-      error: 'unknown_service_variant' satisfies BookingEndpointError,
-      serviceVariantId: delivery.serviceVariantId,
-    })
+    return { kind: 'unknown_service_variant', serviceVariantId: delivery.serviceVariantId }
   }
 
   const hours = await hoursAround(sql, delivery.startsAt)
   const resolution = resolveTradingDate(delivery.startsAt, (date) => hours.get(date), ASIA_DUBAI)
   if (resolution.kind !== 'trading') {
-    return json(409, {
-      error: 'outside_trading_hours' satisfies BookingEndpointError,
+    return {
+      kind: 'outside_trading_hours',
       reason: resolution.reason,
       calendarDate: resolution.calendarDate,
-    })
+    }
   }
 
   // The CALENDAR date in Asia/Dubai, deliberately not the trading date: a customer looking at the site
@@ -351,30 +368,64 @@ async function resolveDelivery(
   // day would quote a price the site no longer shows (B-CAT-04's NOTE).
   const price = await priceFor(sql, variant, localDate(toLocal(delivery.startsAt).date))
   if (price === null) {
-    return json(409, {
-      error: 'no_applicable_price' satisfies BookingEndpointError,
-      serviceVariantId: delivery.serviceVariantId,
-    })
+    return { kind: 'no_applicable_price', serviceVariantId: delivery.serviceVariantId }
   }
 
   return {
-    tradingDate: resolution.date,
-    serviceVariantId: delivery.serviceVariantId,
-    shape: delivery.shape,
-    roomId: delivery.roomId,
-    therapistIds: delivery.therapistIds,
-    treatment: {
-      startsAt: delivery.startsAt,
-      endsAt: delivery.startsAt + Number(variant.duration_minutes) * 60_000,
+    kind: 'resolved',
+    delivery: {
+      tradingDate: resolution.date,
+      serviceVariantId: delivery.serviceVariantId,
+      shape: delivery.shape,
+      roomId: delivery.roomId,
+      therapistIds: delivery.therapistIds,
+      treatment: {
+        startsAt: delivery.startsAt,
+        endsAt: delivery.startsAt + Number(variant.duration_minutes) * 60_000,
+      },
+      price: {
+        grossFils: price.gross.fils,
+        netFils: price.net.fils,
+        vatFils: price.vat.fils,
+        vatRateBp: price.vatRateBp,
+        priceListId: price.priceListId as string | null,
+        promotionId: price.promotionId as PromotionId | null,
+      },
     },
-    price: {
-      grossFils: price.gross.fils,
-      netFils: price.net.fils,
-      vatFils: price.vat.fils,
-      vatRateBp: price.vatRateBp,
-      priceListId: price.priceListId as string | null,
-      promotionId: price.promotionId as PromotionId | null,
-    },
+  }
+}
+
+/**
+ * {@link resolveDeliveryInput} with this endpoint's status codes attached.
+ *
+ * Returning the `Response` rather than throwing keeps each refusal's own status code and body beside the
+ * check that produced it; the checks themselves moved above so another surface can ask the same question
+ * and answer it in its own words.
+ */
+async function resolveDelivery(
+  sql: Sql,
+  delivery: ParsedDelivery,
+): Promise<BookingDeliveryInput | Response> {
+  const resolved = await resolveDeliveryInput(sql, delivery)
+  switch (resolved.kind) {
+    case 'resolved':
+      return resolved.delivery
+    case 'unknown_service_variant':
+      return json(404, {
+        error: 'unknown_service_variant' satisfies BookingEndpointError,
+        serviceVariantId: resolved.serviceVariantId,
+      })
+    case 'outside_trading_hours':
+      return json(409, {
+        error: 'outside_trading_hours' satisfies BookingEndpointError,
+        reason: resolved.reason,
+        calendarDate: resolved.calendarDate,
+      })
+    case 'no_applicable_price':
+      return json(409, {
+        error: 'no_applicable_price' satisfies BookingEndpointError,
+        serviceVariantId: resolved.serviceVariantId,
+      })
   }
 }
 

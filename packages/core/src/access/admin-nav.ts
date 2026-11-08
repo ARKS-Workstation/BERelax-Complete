@@ -84,6 +84,17 @@ export const ADMIN_NAV: readonly AdminNavGroup[] = [
       { href: '/calendar', label: 'Calendar', permission: 'calendar:read' },
       { href: '/day-sheet/print', label: 'Day sheet', permission: 'calendar:read' },
       { href: '/quick-book', label: 'Quick book', permission: 'walkin:create' },
+      /*
+       * Beside Quick book, because that is where somebody goes when they realise a visit is missing — and
+       * `booking:override_constraints` rather than `walkin:create`, so a receptionist does not see a link
+       * to a screen the route refuses them. The permission is the route's, named once here and once in
+       * `record-visit/route.ts`; `admin-nav.test.ts` is what keeps the pair from drifting.
+       */
+      {
+        href: '/record-visit',
+        label: 'Record a missed visit',
+        permission: 'booking:override_constraints',
+      },
     ],
   },
   {

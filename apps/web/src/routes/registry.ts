@@ -1595,6 +1595,33 @@ export const ROUTES = [
       'its own path, which is what W-SITE-05 made the `indexable` field mean.',
   },
   {
+    id: 'record-visit',
+    path: '/record-visit',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'The treatment that happened and was never typed in. A walk-in served at 19:00 on Friday and not ' +
+      'entered was, on Monday, unrecordable: /quick-book books through queryAvailability, which filters ' +
+      'every slot against the desk lead time from NOW, so a past date offers nothing to choose, and the ' +
+      'diary only MOVES an appointment. The visit was therefore missing from the diary, from utilisation, ' +
+      'from commission, and its money missing from the books. It POSTs twice - check resolves the trading ' +
+      'date, the price and who was on shift that day; record walks the entry through the same lifecycle a ' +
+      'live visit takes - and it is the one admin screen gated on a PERMISSION beyond the session: ' +
+      'booking:override_constraints, which manager and owner hold and receptionist does not, because a ' +
+      'backdated entry writes money into a trading day that has already been counted. A handler answering ' +
+      'text/html rather than a document, for the reason the diary, quick-book, the pipeline board and the ' +
+      'duplicate queue all give: a registry document must be served in BOTH locales, which needs an ' +
+      'Arabic admin document and the W-SYS-01 shell, and `?dir=rtl` re-renders this English document ' +
+      'mirrored so the direction half of the accessibility matrix is audited without inventing an Arabic ' +
+      'admin surface. Dynamic because the horizon it refuses entries beyond is measured from the clock. A path ' +
+      'of its own rather than /quick-book/past, because ADMIN_STANDALONE_PATHS matches by equality and a ' +
+      'child of that path would reach the proxy unguarded.',
+  },
+  {
     id: 'reports-dashboard',
     path: '/reports',
     kind: 'handler',

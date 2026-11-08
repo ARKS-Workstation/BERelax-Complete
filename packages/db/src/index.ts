@@ -275,6 +275,11 @@ export {
   readPublicTherapists,
 } from './queries/public-roster.ts'
 export {
+  type BookableRoomRow,
+  readBookableRooms,
+  readRequiredSkillForVariant,
+} from './queries/record-visit-options.ts'
+export {
   type ForecastFilter,
   type ForecastPeriod,
   type ForecastRow,
@@ -2616,6 +2621,7 @@ export {
   MAX_ADVANCE_SETTING_KEY,
   MIN_LEAD_SETTING_KEY,
   readAvailabilityLimits,
+  readBackdatedVisitHorizonDays,
   readFrontDeskMinLeadMinutes,
   readGenderMatching,
   readWhatsappRefExpected,

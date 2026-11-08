@@ -42,15 +42,27 @@ import { ADMIN_GROUP_PREFIXES } from './registry.ts'
 /**
  * Admin routes whose path sits under none of the group's prefixes.
  *
- * Three today. Each is a top-level path that claims no prefix of its own, which is why the registry did not
+ * Four today. Each is a top-level path that claims no prefix of its own, which is why the registry did not
  * already have a prefix for it: `/calendar` is B-UI-03's front-desk diary, `/quick-book` is B-UI-04's
- * walk-in screen, and `/login` is this unit's. A prefix for any of them would be a claim on paths nothing
- * serves.
+ * walk-in screen, `/record-visit` enters a treatment that happened and was never typed in, and `/login` is
+ * this unit's. A prefix for any of them would be a claim on paths nothing serves.
+ *
+ * `/record-visit` is a path of its own rather than `/quick-book/past`, and the reason is this list's own
+ * rule: these are matched by EQUALITY, so a child of `/quick-book` would not be an admin path at all and
+ * the proxy would not require a session for it. A screen that writes money into a counted trading day
+ * arriving unguarded because it was filed under a tidier name is the exact failure this file exists to
+ * prevent. The screens are also not variants of one another — one consults the availability solver and one
+ * must not — which `record-visit/view.ts` sets out at length.
  *
  * Exact paths, matched whole, and NOT prefixes: `/calendar` must not claim `/calendars` or some future
  * public `/calendar-feed`. {@link isAdminPath} compares them by equality for that reason.
  */
-export const ADMIN_STANDALONE_PATHS: readonly string[] = ['/calendar', '/login', '/quick-book']
+export const ADMIN_STANDALONE_PATHS: readonly string[] = [
+  '/calendar',
+  '/login',
+  '/quick-book',
+  '/record-visit',
+]
 
 /**
  * The admin paths that do NOT require a session.
