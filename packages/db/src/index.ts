@@ -2482,6 +2482,12 @@ export {
   recoverabilityOfPair,
 } from './services/reclassify-account.ts'
 export {
+  type PastVisitOutcome,
+  type RecordPastVisitInput,
+  type RecordPastVisitResult,
+  recordPastVisit,
+} from './services/record-past-visit.ts'
+export {
   findRecurringCostByCode,
   type GeneratedInstance,
   type GenerateWindow,
