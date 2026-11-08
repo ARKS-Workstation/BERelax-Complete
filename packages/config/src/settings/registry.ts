@@ -3,6 +3,7 @@ import {
   ALERT_THRESHOLDS_OPEN_QUESTION_ID,
   AppError,
   AUTH_FAILURE_THRESHOLD_SETTING_KEY,
+  BACKDATED_VISIT_HORIZON_SETTING_KEY,
   BREACH_CLOCK_OPEN_QUESTION_ID,
   BREACH_NOTIFICATION_HOURS_SETTING_KEY,
   CLINICAL_LINT_QUESTION_COPY_SETTING_KEY,
@@ -47,6 +48,7 @@ import {
   PARALLEL_RUN_WINDOW_START_SETTING_KEY,
   PLACEHOLDER_WPS_AGENT_ID,
   PLACEHOLDER_WPS_EMPLOYER_ID,
+  PROVISIONAL_BACKDATED_VISIT_HORIZON_DAYS,
   PROVISIONAL_EXPIRING_SOON_DAYS,
   PROVISIONAL_FRONT_DESK_MIN_LEAD_MINUTES,
   PROVISIONAL_LINT_QUESTION_COPY,
@@ -523,6 +525,42 @@ export const SETTINGS = [
       note:
         'Zero assumed. Y9-lead states a 2-hour minimum for ONLINE booking and says nothing about the ' +
         'counter; a walk-in screen that applied it could not book a walk-in.',
+    },
+  }),
+  define({
+    /**
+     * How many days back a visit that happened may still be entered.
+     *
+     * The gate on `/record-visit`, which exists because a walk-in served at 19:00 and never typed in is
+     * otherwise unrecordable: `/quick-book` filters every slot against the lead time from *now*, so a past
+     * date offers nothing to choose, and the calendar only MOVES an appointment. The visit is then missing
+     * from the diary, from utilisation, from commission, and its money is missing from the books.
+     *
+     * The direction that is safe is the SHORT one, and it is the opposite of the desk lead above. Too long
+     * and a mistyped year writes a treatment into a month whose figures have been reported — and the period
+     * lock catches that only once money is attached, not when the diary row is written. Too short and the
+     * desk is told to ask, which is a refusal somebody reads, not a silent wrong number.
+     *
+     * It is NOT the backstop against a double-booked therapist. That is 0024's exclusion constraint, which
+     * a backdated entry meets exactly as a live one does: two overlapping treatments for one therapist
+     * cannot have happened, whatever this figure says.
+     */
+    key: BACKDATED_VISIT_HORIZON_SETTING_KEY,
+    tier: 'operational',
+    schema: z.number().int().min(1).max(90),
+    defaultValue: PROVISIONAL_BACKDATED_VISIT_HORIZON_DAYS,
+    label: 'How far back a missed visit may be entered',
+    help: 'Days. A visit that happened and was never typed in can be recorded within this window; older than that, the desk has to ask.',
+    editableBy: OWNER_MANAGER,
+    audited: true,
+    // `[]` is a conclusion and not an oversight: nothing is prerendered from this value. It is read once,
+    // inside the POST that records the visit, and it changes no page a crawler or a cache has ever seen.
+    invalidates: [],
+    provisional: {
+      openQuestionId: 'Y9-backdating',
+      note:
+        '14 days assumed. Nobody has said how long after a visit the books may still be corrected; the ' +
+        'short direction refuses loudly where the long one writes into a reported month.',
     },
   }),
   define({

@@ -440,6 +440,10 @@ export type Brand<T, B extends string> = T & { readonly __brand: B }
  * resolves here and `isAppError` still answers true for every error raised anywhere.
  */
 export { AppError, type ErrorKind, isAppError } from './app-error.ts'
+export {
+  BACKDATED_VISIT_HORIZON_SETTING_KEY,
+  PROVISIONAL_BACKDATED_VISIT_HORIZON_DAYS,
+} from './backdated-visit.ts'
 
 /**
  * The CMS's schema name, from its own module. G-REV-02 moved it out of `payload.config.ts` because that file

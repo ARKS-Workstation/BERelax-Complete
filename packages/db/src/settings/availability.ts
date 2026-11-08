@@ -1,5 +1,6 @@
 import {
   AppError,
+  BACKDATED_VISIT_HORIZON_SETTING_KEY,
   FRONT_DESK_MIN_LEAD_SETTING_KEY,
   GENDER_MATCHING_SETTING_KEY,
   type GenderMatchingMode,
@@ -131,6 +132,27 @@ export async function readFrontDeskMinLeadMinutes(sql: Sql): Promise<number> {
     FRONT_DESK_MIN_LEAD_SETTING_KEY,
     await readSetting<unknown>(sql, FRONT_DESK_MIN_LEAD_SETTING_KEY),
     0,
+  )
+}
+
+/**
+ * How many days back a visit that happened may still be entered — Y9-backdating, as a value.
+ *
+ * `wholeMinutes`' shape, floor 1, and the throw is the point. A corrupted horizon has no safe reading: a
+ * zero makes the one ordinary case impossible — a Friday walk-in entered on Monday — and the desk's remedy
+ * for a gate it cannot pass is to type a date the gate accepts, which is a false row in the diary and
+ * false money in the day's takings. A very large one lets a mistyped year write into a month whose figures
+ * have been reported. Both look exactly like working software, so neither is a fallback.
+ *
+ * Read ONCE, inside the POST that records the visit, and passed to `backdatedVisitVerdict` as its
+ * `horizonDays`. Not read on the GET: a figure shown on a form and re-read at submit is two answers, and
+ * the one that decides is the second.
+ */
+export async function readBackdatedVisitHorizonDays(sql: Sql): Promise<number> {
+  return wholeMinutes(
+    BACKDATED_VISIT_HORIZON_SETTING_KEY,
+    await readSetting<unknown>(sql, BACKDATED_VISIT_HORIZON_SETTING_KEY),
+    1,
   )
 }
 
