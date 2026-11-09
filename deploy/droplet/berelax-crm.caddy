@@ -1,0 +1,74 @@
+# The CRM's Caddy site block, for the droplet that already serves the spa-management platform.
+#
+# Caddy is what is actually in front of that box — `berelaxmassage.com`, `spamanagement.co` and
+# `admin.spamanagement.co` all answer `via: 1.1 Caddy` from `134.209.145.162` — so this is the file to
+# use. `berelax-crm.nginx.conf` beside it is the equivalent for an nginx host and is not needed here.
+#
+# ## Install it as its own file, imported — never by editing the platform's site blocks
+#
+# Caddy supports an import glob, which gives the same isolation nginx's `sites-enabled` does:
+#
+#   mkdir -p /etc/caddy/sites.d
+#   cp deploy/droplet/berelax-crm.caddy /etc/caddy/sites.d/berelax-crm.caddy
+#   # once, at the END of /etc/caddy/Caddyfile, if it is not already there:
+#   #   import sites.d/*.caddy
+#   caddy validate --config /etc/caddy/Caddyfile
+#   systemctl reload caddy
+#
+# `caddy validate` before every reload, without exception. A reload with a broken Caddyfile is the one
+# action in this deployment that can take the live platform down, and validate is what makes it
+# impossible. Removing the CRM again is deleting one file and reloading.
+#
+# The hostname must be a subdomain with its own DNS record, and it must NOT be `berelaxmassage.com`:
+# that name already resolves here and is served by the platform's own site block, which rewrites to
+# `/site-html` to render the tenant's pages. Two site blocks claiming one hostname is a Caddyfile that
+# does not do what it looks like it does.
+
+REPLACE_SUBDOMAIN.berelaxmassage.com {
+	# No `tls` directive: Caddy obtains and renews the certificate itself over ACME, which is why there is
+	# no certbot step for this host. It needs port 80 reachable, which it already is for the other sites.
+
+	# No `encode`, deliberately. Next.js compresses its own responses (`compress` defaults to true), so a
+	# second pass here spends CPU on a 2-vCPU box shared with a live site to re-compress what is already
+	# compressed.
+
+	# Media and document uploads. Absent, Caddy has no limit, which is how a 4 GB box runs out of disk.
+	request_body {
+		max_size 32MB
+	}
+
+	reverse_proxy 127.0.0.1:3000 {
+		# 127.0.0.1 and not a container name: `docker-compose.production.yml` publishes the web service to
+		# loopback only, so this is the one route in and nothing is reachable if Caddy is stopped. Change
+		# the port only alongside WEB_PORT in `.env`.
+		transport http {
+			# Documents render through Chromium (ADR 0011) and a PDF of a month's statements is not quick.
+			# The default is 0 (no timeout) for reads, but write and dial timeouts still apply; these are
+			# set explicitly so the values are a decision rather than a default somebody has to look up.
+			# A 504 here returns to an operator who presses the button again, starting a SECOND render on
+			# a box that is already busy.
+			read_timeout 300s
+			write_timeout 300s
+			dial_timeout 10s
+		}
+
+		# Caddy already sets Host, X-Forwarded-For and X-Forwarded-Proto. This one it does not.
+		header_up X-Forwarded-Host {host}
+	}
+
+	# NOTHING sets a security header here, and that is deliberate.
+	#
+	# `apps/web/proxy.ts` emits the whole set on every return path — CSP, HSTS, X-Frame-Options,
+	# Referrer-Policy, Permissions-Policy — and `pnpm headers` asserts it, including the per-response CSP
+	# nonce the admin documents carry, which only the application can produce. A static CSP added here
+	# would silently replace a nonce-bearing one and break every inline script in the admin estate. One
+	# author per header.
+
+	# Its own log, so a CRM problem is readable without grepping the live platform's access log.
+	log {
+		output file /var/log/caddy/berelax-crm.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}

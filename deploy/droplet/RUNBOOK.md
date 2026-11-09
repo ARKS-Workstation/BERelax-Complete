@@ -41,7 +41,7 @@ Three answers decide the shape of the rest:
 |---|---|
 | **No Docker** | Install it (§1). If the live site runs under Docker already, do not touch its daemon config. |
 | **Available memory under ~2 GB** | Stop. The app plus the worker plus Chromium will not fit beside the existing site. Resize the droplet first, or use App Platform. §2 explains why this is not negotiable. |
-| **Proxy is Caddy, not nginx** | `berelax-crm.nginx.conf` does not apply; §4 has the Caddy equivalent. |
+| **Proxy is Caddy** | Confirmed: `berelaxmassage.com`, `spamanagement.co` and `admin.spamanagement.co` all answer `via: 1.1 Caddy` from this droplet. Use `berelax-crm.caddy`; the nginx file is for a host that is not this one. |
 
 ---
 
@@ -65,14 +65,20 @@ and the first request hits a schema that is not there yet.
 The compose file manages no PostgreSQL. `DATABASE_URL` points at one you choose, and the choice is a real
 one.
 
-**Managed cluster (recommended).** `.do/README.md` §2 has the `doctl databases create`: PostgreSQL 16,
-2 vCPU / 4 GB with a standby. It costs money monthly and buys a standby, point-in-time restore and a
-connection pool — the three things a development database does not have, and the three things you want the
-day something is wrong with the books.
+**There is no managed cluster today.** Checked across all 14 DigitalOcean projects on this account: five
+droplets, zero App Platform apps, zero managed databases. So `berelax-pg` in `.do/app.production.yaml`
+does not exist, and neither option below is the status quo — both are something to create.
 
-**On the droplet.** Free, and it puts the application and its data in one failure domain: one bad
-`docker compose down -v`, one disk full, one OOM kill. On a 2 vCPU / 4 GB box already serving a live site,
-PostgreSQL's shared buffers compete with that site's working set.
+**Managed cluster.** `.do/README.md` §2 has the `doctl databases create`: PostgreSQL 16, 2 vCPU / 4 GB
+with a standby. It costs money every month and buys a standby, point-in-time restore and a connection
+pool — the three things a development database does not have, and the three things you want on the day
+something is wrong with the books. For a system holding VAT records, that is the argument.
+
+**On the droplet.** No monthly cost, and it puts the application and its data in one failure domain: one
+bad `docker compose down -v`, one disk full, one OOM kill. On a 2 vCPU / 4 GB box **already running the
+spa-management platform and its own database**, PostgreSQL's shared buffers compete directly with that
+platform's working set. Check `free -m` from §0 before choosing this; if the box is already tight, the
+honest answer is to resize it or take the managed cluster.
 
 ```bash
 # If you go this way
@@ -110,9 +116,33 @@ failed — it just quietly claimed the wrong origin.
 
 ---
 
-## 4. The reverse proxy
+## 4. The reverse proxy — Caddy
 
-**nginx:**
+This droplet runs **Caddy**, confirmed from outside: every hostname it serves answers `via: 1.1 Caddy`.
+So this is the path; the nginx section below it is for a different host.
+
+```bash
+mkdir -p /etc/caddy/sites.d
+cp deploy/droplet/berelax-crm.caddy /etc/caddy/sites.d/berelax-crm.caddy
+sed -i 's/REPLACE_SUBDOMAIN/crm/' /etc/caddy/sites.d/berelax-crm.caddy   # your subdomain
+
+# Once only, at the END of /etc/caddy/Caddyfile, if it is not already there:
+grep -q 'import sites.d' /etc/caddy/Caddyfile || echo 'import sites.d/*.caddy' >> /etc/caddy/Caddyfile
+
+caddy validate --config /etc/caddy/Caddyfile    # MUST pass before the reload
+systemctl reload caddy
+```
+
+`caddy validate` before every reload, without exception. A reload with a broken Caddyfile is the one
+action in this runbook that can take the live platform down, and validate is what makes it impossible.
+Caddy gets the certificate itself over ACME, so there is no certbot step — it needs port 80 reachable for
+the hostname, which it already is for the other sites.
+
+Removing the CRM again is `rm /etc/caddy/sites.d/berelax-crm.caddy`, validate, reload.
+
+### If the host were nginx instead
+
+Not this droplet. Kept because the deployment should not assume one proxy for ever:
 
 ```bash
 cp deploy/droplet/berelax-crm.nginx.conf /etc/nginx/sites-available/berelax-crm
@@ -127,18 +157,9 @@ certbot --nginx -d crm.berelaxmassage.com  # writes the certificate paths the vh
 `nginx -t` before every reload, without exception. A reload with a broken config is the one action in this
 runbook that can take the live site down, and `-t` is what makes it impossible.
 
-**Caddy:** add to the `Caddyfile` — Caddy gets the certificate itself, so there is no certbot step:
-
-```
-crm.berelaxmassage.com {
-    reverse_proxy 127.0.0.1:3000
-    request_body { max_size 32MB }
-}
-```
-
-Then `caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy`. Do not add security
-headers in either proxy: `apps/web/proxy.ts` emits the whole set including a per-response CSP nonce, and a
-static CSP added here breaks every inline script in the admin estate.
+Do not add security headers in either proxy: `apps/web/proxy.ts` emits the whole set including a
+per-response CSP nonce, and a static CSP added at the proxy breaks every inline script in the admin
+estate. One author per header.
 
 ---
 
@@ -176,12 +197,15 @@ sequence for that case; it is the normal case here, not an edge one.
 ```bash
 curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/            # 200, from the box
 curl -sS -o /dev/null -w '%{http_code}\n' https://crm.berelaxmassage.com/   # 200, from outside
-curl -sS -o /dev/null -w '%{http_code}\n' https://berelaxmassage.com/       # 200 — the LIVE SITE, unchanged
+curl -sS -o /dev/null -w '%{http_code}\n' https://berelaxmassage.com/       # 200 — the LIVE tenant site
+curl -sS -o /dev/null -w '%{http_code}\n' https://admin.spamanagement.co/   # 307 — the LIVE platform console
 docker compose -f docker-compose.production.yml ps                          # web and worker up, migrate exited 0
 free -m                                                                     # headroom left over
 ```
 
-That third line is the one that matters most. Run it before you call the deploy done.
+Those last three are the ones that matter most: they are the live platform and a tenant's live website,
+both on this droplet, and both must answer exactly as they did before. Run them before you call the deploy
+done.
 
 Then sign in at `https://crm.berelaxmassage.com/login` and open `/record-visit` — it is the newest screen
 and it exercises the whole stack: a session, the admin shell, a database read, the settings table and the
