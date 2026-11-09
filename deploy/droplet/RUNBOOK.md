@@ -219,6 +219,51 @@ correctly offers nobody, and `/quick-book` cannot book either.
 
 ---
 
+## 6b. The second tenant, and every one after it
+
+ADR 0129 makes each tenant an isolated instance. Everything in §1-§6 is what the FIRST one needs; after
+that two scripts do it, and they exist from tenant one on purpose — a hand-built instance is one nobody
+can reproduce.
+
+```bash
+# What it would do, writing nothing
+node scripts/provision-tenant.mjs --slug zen-spa --subdomain crm.zen-spa.com \
+  --create-database --port 3200 --dry-run
+
+# For real: directory, secrets, database, role grants, Caddy block, schema
+pnpm tenant:provision -- --slug zen-spa --subdomain crm.zen-spa.com --create-database --port 3200
+```
+
+Every tenant on one host needs a **different `--port`**, and the script does not check that for you:
+`ss -ltnp` does. It stops short of two things deliberately — copying the Caddy block into
+`/etc/caddy/sites.d/` and starting the containers — and prints both commands instead, because a proxy
+reload and a container start are the two actions that can disturb the live platform, and `caddy validate`
+has to pass first.
+
+Then every release migrates the whole estate:
+
+```bash
+pnpm tenant:migrate                    # every tenant under /srv/berelax
+pnpm tenant:migrate -- --dry-run       # which tenants it would touch
+pnpm tenant:migrate -- --only zen-spa  # one
+```
+
+It does **not** stop at the first failure, and that is the point: after a release you need the shape of
+the whole estate, because "roll forward or roll back" depends on how many instances are on which schema.
+A partial run ends with a named `SPLIT ESTATE` line and a non-zero exit. It also refuses to report success
+when it finds no tenants at all — "0 tenants, 0 failures" reads exactly like a clean run and is what a
+wrong `--root` produces.
+
+Two things it found that are worth knowing before you provision tenant two:
+
+- **The tenant's database role needs `CREATEROLE`.** Migrations 0009 and 0096 create roles. Without it the
+  run dies at 0096 after 95 migrations have applied — recoverable, because of the ledger, but not a state
+  to meet for the first time at 2am.
+- **PostgreSQL roles are cluster-wide.** Four shared roles exist across every tenant on one cluster, so
+  the script has the superuser own them and grants each tenant ADMIN option. ADR 0129 has what that does
+  and does not buy; the short version is that a database per tenant isolates data and grants, not role
+  objects.
+
 ## 7. Rollback
 
 ```bash

@@ -53,6 +53,42 @@ And the audit trail's entire value is that it has one unambiguous subject. Addin
 `audit_event` does not weaken it, but it does mean every reader of it is now also asserting a tenancy
 claim, and a reader that forgets is a reader that over-reports.
 
+## One thing is shared whether you want it or not: roles
+
+Measured while writing the provisioning script, not reasoned about — the second tenant on a cluster
+failed, and this is why.
+
+**PostgreSQL roles are cluster-wide, not per-database.** Migrations 0009 and 0096 create four —
+`berelax_app`, `berelax_clinical`, `berelax_readonly`, `berelax_retention` — all `nologin`, each reached
+by `set role`, and each guarded by `if not exists`. That guard is exactly what breaks tenant two: the role
+already exists from tenant one, so the guard skips creating it, and the next statement fails because the
+role belongs to somebody else.
+
+```
+ERROR:  permission denied
+DETAIL: The current user must have the ADMIN option on role "berelax_retention".
+```
+
+So with a database per tenant on one cluster, the role OBJECTS are shared. `scripts/provision-tenant.mjs`
+resolves it by having the superuser create them once and granting each tenant's role ADMIN option, which
+makes every tenant equal and leaves no tenant owning a role another depends on.
+
+What this does and does not cost is worth stating precisely, because it is the one crack in the sentence
+*"they are not in the same database"*:
+
+- **The grants stay per-database.** `grant usage on schema public to berelax_app` applies in the database
+  it runs in. A session that can `set role berelax_app` in tenant A's database has no privilege in tenant
+  B's, because it has no CONNECT there. The role object is shared; the authority it carries is not.
+- **A mistaken `grant connect` would widen it**, and nothing in the schema would refuse that. On a shared
+  cluster, tenant isolation therefore rests on a cluster-level grant that no migration and no gate in this
+  repository checks.
+- **A cluster per tenant removes the crack entirely**, at the cost of a cluster per tenant. For a tenant
+  whose data is subject to a residency requirement (ADR 0010), that is the answer rather than an upgrade.
+
+This does not change the decision. It qualifies the claim: a database per tenant buys isolation of DATA
+and of GRANTS, and not of role objects. Anyone repeating "they are not in the same database" as the whole
+security argument should read this section first.
+
 ## What this costs, stated now rather than discovered
 
 Instance-per-tenant is not free, and the costs are operational and front-loaded:
