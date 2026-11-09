@@ -106,7 +106,10 @@
     "cms:bootstrap": "pnpm cms:migrate && pnpm cms:user --email \"$CMS_USER_EMAIL\" --role \"${CMS_USER_ROLE:-owner}\"",
     "staff:credential": "pnpm --filter @berelax/web exec tsx scripts/create-staff-credential.mjs",
     "tenant:provision": "node scripts/provision-tenant.mjs",
-    "tenant:migrate": "node scripts/migrate-tenants.mjs"
+    "tenant:migrate": "node scripts/migrate-tenants.mjs",
+    "deployment:record": "node scripts/record-deployment.mjs --record",
+    "deployment:retire": "node scripts/record-deployment.mjs --retire",
+    "deployment:verify": "node scripts/record-deployment.mjs --verify"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

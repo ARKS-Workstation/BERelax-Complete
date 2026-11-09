@@ -1,0 +1,33 @@
+{
+  "$comment": [
+    "The deployment register: what was deployed, where, from which commit, and who recorded it.",
+    "",
+    "It exists because a production system disappeared and this repository could not say which one it",
+    "was. An App Platform app ran in blr1 from 2026-10-05 \u2014 commit a468403 sized it, c209a3e created the",
+    "first CMS account and f1f7e97 the first staff credential, so it was live and migrated \u2014 and five",
+    "weeks later the account held no app and no managed database. Nothing here recorded its id, its URL",
+    "or the commit it served, because `.do/README.md` is written with `<app-id>` placeholders and no step",
+    "ever captured the real one. So the questions 'which app was it', 'when did it go' and 'what was",
+    "running' have no answer in the repository, and the DigitalOcean API does not list deleted apps.",
+    "",
+    "That is the same failure this build spends most of its gates refusing: `artifacts/drills` records a",
+    "restore, `artifacts/release/freeze.json` records a freeze, `pnpm go-no-go` refuses on an absent fact",
+    "with 'we did not measure it and it failed have the same consequence' \u2014 and the deployment itself,",
+    "the one thing customers touch, was the fact nobody measured.",
+    "",
+    "It ships LIVE AND OPEN rather than absent, which is freeze.json's and ADR 0125's argument: a",
+    "register created on the day somebody needs it is a register nobody has read, and a missing one is",
+    "indistinguishable from an estate nobody deployed.",
+    "",
+    "NOTHING WRITES HERE AUTOMATICALLY. `pnpm deployment:record` appends an entry from facts a person",
+    "supplies, validates every one of them, and invents none \u2014 the same shape as the freeze register,",
+    "and for the same reason: a mechanism that guessed the live URL would be recording a claim this",
+    "build made up (brief rule 15). `pnpm deployment:verify` refuses a malformed register, an entry",
+    "naming a commit that is not in this history, and an entry that claims to supersede one it predates.",
+    "",
+    "`retired` is set when a deployment is taken down, with the instant and the reason, and the entry is",
+    "never deleted. The whole value of this file is that it still holds the row for a thing that no",
+    "longer exists."
+  ],
+  "deployments": []
+}
