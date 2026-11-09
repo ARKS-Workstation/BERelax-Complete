@@ -1,0 +1,148 @@
+# The production stack, for a droplet rather than App Platform.
+#
+# ## Why this file exists beside `.do/app.production.yaml` rather than instead of it
+#
+# The App Platform spec is still the deployment this repository was built for, and it is the one whose
+# ordering, sizing and secret handling `.do/README.md` documents. This file is the same application
+# arranged to run on a plain Ubuntu box with Docker, for the case where the CRM shares a droplet that is
+# already doing something else. Both are kept because neither supersedes the other: whichever is in use,
+# the other is the migration path away from it, and a repository holding only one has no answer to "how do
+# we move".
+#
+# ## Why it lives at the repository root
+#
+# `scripts/check-container.mjs` scans `^docker-compose.*\.ya?ml$` in the root and `.github/workflows/`,
+# and nothing else. A production compose file under `deploy/` would therefore be the one file naming
+# container images that no gate reads — un-pinned base images, a PostgreSQL major nobody checked, a moving
+# tag — which is the exact shape ADR 0003 exists to refuse. Tidiness is not worth an unaudited production
+# file, so it sits here where the gate finds it.
+#
+# ## The one property this file is built around: it must not take down the live site
+#
+# The droplet it is meant for already serves a live, customer-facing website. Three decisions follow, and
+# each is a refusal rather than a default:
+#
+#   - **Nothing binds a public interface.** `web` publishes to `127.0.0.1:3000` only. The CRM is
+#     unreachable from the internet except through the reverse proxy already on the box, so no firewall
+#     rule changes and no port is exposed by accident. `0.0.0.0:3000` would publish an admin estate to the
+#     internet the moment this file ran.
+#   - **Both services carry hard memory limits.** A Next.js build and a Chromium render (ADR 0011) will
+#     take whatever is available, and on a 4 GB box "whatever is available" is the other site's working
+#     set. A container that hits its limit is killed; a box that runs out of memory kills whatever the
+#     kernel picks, which may be the thing earning money.
+#   - **A distinct project name.** `name:` below means `docker compose` cannot adopt, rename or remove
+#     another stack's containers, networks or volumes on the same host.
+#
+# ## No `postgres` service, deliberately
+#
+# `DATABASE_URL` points at a database this file does not manage. A compose-managed PostgreSQL on the same
+# droplet would put the application and its data in one failure domain and one `docker compose down -v`,
+# and `docker-compose.yml` in this repository is explicitly the LOCAL development database — a second
+# Postgres here would read as the production one. `deploy/droplet/RUNBOOK.md` §2 covers both choices
+# (managed cluster or on-box server) and what each costs.
+#
+# ## Why `migrate` is a service and not a step somebody remembers
+#
+# It reproduces the App Platform spec's `PRE_DEPLOY` job exactly: the schema moves before anything serves.
+# `depends_on: service_completed_successfully` is what makes that an ordering the tool enforces rather
+# than a sentence in a runbook — a failed migration leaves the old containers running, which is the
+# correct outcome and the one a `&&` in a shell script does not give you.
+#
+# It runs on the WORKER image, as the spec's job does, because that image carries `postgresql-client`:
+# `pnpm db:deploy` drives migrations through one `psql` session behind an advisory lock. The web image has
+# no psql.
+
+name: berelax-crm
+
+x-app-env: &app-env
+  APP_ENV: production
+  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+  SITE_ORIGIN: ${SITE_ORIGIN:?SITE_ORIGIN is required}
+  BUSINESS_TIMEZONE: Asia/Dubai
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  # Every provider is `fake`, in production too: there is no real adapter for any of them (ADR 0005,
+  # ADR 0022). `real` resolves to `notImplemented`, which throws by name rather than pretending.
+  SMS_PROVIDER: fake
+  EMAIL_PROVIDER: fake
+  GOOGLE_PROVIDER: fake
+  PAYMENT_PROVIDER: fake
+  LLM_PROVIDER: fake
+  ANALYTICS_PROVIDER: fake
+  MEDIA_STORAGE: fake
+  OUTBOUND_ALLOWLIST: ''
+  # Absent is refused by name at the point of use, never defaulted: `.do/README.md`'s table says what
+  # each one gates and what fails without it. A placeholder would be worse than absent — the application
+  # rejects the placeholder for PAYLOAD_SECRET specifically, because a known secret is not a secret.
+  PAYLOAD_SECRET: ${PAYLOAD_SECRET:?PAYLOAD_SECRET is required}
+  DOCUMENT_URL_SIGNING_SECRET: ${DOCUMENT_URL_SIGNING_SECRET:-}
+  DOCUMENT_URL_SIGNING_SECRET_VERSION: ${DOCUMENT_URL_SIGNING_SECRET_VERSION:-}
+  GOOGLE_TOKEN_KEK: ${GOOGLE_TOKEN_KEK:-}
+  GOOGLE_TOKEN_KEK_VERSION: ${GOOGLE_TOKEN_KEK_VERSION:-}
+  PAYMENT_WEBHOOK_SIGNING_SECRET: ${PAYMENT_WEBHOOK_SIGNING_SECRET:-}
+
+services:
+  # One shot, before anything serves. Exits 0 or the deploy stops here with the old containers still up.
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    # `pnpm db:deploy` AND `pnpm cms:migrate`: two migration estates, only one of them this repository's
+    # SQL. Payload owns its own tables and `payload.config.ts` sets `push: false` in production, so the
+    # CMS admin answers 500 with `relation "payload.cms_user" does not exist` until this has run.
+    command: ['pnpm', 'deploy:migrate']
+    environment: *app-env
+    restart: 'no'
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      # Build-time, not run-time, and both are needed or the build is silently wrong.
+      #
+      # `/` and `/ar` are prerendered FROM THE DATABASE, so the build reads it — and App Platform taught
+      # this the expensive way: a binding that is not interpolated at build time arrives as the literal
+      # string `${db.DATABASE_URL}`, and `SITE_ORIGIN` falling back to its default made staging serve
+      # production canonical URLs. A build arg with no matching `ARG` in the Dockerfile is dropped
+      # without a word, which is why `apps/web/Dockerfile` declares both.
+      args:
+        DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+        SITE_ORIGIN: ${SITE_ORIGIN:?SITE_ORIGIN is required}
+    environment: *app-env
+    # 127.0.0.1 only. See the header: the reverse proxy on the host is the only way in, and an admin
+    # estate published to 0.0.0.0 is the accident this spelling prevents.
+    ports:
+      - '127.0.0.1:${WEB_PORT:-3000}:3000'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    # `/` is the health check (`.do/README.md`): an instance answering 200 there has the premises row, the
+    # catalogue and the trading calendar, so it is a claim about the data and not only about the process.
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      start_period: 90s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: ${WEB_MEMORY_LIMIT:-1536M}
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    environment: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: ${WORKER_MEMORY_LIMIT:-1024M}
